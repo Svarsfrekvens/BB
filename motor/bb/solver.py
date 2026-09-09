@@ -7,7 +7,7 @@ relationship + 2.50 SEK per permille of workload-utilisation spread.
 from math import floor
 from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
-                     instant, add_days, days, night_intervals, is_night, monday)
+                     instant, add_days, days, night_intervals, jour_intervals, is_night, monday)
 from .validate import validate
 
 
@@ -21,6 +21,7 @@ def solve(data, seconds=30):
     employees=[e for e in data['employees'] if e['status']=='active']
     templates={t['id']:t for t in data['templates']}
     occ=occurrences(data)
+    jour_floor=int(rules.get('jourFloor') or 0)
     model=cp_model.CpModel()
     candidates=[]
     boundaries=[]
@@ -33,13 +34,15 @@ def solve(data, seconds=30):
         for day in days(add_days(wp['start'],-1),wp['end']):
             for profile in e['profiles']:
                 t=templates[profile]
+                if t['type']=='jour' and not jour_floor: continue
                 s=dict(id=f"{e['id']}:{day}:{profile}",employeeId=e['id'],date=day,start=t['start'],end=t['end'],type=t['type'],skills=t['skills'],breaks=t['breaks'])
                 a,b=span(s)
                 if b<=lo or a>=hi or b-a>rules['maxShiftHours']*60: continue
                 if not set(t['skills'])<=set(e['skills']) or (is_night(a,b) and not e['night']): continue
                 if any(overlap(a,b,x,y) for x,y in absences): continue
-                if any(not (a-v['b']>=rules['minRestHours']*60 or v['a']-b>=rules['minRestHours']*60) for v in boundary): continue
                 work=paid(s)
+                if any(overlap(a,b,v['a'],v['b']) for v in boundary): continue
+                if work and any(v['work'] and not (a-v['b']>=rules['minRestHours']*60 or v['a']-b>=rules['minRestHours']*60) for v in boundary): continue
                 x=model.new_bool_var('shift:'+s['id'])
                 candidates.append(dict(shift=s,a=a,b=b,work=work,x=x))
     if len(candidates)>10000:
@@ -54,8 +57,12 @@ def solve(data, seconds=30):
         fixed=[b for b in boundaries if b['shift']['employeeId']==e['id']]
         for i,a in enumerate(rows):
             for b in rows[i+1:]:
-                if b['a']-a['b']>=rules['minRestHours']*60: break
-                model.add(a['x']+b['x']<=1)
+                if overlap(a['a'],a['b'],b['a'],b['b']):
+                    model.add(a['x']+b['x']<=1)
+                    continue
+                if a['work'] and b['work']:
+                    if b['a']-a['b']>=rules['minRestHours']*60: break
+                    model.add(a['x']+b['x']<=1)
         cap=floor(e['ssg']/100*rules['fullTimeWeeklyHours']*60*len(period_days)/7+1e-7)
         used=sum(min_period(c)*c['x'] for c in rows)+sum(min_period(c) for c in fixed)
         model.add(used<=cap)
@@ -72,13 +79,22 @@ def solve(data, seconds=30):
         for day in days(add_days(wp['start'],-rules['maxConsecutiveDays']),add_days(wp['end'],rules['maxConsecutiveDays'])):
             a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
             flag=model.new_bool_var('workday:'+e['id']+day)
-            covering=[c['x'] for c in rows+fixed if overlap(c['a'],c['b'],a,b)]
+            covering=[c['x'] for c in rows+fixed if any(overlap(x,y,a,b) for x,y in c['work'])]
             if covering: model.add_max_equality(flag,covering)
             else: model.add(flag==0)
             flags.append(flag)
         window=rules['maxConsecutiveDays']+1
         for i in range(len(flags)-window+1):
             model.add(sum(flags[i:i+window])<=rules['maxConsecutiveDays'])
+        jour_rows=[c for c in rows+fixed if c['shift'].get('type')=='jour']
+        for start_day in sorted({c['shift']['date'] for c in jour_rows}):
+            limit=add_days(start_day,27)
+            model.add(sum((c['b']-c['a'])*c['x'] for c in jour_rows if start_day<=c['shift']['date']<=limit)<=48*60)
+        per_manad={}
+        for c in jour_rows:
+            per_manad.setdefault(c['shift']['date'][:7],[]).append(c)
+        for grupp in per_manad.values():
+            model.add(sum((c['b']-c['a'])*c['x'] for c in grupp)<=50*60)
 
     # Awake-night floor counts on-duty, eligible people. Rest constraints prevent
     # a person from being counted through two simultaneous candidate shifts.
@@ -90,6 +106,16 @@ def solve(data, seconds=30):
         edges=sorted({a,b}|{t for u,v,_ in coverage for t in (u,v) if a<t<b})
         for edge in edges[:-1]:
             model.add(sum(x for u,v,x in coverage if u<=edge<v)>=rules['nightFloor'])
+
+    if jour_floor:
+        valid_ids={e['id'] for e in employees if e['night']}
+        for a,b in jour_intervals(wp['start'],wp['end']):
+            a,b=max(a,lo),min(b,hi)
+            if a>=b: continue
+            coverage=[(c['a'],c['b'],c['x']) for c in candidates+boundaries if c['shift'].get('type')=='jour' and c['shift']['employeeId'] in valid_ids]
+            edges=sorted({a,b}|{t for u,v,_ in coverage for t in (u,v) if a<t<b})
+            for edge in edges[:-1]:
+                model.add(sum(x for u,v,x in coverage if u<=edge<v)>=jour_floor)
 
     task_vars=[]
     # Ge CP-SAT en omedelbart giltig startpunkt: inga valda pass och allt

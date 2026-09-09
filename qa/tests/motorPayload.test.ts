@@ -105,4 +105,23 @@ describe("motorPayload ur Galaxen", () => {
     expect(w.continuitySek).toBe(50);
     expect(w.spreadSekPerPermille).toBe(2.5);
   });
+
+  it("lägger jour-mall och jourFloor när natten saknar arbetspass", () => {
+    const r = byggMotorPayload({
+      rader: sekoia.rows as Insats[],
+      medarbetare: tillMedarbetare(),
+      from: "2026-08-03",
+      dagar: 7,
+      timkostnad: 270,
+      mallar: [{ id: "dag", type: "day", start: "07:00", end: "16:00", breaks: [], skills: [] }],
+      regler: reglerFranVillkor(),
+    });
+    const mallar = (r.payload.templates as { type: string; start: string; end: string }[]) || [];
+    expect(mallar.some((m) => m.type === "jour" && m.start === "23:00" && m.end === "06:30")).toBe(true);
+    expect(r.info.regler.nightFloor).toBe(0);
+    expect(r.info.regler.jourFloor).toBe(1);
+    const anstallda = (r.payload.employees as { night: boolean; profiles: string[] }[]) || [];
+    const jourId = mallar.find((m) => m.type === "jour")?.id;
+    expect(anstallda.some((e) => e.night && jourId && e.profiles.includes(jourId))).toBe(true);
+  });
 });

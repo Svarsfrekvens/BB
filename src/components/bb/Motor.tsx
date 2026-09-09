@@ -89,6 +89,8 @@ export function Motor({ state, api }: VyProps) {
     const nattgolv = p.info.regler.nightFloor;
     const nattpersonal = aktiva.filter((e) => e.night).length;
     if (nattgolv > nattpersonal) ut.push(`Vaken natt kräver ${nattgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
+    const jourgolv = p.info.regler.jourFloor;
+    if (jourgolv > nattpersonal) ut.push(`Sovande jour kräver ${jourgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
     const heltid = Number((p.payload["rules"] as { fullTimeWeeklyHours: number }).fullTimeWeeklyHours) || 36.33;
     const tak = aktiva.reduce((s, e) => s + (e.ssg / 100) * heltid * (p.info.dagar / 7), 0);
     const behov = insatser.reduce((s, i) => s + i.minutes, 0) / 60;

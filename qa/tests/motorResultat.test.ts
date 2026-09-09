@@ -49,4 +49,28 @@ describe("tolkaMotorSchema – sommartid", () => {
     );
     expect(schema?.objectiveBreakdown).toEqual({ costOre: 1000, continuityOre: 5000, spreadOre: 250 });
   });
+
+  it("märker type jour som sovande jour", () => {
+    const schema = tolkaMotorSchema(
+      JSON.stringify({
+        solverStatus: "OPTIMAL",
+        shifts: [
+          {
+            id: "j1",
+            employeeId: "e1",
+            date: "2026-08-03",
+            start: "23:00",
+            end: "06:30",
+            type: "jour",
+            breaks: [],
+          },
+        ],
+        assignments: [],
+        uncovered: [],
+      }),
+      { medarbetare: { e1: { namn: "Anna", vikarie: false } }, insatser: {} },
+    );
+    expect(schema?.pass[0]?.jour).toBe(true);
+    expect(schema?.pass[0]?.timmar).toBe(7.5);
+  });
 });

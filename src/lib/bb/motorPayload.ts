@@ -64,6 +64,7 @@ function klockMin(t: string) {
 
 /** Ryms insatsen inom mallens arbetstid? */
 function tacker(mall: Passmall, start: string, minuter: number) {
+  if (mall.type === "jour") return false;
   const a = klockMin(mall.start);
   let b = klockMin(mall.end);
   if (b <= a) b += 1440;
@@ -126,6 +127,7 @@ function kortareVarianter(mallar: Passmall[]): Passmall[] {
   const finns = (start: string, slut: string) => ut.some((m) => m.start === start && m.end === slut);
   for (const m of mallar.slice(0, 4)) {
     if (ut.length >= 12) break;
+    if (m.type === "jour") continue;
     const a = klockMin(m.start);
     let b = klockMin(m.end);
     if (b <= a) b += 1440;
@@ -144,6 +146,7 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   const dag = idFor("day");
   const kvall = idFor("evening");
   const natt = idFor("night");
+  const jour = idFor("jour");
   const p = String(m.passprofil || "").toLowerCase();
   const nattOk = Boolean(m.nattbehorig || m.jour);
   let ut: string[] = [];
@@ -151,8 +154,23 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   else if (/kväll|kvall/.test(p)) ut = nattOk ? [...kvall, ...natt] : kvall;
   else if (/dag/.test(p)) ut = nattOk ? [...dag, ...natt] : dag;
   else ut = nattOk ? [...dag, ...kvall, ...natt] : [...dag, ...kvall];
+  if (nattOk) ut = [...ut, ...jour];
   const rensad = ut.filter(Boolean);
-  return rensad.length ? rensad : mallar.slice(0, 1).map((t) => t.id);
+  return rensad.length ? rensad : mallar.filter((t) => t.type !== "jour").slice(0, 1).map((t) => t.id);
+}
+
+const JOUR_MALL: Passmall = { id: "jour", type: "jour", start: "23:00", end: "06:30", breaks: [], skills: [] };
+
+function laggJourMall(mallar: Passmall[]): Passmall[] {
+  if (mallar.some((m) => m.type === "jour")) return mallar;
+  if (mallar.length < 12) return [...mallar, JOUR_MALL];
+  const kort = mallar.findIndex((m) => m.id.startsWith("k"));
+  if (kort >= 0) {
+    const ut = mallar.slice();
+    ut[kort] = JOUR_MALL;
+    return ut;
+  }
+  return [...mallar.slice(0, 11), JOUR_MALL];
 }
 
 /** Passtyp ur starttid: dag före 11, kväll 11–17, annars natt. */
@@ -170,6 +188,7 @@ export type MotorRegler = {
   maxShiftHours: number;
   maxConsecutiveDays: number;
   nightFloor: number;
+  jourFloor: number;
   flexibilityStep: number;
 };
 
@@ -223,6 +242,7 @@ export function byggMotorPayload(opts: {
     maxShiftHours: 12,
     maxConsecutiveDays: 5,
     nightFloor: 1,
+    jourFloor: 0,
     flexibilityStep: 15,
     ...(opts.regler || {}),
   };
@@ -349,7 +369,31 @@ export function byggMotorPayload(opts: {
   const overTak = interventions.length > MOTOR_MAX_INSATSER;
   if (!interventions.length) varningar.push("Inga insatser i den valda perioden.");
 
-
+  // Vaken natt kräver att ett arbetspass täcker hela natten (22–06). I
+  // verksamheter där natten sköts av sovande jour finns inget sådant pass.
+  const nattTackt = (minut: number) =>
+    mallar.some((m) => {
+      if (m.type === "jour") return false;
+      const a = klockMin(m.start);
+      let b = klockMin(m.end);
+      if (b <= a) b += 1440;
+      const t = minut < a ? minut + 1440 : minut;
+      return t >= a && t < b;
+    });
+  let helaNatten = true;
+  for (let m = 22 * 60; m < 30 * 60; m += 30) if (!nattTackt(m % 1440)) helaNatten = false;
+  if (regler.nightFloor > 0 && !helaNatten) {
+    regler.nightFloor = 0;
+    regler.jourFloor = Math.max(1, regler.jourFloor || 0);
+    varningar.push(
+      "Inget arbetspass täcker hela natten – nätterna sköts av sovande jour. Kravet på vaken natt ingår därför inte i den här beräkningen.",
+    );
+  }
+  if (regler.jourFloor > 0) {
+    const medJour = laggJourMall(mallar);
+    mallar.length = 0;
+    mallar.push(...medJour);
+  }
 
   const medarbetarKarta: PayloadResultat["medarbetarKarta"] = {};
   let ordinarie = 0;
@@ -412,7 +456,7 @@ export function byggMotorPayload(opts: {
       );
   }
 
-  // Kravet på vaken natt kan aldrig bli högre än antalet nattbehöriga.
+  // Kravet på vaken natt / sovande jour kan aldrig bli högre än nattbehöriga.
   const nattpersonal = employees.filter((e) => e.status === "active" && e.night).length;
   if (regler.nightFloor > nattpersonal) {
     if (nattpersonal < 1)
@@ -420,27 +464,11 @@ export function byggMotorPayload(opts: {
     else varningar.push(`Kravet på vaken natt sänktes till ${nattpersonal} eftersom bara så många är nattbehöriga.`);
     regler.nightFloor = nattpersonal;
   }
-
-  // Vaken natt kräver att ett arbetspass täcker hela natten (22–06). I
-  // verksamheter där natten sköts av sovande jour finns inget sådant pass,
-  // och kravet kan då inte ingå i beräkningen.
-  if (regler.nightFloor > 0) {
-    const nattTackt = (minut: number) =>
-      mallar.some((m) => {
-        const a = klockMin(m.start);
-        let b = klockMin(m.end);
-        if (b <= a) b += 1440;
-        const t = minut < a ? minut + 1440 : minut;
-        return t >= a && t < b;
-      });
-    let hela = true;
-    for (let m = 22 * 60; m < 30 * 60; m += 30) if (!nattTackt(m % 1440)) hela = false;
-    if (!hela) {
-      regler.nightFloor = 0;
-      varningar.push(
-        "Inget arbetspass täcker hela natten – nätterna sköts av sovande jour. Kravet på vaken natt ingår därför inte i den här beräkningen.",
-      );
-    }
+  if (regler.jourFloor > nattpersonal) {
+    if (nattpersonal < 1)
+      varningar.push("Ingen medarbetare är nattbehörig, så kravet på sovande jour kunde inte tillämpas i beräkningen.");
+    else varningar.push(`Kravet på sovande jour sänktes till ${nattpersonal} eftersom bara så många är nattbehöriga.`);
+    regler.jourFloor = nattpersonal;
   }
 
   // Frånvaro ur medarbetarvyns fält. Motorn hanterar hela dagar.
