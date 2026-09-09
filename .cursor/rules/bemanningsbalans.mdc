@@ -1,0 +1,65 @@
+---
+description: Bemanningsbalans – projektregler, facit och förbjudna ändringar. Gäller alltid.
+alwaysApply: true
+---
+
+# Bemanningsbalans – regler för allt arbete i det här repot
+
+## Vad appen är
+Verktyg för chefer i LSS/hemtjänst. Läser kundernas behov ur Sekoia-export (Excel) och
+personalschemat ur Medvind-export (Excel), räknar bemanning, ekonomi och ett schemaförslag.
+Frontend: TanStack Start + React + TypeScript (`src/`). Beräkningskärna: `src/lib/bb/core.ts`,
+`modell.ts`, `sekoia.ts`, `medvind.ts`. Optimeringsmotor: Python + OR-Tools CP-SAT i `motor/`.
+Svenska i all text mot användare, kommentarer och commit-meddelanden.
+
+## Facit – Galaxen (qa/fixtures/). Ändras ALDRIG för att få tester gröna.
+| Mått | Värde |
+|---|---|
+| Insatser | 2 541 |
+| Period | 2026-08-03 – 2026-08-30 (28 dagar) |
+| Kundbehov | 578,8 h |
+| Kunder | 11 (10 intäktsgrundande – "Gemensam Norrskenet" exkluderas) |
+| Status | 2 324 utförd / 164 inställd / 50 flyttad / 3 ej utförd |
+| Medarbetare | 11 = 5 ordinarie + 6 vikarierader |
+| Pass / vakanta | 143 / 40 |
+| Schematid FÖRE (exkl. sovande jour) | 832,0 h |
+| Sovande jour | 210,0 h |
+| Dimensionerande resursbehov | 793,8 h |
+| Kundnära FÖRE | 69,6 % |
+| Intäkt | 700 000 kr (10 × 2 500 × 28) |
+Faller ett facit-test har KODEN fel. Ändra koden, aldrig talen. Talen ändras bara om
+underlagsfilerna byts, i egen commit med motivering.
+
+## Invarianter (skriv som tester, bryt aldrig)
+1. Kundbehov är oförändrat FÖRE → EFTER.
+2. `kundnära andel = kundbehov ÷ planerad schematid`. Samma formel i alla vyer. Inget annat
+   får heta "Kundnära tid". Täckningsmått heter "Täckt behov".
+3. Schematid EFTER räknas av EN funktion och visas identiskt i Före & efter, Bemanning, Ekonomi.
+4. Schematid härleds ALDRIG ur Sekoia när Medvind-schema finns. Sekoia = behov, Medvind = schema.
+5. Sovande jour (kod "Jo") ingår aldrig i schematid eller kostnad per arbetstimme.
+6. Vakanta schemarader ("Ingen placerad", "Vakant") blir vikarier och ingår i beräkningarna.
+7. Ingen grön bock utan beräkning bakom. `ok: true` hårdkodat är förbjudet.
+8. Inga hårdkodade utfall, procent eller belopp i vyer. Inga demoverksamheter (grep "Vintergatan" = 0).
+9. Sparat tillstånd med äldre `STATE_VERSION` kastas vid start.
+10. Optimering sker i OR-Tools-motorn. Frontend bygger ingen egen optimering; lokal beräkning
+    är uttryckligt "reservläge" och får aldrig visas som motorns resultat.
+
+## Arbetssätt – obligatoriskt
+- Kör `npx tsc --noEmit && npx vitest run` före varje påstående om att något fungerar.
+  Kör `npx playwright test --config qa/playwright.config.ts` vid ändring i flöde/vyer.
+  Kör `cd motor && python -m unittest discover -s tests -v` vid ändring i `motor/`.
+- Rapportera testutfall rad för rad (X/Y gröna), aldrig "det borde fungera".
+- Ny bugg → skriv testet som faller FÖRST, sedan fixen.
+- `core.ts` ändras inte utan att facit-testerna är gröna före och efter.
+- Rör inte `motor/bb/domain.py`s `check_input`-gränser utan att uppdatera `motorPayload.ts` och testerna i samma commit.
+- Datum ur Excel: läs visad text (`raw:false`) och tolka som D/M/Y. Aldrig `.v` från SheetJS för datumceller.
+- Små, avgränsade commits. En sak per commit. Meddelande på svenska.
+
+## Motorn (motor/) – fakta
+- API: `POST /api/optimize {data, seconds}`, `POST /api/validate {data, schedule}`, `GET /api/health`.
+  Bearer-token via `BB_API_TOKEN`. Frontend når den bara via serverfunktioner i `motor.functions.ts`
+  (`OPTIMIZER_URL`, `OPTIMIZER_TOKEN` på servern). Token aldrig i webbläsarkod.
+- Gränser: period 1–42 dagar, ≤1 600 insatstillfällen, en körning åt gången (429).
+- Endast `status: "active"` schemaläggs. `boundaryShifts` = låsta pass (även inom perioden).
+- Objective-vikter (5000 kontinuitet, 250 spridning) är hårdkodade i `solver.py` – flyttas till konfiguration (se B-lista).
+- Sovande jour finns INTE i motorn ännu. Allt som överlappar 22–06 är "natt".
