@@ -1,0 +1,326 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Design system definition.
+ *
+ * The @theme inline block maps CSS custom properties to Tailwind utility
+ * classes (e.g. --color-primary -> bg-primary, text-primary).
+ *
+ * The :root and .dark blocks define the actual color values using oklch.
+ * All colors MUST use oklch format.
+ *
+ * To add a new semantic color:
+ * 1. Add the variable to :root (light value) and .dark (dark value)
+ * 2. Register it in @theme inline as --color-<name>: var(--<name>)
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
+  --radius-4xl: calc(var(--radius) + 16px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-ring-offset-background: var(--background);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-deep: var(--deep);
+  --color-deep-soft: var(--deep-soft);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-success-soft: var(--success-soft);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-warning-soft: var(--warning-soft);
+  --color-danger-soft: var(--danger-soft);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-teal: var(--teal);
+  --color-teal-soft: var(--teal-soft);
+  --color-blue: var(--blue);
+  --color-blue-soft: var(--blue-soft);
+
+  --font-sans: Inter, ui-sans-serif, system-ui, sans-serif;
+  --shadow-lift: var(--shadow-lift);
+  --shadow-lift-lg: var(--shadow-lift-lg);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  /* Status, passtyper och grafer – en plats att ändra på. */
+  --color-ok: var(--ok);
+  --color-ok-mjuk: var(--ok-mjuk);
+  --color-varn: var(--varn);
+  --color-varn-mjuk: var(--varn-mjuk);
+  --color-fara: var(--fara);
+  --color-fara-mjuk: var(--fara-mjuk);
+  --color-korall: var(--korall);
+  --color-djup: var(--djup);
+  --color-djup-mork: var(--djup-mork);
+  --color-djup-natt: var(--djup-natt);
+  --color-djup-ljus: var(--djup-ljus);
+  --color-pass-dag: var(--pass-dag);
+  --color-pass-kvall: var(--pass-kvall);
+  --color-pass-natt: var(--pass-natt);
+  --color-pass-resurs: var(--pass-resurs);
+  --color-ins-flyttbar: var(--ins-flyttbar);
+  --color-ins-fast: var(--ins-fast);
+  --color-graf-linje: var(--graf-linje);
+  --color-graf-dim: var(--graf-dim);
+  --color-graf-band: var(--graf-band);
+  --color-graf-neutral: var(--graf-neutral);
+  --color-graf-axel: var(--graf-axel);
+  --color-sim-plus: var(--sim-plus);
+  --color-sim-minus: var(--sim-minus);
+}
+
+:root {
+  --radius: 1.15rem;
+
+  /* Bemanningsbalans – ljus salvia/teal-palett med lila accent */
+  --background: #f7f9f8;
+  --foreground: #1f3a34;
+  --card: #ffffff;
+  --card-foreground: #1f3a34;
+  --popover: #ffffff;
+  --popover-foreground: #1f3a34;
+  --primary: #7c5cd6;
+  --primary-foreground: #ffffff;
+  --secondary: #f2f5f4;
+  --secondary-foreground: #1f3a34;
+  --muted: #f2f5f4;
+  --muted-foreground: #5c7268;
+  --accent: #2e9e8f;
+  --accent-foreground: #ffffff;
+  --destructive: #d4483b;
+  --destructive-foreground: #ffffff;
+  --border: #e6ecea;
+  --input: #e6ecea;
+  --ring: #7c5cd6;
+
+  --deep: #1f4a40;
+  --deep-soft: #5c7268;
+  --success: #2e7d46;
+  --success-foreground: #ffffff;
+  --success-soft: #e6f2ea;
+  --warning: #b0790f;
+  --warning-foreground: #ffffff;
+  --warning-soft: #fdf3e0;
+  --danger-soft: #fbe9e7;
+  --primary-hover: #6b4bc7;
+  --primary-soft: #efeafb;
+
+  /* Mockupens extrafärger */
+  --teal: #2e9e8f;
+  --teal-soft: #e4f3f0;
+  --blue: #3b82c4;
+  --blue-soft: #e7f0f8;
+
+  --chart-1: #7c5cd6;
+  --chart-2: #1f4a40;
+  --chart-3: #2e9e8f;
+  --chart-4: #b0790f;
+  --chart-5: #3b82c4;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #1f3a34;
+  --sidebar-primary: #1f4a40;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #f2f5f4;
+  --sidebar-accent-foreground: #1f3a34;
+  --sidebar-border: #e6ecea;
+  --sidebar-ring: #7c5cd6;
+
+  --shadow-lift: 0 6px 18px rgba(20, 50, 45, 0.08);
+  --shadow-lift-lg: 0 14px 34px rgba(20, 50, 45, 0.12);
+
+
+  /* Statusfärger (ikon + färg + text), passtyper i schemat och grafernas
+     färger. Ändra här – vyerna använder bara namnen. */
+  --ok: #2E7D46;
+  --ok-mjuk: #E6F2EA;
+  --varn: #B0790F;
+  --varn-mjuk: #FDF3E0;
+  --fara: #B3261E;
+  --fara-mjuk: #FBE0DE;
+  --korall: #F44F42;
+  --djup: #2A564A;
+  --djup-mork: #14504b;
+  --djup-natt: #22333B;
+  --djup-ljus: #93b3ab;
+  --pass-dag: #d7e9f6;
+  --pass-kvall: #e6dff5;
+  --pass-natt: #dfe4ea;
+  --pass-resurs: #e2f0e8;
+  --ins-flyttbar: #f7c948;
+  --ins-fast: #bcd8f0;
+  --graf-linje: #5b53a6;
+  --graf-dim: #cfd0ef;
+  --graf-band: #f0eff8;
+  --graf-neutral: #eef1f4;
+  --graf-axel: #9aa7b2;
+  --sim-plus: #A9E5BE;
+  --sim-minus: #FFB4AC;
+}
+
+.dark {
+  --background: oklch(0.129 0.042 264.695);
+  --foreground: oklch(0.984 0.003 247.858);
+  --card: oklch(0.208 0.042 265.755);
+  --card-foreground: oklch(0.984 0.003 247.858);
+  --popover: oklch(0.208 0.042 265.755);
+  --popover-foreground: oklch(0.984 0.003 247.858);
+  --primary: oklch(0.929 0.013 255.508);
+  --primary-foreground: oklch(0.208 0.042 265.755);
+  --secondary: oklch(0.279 0.041 260.031);
+  --secondary-foreground: oklch(0.984 0.003 247.858);
+  --muted: oklch(0.279 0.041 260.031);
+  --muted-foreground: oklch(0.704 0.04 256.788);
+  --accent: oklch(0.279 0.041 260.031);
+  --accent-foreground: oklch(0.984 0.003 247.858);
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.984 0.003 247.858);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.551 0.027 264.364);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.208 0.042 265.755);
+  --sidebar-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-accent: oklch(0.279 0.041 260.031);
+  --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.551 0.027 264.364);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+  }
+}
+
+@layer base {
+  html {
+    font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  h1, h2, h3 {
+    color: var(--deep);
+    letter-spacing: -0.02em;
+  }
+}
+
+@utility card-lift {
+  background: var(--card);
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-lift);
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+@utility num-xl {
+  font-size: clamp(2.5rem, 4vw, 3.5rem);
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes bb-rise {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+.bb-rise {
+  animation: bb-rise 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* När en flik ritas av React innehåller #view bara verksamhetsraden – då ska
+   den gamla vy-ytan inte lägga till tomrum under. */
+#view:has(> .verksbar:only-child) {
+  padding-bottom: 0 !important;
+}
+
+/* ---- Etapp 2: konsekvent hover, fokus och ikonvikt (bara utseende) ---- */
+
+/* Tydlig fokusring vid tangentbordsnavigering – aldrig osynlig fokus. */
+:where(button, a, [role="button"], input, select, textarea, [tabindex]):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 40%, transparent);
+  border-radius: 0.5rem;
+}
+
+/* Lätt lyft på klickbara ytor. */
+:where(button, [role="button"], a.bb-lyft):not(:disabled):hover {
+  transform: translateY(-1px);
+  transition: transform 150ms ease, box-shadow 150ms ease;
+}
+:where(button, [role="button"]):not(:disabled) {
+  transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease, color 150ms ease;
+}
+
+/* Samma streckvikt på alla lucide-ikoner. */
+svg.lucide {
+  stroke-width: 1.75;
+}
+
+/* Tal linjerar överallt. */
+table :where(td, th),
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Mjuk inrykning för steg som dyker upp i tur och ordning – inget hopp. */
+@keyframes bb-fade-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animated.fadeInUp {
+  animation: bb-fade-up 320ms ease-out both;
+}
