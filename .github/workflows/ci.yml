@@ -13,7 +13,7 @@ jobs:
       - run: npx eslint .
       - run: npx vitest run
       - run: npx playwright install --with-deps chromium
-      - run: npx playwright test
+      - run: npx playwright test --config qa/playwright.config.ts
       - run: npx vite build
       - run: grep -rniq vintergatan src public && exit 1 || true   # ingen demodata får komma tillbaka
   motor:
