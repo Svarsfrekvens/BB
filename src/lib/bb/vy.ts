@@ -70,6 +70,7 @@ export type ForeEfter = {
   forstark: string[];
   vikarie: { antalBorttagna: number; antalBehalls: number } | null;
   varningar: string[];
+  obemannade: { insats: string; datum: string; minuter: number; antal: number }[];
 };
 
 
@@ -119,6 +120,7 @@ export type VyApi = {
     maxConsecutiveDays: number;
     nightFloor: number;
     flexibilityStep: number;
+    jour: { start: string; end: string; weekdays: number[] };
   };
   motorResultat: () => Record<string, unknown> | null;
   berakningsKalla: () => "motor" | "lokal" | null;

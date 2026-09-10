@@ -57,7 +57,7 @@ export function ForeEfter({ api }: VyProps) {
     );
   }
 
-  const { fore, efter, tabell, punkter, flyttade, vikarie, varningar } = m;
+  const { fore, efter, tabell, punkter, flyttade, vikarie, varningar, obemannade } = m;
 
   return (
     <div className="space-y-4">
@@ -142,6 +142,33 @@ export function ForeEfter({ api }: VyProps) {
               </tbody>
             </table>
           </div>
+        </Card>
+      ) : null}
+
+      {obemannade.length ? (
+        <Card className="gap-0 rounded-2xl border-destructive/40 bg-destructive/5 p-6 shadow-lift">
+          <Eyebrow>Obemannat i förslaget</Eyebrow>
+          <h3 className="mt-1 text-lg font-extrabold text-destructive">
+            {obemannade.reduce((s, u) => s + (u.antal || 1), 0)} insatser kunde inte bemannas
+          </h3>
+          <p className="mt-1 text-sm text-muted-foreground">
+            De kommer från motorns redovisning av obemannat behov. Hårda regler har inte lättats.
+          </p>
+          <ul className="mt-4 space-y-2">
+            {obemannade.map((u, i) => (
+              <li key={`${u.datum}-${u.insats}-${i}`} className="flex gap-3 text-sm leading-relaxed text-deep">
+                <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-destructive" />
+                <span>
+                  <span className="font-semibold">{u.insats}</span>
+                  {" · "}
+                  {u.datum}
+                  {" · "}
+                  {u.minuter} minuter
+                  {u.antal > 1 ? ` · ${u.antal} tillfällen` : ""}
+                </span>
+              </li>
+            ))}
+          </ul>
         </Card>
       ) : null}
 

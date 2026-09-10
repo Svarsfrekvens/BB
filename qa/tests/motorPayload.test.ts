@@ -100,10 +100,20 @@ describe("motorPayload ur Galaxen", () => {
     expect(payload(7).info.overTak).toBe(false);
   });
 
-  it("skickar objectiveWeights med standard 50 och 2,5", () => {
-    const w = payload(7).payload.objectiveWeights as { continuitySek: number; spreadSekPerPermille: number };
+  it("skickar objectiveWeights med standard 50, 2,5 och 500", () => {
+    const w = payload(7).payload.objectiveWeights as {
+      continuitySek: number;
+      spreadSekPerPermille: number;
+      uncoveredSekPerMinute: number;
+    };
     expect(w.continuitySek).toBe(50);
     expect(w.spreadSekPerPermille).toBe(2.5);
+    expect(w.uncoveredSekPerMinute).toBe(500);
+  });
+
+  it("skickar rules.jour med 23:00–06:30 alla veckodagar", () => {
+    const jour = (payload(7).payload.rules as { jour: { start: string; end: string; weekdays: number[] } }).jour;
+    expect(jour).toEqual({ start: "23:00", end: "06:30", weekdays: [1, 2, 3, 4, 5, 6, 7] });
   });
 
   it("lägger jour-mall och jourFloor när natten saknar arbetspass", () => {

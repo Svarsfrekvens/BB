@@ -74,6 +74,7 @@ export function Motor({ state, api }: VyProps) {
       objectiveWeights: {
         continuitySek: Number(state?.["continuitySek"] ?? 50),
         spreadSekPerPermille: Number(state?.["spreadSekPerPermille"] ?? 2.5),
+        uncoveredSekPerMinute: Number(state?.["uncoveredSekPerMinute"] ?? 500),
       },
     });
   };

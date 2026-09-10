@@ -73,4 +73,16 @@ describe("tolkaMotorSchema – sommartid", () => {
     expect(schema?.pass[0]?.jour).toBe(true);
     expect(schema?.pass[0]?.timmar).toBe(7.5);
   });
+
+  it("läser schedule.uncovered till insats, datum och minuter", () => {
+    const schema = tolkaMotorSchema(
+      JSON.stringify({
+        solverStatus: "OPTIMAL",
+        assignments: [],
+        uncovered: [{ occurrenceId: "i1@2026-08-03", name: "Tillsyn", date: "2026-08-03", minutes: 30, count: 1 }],
+      }),
+      { medarbetare: {}, insatser: {} },
+    );
+    expect(schema?.obemannade).toEqual([{ insats: "Tillsyn", datum: "2026-08-03", minuter: 30, antal: 1 }]);
+  });
 });

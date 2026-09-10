@@ -807,7 +807,7 @@ function foreEfterModell() {
   const { from, to } = analysPeriod();
   const bas = { fran: from, till: to, ...ekonomiBas() };
   const fore = MODELL.analysera({ ...bas, pass: schemaPass(), rader: C.filtreraPeriod(state.rows, from, to) });
-  if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [] };
+  if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [], obemannade: [] };
   const efter = MODELL.analysera({ ...bas, pass: efterPass(), rader: C.filtreraPeriod(raderEfter(), from, to) });
   const schemaVarningar = (state.balans.schemaVarningar || []).map((v) => v.text);
   const varningar = [...new Set([...villkorsVarningar(), ...schemaVarningar])];
@@ -815,7 +815,8 @@ function foreEfterModell() {
     h: (x) => h1(x) + " h", kr: (x) => kr(x), pct: (x) => h1(x) + " %",
   }, state.balans.vikarie || null, varningar);
   const forandringar = state.balans.schemaForandringar || [];
-  return { fore, efter, ...j, punkter: [...forandringar.map((f) => f.text), ...j.punkter], flyttade: state.balans.flyttade || [], vikarie: state.balans.vikarie || null, varningar };
+  const obemannade = Array.isArray(state.motorResultat?.obemannade) ? state.motorResultat.obemannade : [];
+  return { fore, efter, ...j, punkter: [...forandringar.map((f) => f.text), ...j.punkter], flyttade: state.balans.flyttade || [], vikarie: state.balans.vikarie || null, varningar, obemannade };
 }
 
 function underlagInfo() {
@@ -1049,6 +1050,11 @@ function motorRegler() {
     maxConsecutiveDays: Math.round(tal("Max arbetsdagar i följd", 5)),
     nightFloor: Math.round(tal("Vaken natt – grundbemanning", 1)),
     flexibilityStep: 15,
+    jour: {
+      start: MODELL.REGLER.jourStart,
+      end: MODELL.REGLER.jourSlut,
+      weekdays: [1, 2, 3, 4, 5, 6, 7],
+    },
   };
 }
 

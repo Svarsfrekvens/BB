@@ -61,5 +61,6 @@ underlagsfilerna byts, i egen commit med motivering.
   (`OPTIMIZER_URL`, `OPTIMIZER_TOKEN` på servern). Token aldrig i webbläsarkod.
 - Gränser: period 1–42 dagar, ≤1 600 insatstillfällen, en körning åt gången (429).
 - Endast `status: "active"` schemaläggs. `boundaryShifts` = låsta pass (även inom perioden).
-- Objective-vikter (5000 kontinuitet, 250 spridning) är hårdkodade i `solver.py` – flyttas till konfiguration (se B-lista).
-- Sovande jour finns INTE i motorn ännu. Allt som överlappar 22–06 är "natt".
+- Objective-vikter kommer från `objectiveWeights`: `continuitySek` (50), `spreadSekPerPermille` (2,5),
+  `uncoveredSekPerMinute` (500 kr per obemannad insatsminut).
+- Sovande jour: malltyp `jour`. Fönster från `rules.jour {start, end, weekdays}`, default 23:00–06:30 alla dagar.

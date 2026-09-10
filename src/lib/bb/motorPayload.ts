@@ -159,18 +159,24 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   return rensad.length ? rensad : mallar.filter((t) => t.type !== "jour").slice(0, 1).map((t) => t.id);
 }
 
-const JOUR_MALL: Passmall = { id: "jour", type: "jour", start: "23:00", end: "06:30", breaks: [], skills: [] };
+const JOUR_DEFAULT = { start: "23:00", end: "06:30", weekdays: [1, 2, 3, 4, 5, 6, 7] as number[] };
 
-function laggJourMall(mallar: Passmall[]): Passmall[] {
+function jourMall(regler: MotorRegler): Passmall {
+  const j = regler.jour ?? JOUR_DEFAULT;
+  return { id: "jour", type: "jour", start: j.start || "23:00", end: j.end || "06:30", breaks: [], skills: [] };
+}
+
+function laggJourMall(mallar: Passmall[], regler: MotorRegler): Passmall[] {
+  const mall = jourMall(regler);
   if (mallar.some((m) => m.type === "jour")) return mallar;
-  if (mallar.length < 12) return [...mallar, JOUR_MALL];
+  if (mallar.length < 12) return [...mallar, mall];
   const kort = mallar.findIndex((m) => m.id.startsWith("k"));
   if (kort >= 0) {
     const ut = mallar.slice();
-    ut[kort] = JOUR_MALL;
+    ut[kort] = mall;
     return ut;
   }
-  return [...mallar.slice(0, 11), JOUR_MALL];
+  return [...mallar.slice(0, 11), mall];
 }
 
 /** Passtyp ur starttid: dag före 11, kväll 11–17, annars natt. */
@@ -190,6 +196,7 @@ export type MotorRegler = {
   nightFloor: number;
   jourFloor: number;
   flexibilityStep: number;
+  jour?: { start: string; end: string; weekdays: number[] };
 };
 
 export type PayloadResultat = {
@@ -226,7 +233,7 @@ export function byggMotorPayload(opts: {
   schemaPass?: { namn: string; datum: string; start: string; slut: string; jour?: boolean }[];
   mallar?: Passmall[];
   revision?: number;
-  objectiveWeights?: { continuitySek: number; spreadSekPerPermille: number };
+  objectiveWeights?: { continuitySek: number; spreadSekPerPermille: number; uncoveredSekPerMinute?: number };
 }): PayloadResultat {
   const varningar: string[] = [];
   const dagar = Math.max(1, Math.min(42, Math.round(opts.dagar || 7)));
@@ -244,7 +251,17 @@ export function byggMotorPayload(opts: {
     nightFloor: 1,
     jourFloor: 0,
     flexibilityStep: 15,
+    jour: {
+      start: opts.regler?.jour?.start || "23:00",
+      end: opts.regler?.jour?.end || "06:30",
+      weekdays: opts.regler?.jour?.weekdays?.length ? opts.regler.jour.weekdays : [1, 2, 3, 4, 5, 6, 7],
+    },
     ...(opts.regler || {}),
+  };
+  regler.jour = {
+    start: regler.jour?.start || "23:00",
+    end: regler.jour?.end || "06:30",
+    weekdays: regler.jour?.weekdays?.length ? regler.jour.weekdays : [1, 2, 3, 4, 5, 6, 7],
   };
   const mallTimmar = (t: Passmall) => {
     const a = klockMin(t.start);
@@ -390,7 +407,7 @@ export function byggMotorPayload(opts: {
     );
   }
   if (regler.jourFloor > 0) {
-    const medJour = laggJourMall(mallar);
+    const medJour = laggJourMall(mallar, regler);
     mallar.length = 0;
     mallar.push(...medJour);
   }
@@ -546,6 +563,7 @@ export function byggMotorPayload(opts: {
     objectiveWeights: {
       continuitySek: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.continuitySek ?? 50))),
       spreadSekPerPermille: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.spreadSekPerPermille ?? 2.5))),
+      uncoveredSekPerMinute: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.uncoveredSekPerMinute ?? 500))),
     },
   };
 
