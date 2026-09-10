@@ -19,10 +19,19 @@ export type MotorSvar = {
   meddelande?: string;
 };
 
+/** Publik Render-adress. Token är hemlig och läses bara på servern. */
+const STANDARD_MOTOR_URL = "https://bemanningsbalans-motor.onrender.com";
+
+function lasEnv(namn: string) {
+  const vite = (import.meta as { env?: Record<string, string | undefined> }).env;
+  const v = process.env[namn] || process.env[`VITE_${namn}`] || vite?.[namn] || vite?.[`VITE_${namn}`] || "";
+  return String(v).trim();
+}
+
 function bas() {
-  const url = process.env["OPTIMIZER_URL"];
-  const token = process.env["OPTIMIZER_TOKEN"];
-  return { url: url ? url.replace(/\/+$/, "") : "", token: token || "" };
+  const url = (lasEnv("OPTIMIZER_URL") || STANDARD_MOTOR_URL).replace(/\/+$/, "");
+  const token = lasEnv("OPTIMIZER_TOKEN");
+  return { url, token };
 }
 
 async function anropa(vag: string, kropp: unknown): Promise<MotorSvar> {
@@ -96,7 +105,14 @@ export const motorStatus = createServerFn({ method: "GET" }).handler(async () =>
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     });
     const data: any = await svar.json().catch(() => null);
-    return { installd: true, klar: Boolean(data?.ready), meddelande: svar.ok ? "" : `Svar ${svar.status}` };
+    if (!svar.ok) {
+      const varfor =
+        svar.status === 401
+          ? "Token saknas eller stämmer inte (OPTIMIZER_TOKEN / BB_API_TOKEN)."
+          : `Svar ${svar.status}`;
+      return { installd: true, klar: false, meddelande: varfor };
+    }
+    return { installd: true, klar: Boolean(data?.ready), meddelande: data?.ready ? "" : "Motorn svarar men OR-Tools saknas." };
   } catch (e) {
     return { installd: true, klar: false, meddelande: (e as Error).message };
   }
