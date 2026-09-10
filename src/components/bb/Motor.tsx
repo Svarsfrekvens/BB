@@ -168,8 +168,10 @@ export function Motor({ state, api }: VyProps) {
           loggar.push({ fonster: f, status: svar?.status ?? "FEL", forklaring: "", fel: svar?.fel ?? [], meddelande: svar?.meddelande });
           setKorningar([...loggar]);
           setDiagnos(byggDiagnos(underlagMotor));
-          // Ingen ska bli stående utan förslag: appen räknar fram ett i stället.
-          lokalBerakning();
+          setAvvisat(
+            svar?.meddelande ||
+              `Motorn avvisade fönstret ${f.from}–${f.to} (${svar?.status ?? "fel"}). Ingen lokal helperiodsberäkning kördes.`,
+          );
           setJobbar(false);
           setSteg("");
           return;
@@ -187,7 +189,10 @@ export function Motor({ state, api }: VyProps) {
         setKorningar([...loggar]);
         if (!schema || !schema.pass.length || svar.status === "INFEASIBLE" || svar.status === "UNKNOWN" || svar.status === "MODEL_INVALID") {
           setDiagnos(byggDiagnos(underlagMotor));
-          lokalBerakning();
+          setAvvisat(
+            svar.forklaring ||
+              `Fönster ${f.from}–${f.to}: ${svar.status ?? "okänt"}. Ingen lokal helperiodsberäkning kördes.`,
+          );
           setJobbar(false);
           setSteg("");
           return;
@@ -229,7 +234,7 @@ export function Motor({ state, api }: VyProps) {
     } catch (e) {
       loggar.push({ fonster: fonster[0]!, status: "FEL", forklaring: "", fel: [], meddelande: (e as Error).message });
       setKorningar([...loggar]);
-      lokalBerakning();
+      setAvvisat((e as Error).message || "Anropet till motorn avbröts.");
     } finally {
       setJobbar(false);
       setSteg("");

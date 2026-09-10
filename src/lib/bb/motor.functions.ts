@@ -112,6 +112,13 @@ export const motorStatus = createServerFn({ method: "GET" }).handler(async () =>
           : `Svar ${svar.status}`;
       return { installd: true, klar: false, meddelande: varfor };
     }
+    if (!token) {
+      return {
+        installd: true,
+        klar: false,
+        meddelande: "OPTIMIZER_TOKEN saknas i servern. Hälsokollen kan svara ändå – beräkning kräver token.",
+      };
+    }
     return { installd: true, klar: Boolean(data?.ready), meddelande: data?.ready ? "" : "Motorn svarar men OR-Tools saknas." };
   } catch (e) {
     return { installd: true, klar: false, meddelande: (e as Error).message };
