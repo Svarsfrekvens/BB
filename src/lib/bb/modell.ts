@@ -110,10 +110,8 @@ export function analysera(opts: {
   /** Antal kunder och kronor per kund och dygn – ger beräknad intäkt. */
   antalKunder?: number;
   dygnsErsattning?: number;
-  /** Kundnära aktivitetstimmar som faktiskt ska schemaläggas (journal, avstämning, …). */
-  extraKundnaraH?: number;
-  /** Ej kundnära verksamhetstid som läggs på schemat (möte, handledning, …). */
-  extraEjKundnaraH?: number;
+  /** Kundnära tid som ryms i redan schemalagda pass (tidstyp inom_pass). Ökar inte schematid. */
+  extraInomPassKundnaraH?: number;
 }): Lage {
   const { rader, pass, fran, till, timkostnad } = opts;
   const lista = dagar(fran, till);
@@ -149,18 +147,16 @@ export function analysera(opts: {
   });
 
   const arbetspass = pass.filter((p) => !p.jour);
-  const extraKundnara = Math.max(0, opts.extraKundnaraH || 0);
-  const extraEj = Math.max(0, opts.extraEjKundnaraH || 0);
-  const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0) + extraKundnara + extraEj;
+  const extraInom = Math.max(0, opts.extraInomPassKundnaraH || 0);
+  const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0);
   const jourH = pass.filter((p) => p.jour).reduce((s, p) => s + p.timmar, 0);
   const kpi = beraknaKpi({
     schematidH,
-    kundnaraArbetstidH: bemannatKundbehovH + extraKundnara,
+    kundnaraArbetstidH: bemannatKundbehovH + extraInom,
     totaltKundbehovH: n.kundbehovH,
     bemannatKundbehovH,
   });
-  const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0)
-    + (extraKundnara + extraEj) * timkostnad;
+  const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0);
   const intakt = (opts.antalKunder || 0) * (opts.dygnsErsattning || 0) * lista.length;
   const delare = lista.length * 2; // två intervall per timme och dag
   return {

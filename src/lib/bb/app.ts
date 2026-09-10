@@ -10,7 +10,7 @@ import * as MV from "./medvind";
 import * as MODELL from "./modell";
 import { parseSekoiaRapport } from "./sekoia";
 export { parseSekoiaRapport } from "./sekoia";
-import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt } from "./aktiviteter";
+import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt, STANDARD_AKTIVITETER } from "./aktiviteter";
 import { beraknaKpi } from "./kpi";
 
 declare global {
@@ -143,6 +143,12 @@ function migrate(old) {
   for (const v of rot.verks) {
     if (v.org === "Vintergatan" || v.org === "Ny verksamhet") v.org = "";
     if (!Array.isArray(v.planAktiviteter) || !v.planAktiviteter.length) v.planAktiviteter = standardKatalog();
+    else {
+      v.planAktiviteter = v.planAktiviteter.map((a) => ({
+        ...a,
+        tidstyp: a.tidstyp || STANDARD_AKTIVITETER.find((s) => s.id === a.id)?.tidstyp || (a.kategori === "verksamhet" ? "separat_tid" : "inom_pass"),
+      }));
+    }
     if (!v.kontaktpersoner || typeof v.kontaktpersoner !== "object") v.kontaktpersoner = {};
     // Ett kundbehovsblad kunde i en äldre version feltolkas som personalschema.
     // Ett riktigt schema kan inte rimligen ha långt fler personer än pass.
@@ -566,8 +572,7 @@ function harleddBerakningar(rows, period, individschema, antag) {
       fran,
       till,
       timkostnad,
-      extraKundnaraH: extra.kundnaraH,
-      extraEjKundnaraH: extra.ejKundnaraH,
+      extraInomPassKundnaraH: extra.inomPassKundnaraH,
     });
     kpiAndel = { kundnaraPct: a.kundnaraPct };
     schematid = a.schematidH;
@@ -770,8 +775,7 @@ function analyseraMedAktiviteter(pass, rader) {
     pass,
     fran: from,
     till: to,
-    extraKundnaraH: extra.kundnaraH,
-    extraEjKundnaraH: extra.ejKundnaraH,
+    extraInomPassKundnaraH: extra.inomPassKundnaraH,
     ...ekonomiBas(),
   });
 }
@@ -866,8 +870,7 @@ function foreEfterModell() {
     ...bas,
     pass: schemaPass(),
     rader: C.filtreraPeriod(state.rows, from, to),
-    extraKundnaraH: extraFore.kundnaraH,
-    extraEjKundnaraH: extraFore.ejKundnaraH,
+    extraInomPassKundnaraH: extraFore.inomPassKundnaraH,
   });
   if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [], obemannade: [] };
   const extraEfter = aktivitetTillägg(efterPass());
@@ -875,8 +878,7 @@ function foreEfterModell() {
     ...bas,
     pass: efterPass(),
     rader: C.filtreraPeriod(raderEfter(), from, to),
-    extraKundnaraH: extraEfter.kundnaraH,
-    extraEjKundnaraH: extraEfter.ejKundnaraH,
+    extraInomPassKundnaraH: extraEfter.inomPassKundnaraH,
   });
   const schemaVarningar = (state.balans.schemaVarningar || []).map((v) => v.text);
   const varningar = [...new Set([...villkorsVarningar(), ...schemaVarningar])];

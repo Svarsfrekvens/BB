@@ -35,14 +35,26 @@ export function Planering({ api }: { api: VyApi }) {
                 <span className="flex-1 text-deep">
                   {a.aktiv ? "✓ " : ""}
                   {a.namn}
-                  {a.aktiv ? ` – ${a.omfattning} ${a.enhet === "timmar" ? "h" : "min"}` : ""}
+                  {a.aktiv
+                    ? ` – ${a.omfattning} ${a.enhet === "timmar" ? "h" : "min"} · ${a.tidstyp === "separat_tid" ? "separat tid" : "inom pass"}`
+                    : ""}
                 </span>
                 {a.aktiv ? (
-                  <input
-                    className="h-8 w-16 rounded border border-input px-2 text-sm tabular-nums"
-                    value={String(a.omfattning)}
-                    onChange={(e) => api.setPlanAktivitet(a.id, "omfattning", Number(e.target.value) || 0)}
-                  />
+                  <>
+                    <input
+                      className="h-8 w-16 rounded border border-input px-2 text-sm tabular-nums"
+                      value={String(a.omfattning)}
+                      onChange={(e) => api.setPlanAktivitet(a.id, "omfattning", Number(e.target.value) || 0)}
+                    />
+                    <select
+                      className="h-8 rounded border border-input px-1 text-[12px]"
+                      value={a.tidstyp || "inom_pass"}
+                      onChange={(e) => api.setPlanAktivitet(a.id, "tidstyp", e.target.value)}
+                    >
+                      <option value="inom_pass">Inom pass</option>
+                      <option value="separat_tid">Separat tid</option>
+                    </select>
+                  </>
                 ) : null}
               </li>
             ))}
@@ -52,6 +64,7 @@ export function Planering({ api }: { api: VyApi }) {
             {aktiva.slice(0, 8).map((a) => (
               <li key={a.id}>
                 ✓ {a.namn} – {a.omfattning} {a.enhet === "timmar" ? "h" : "min"}
+                {a.tidstyp === "separat_tid" ? " · separat tid" : " · inom pass"}
               </li>
             ))}
           </ul>

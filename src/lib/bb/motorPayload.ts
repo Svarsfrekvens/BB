@@ -462,7 +462,7 @@ export function byggMotorPayload(opts: {
     sekoiaRader: opts.rader,
   });
   for (const a of expanderade) {
-    if (a.typ === "lasa_journal" || a.typ === "skriva_journal") continue;
+    if (a.tidstyp !== "separat_tid") continue;
     let kvar = Math.round(a.timmar * 60);
     if (kvar < 1) continue;
     const cid = kundId(a.kund || "Gemensamt");

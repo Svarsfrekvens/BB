@@ -21,11 +21,15 @@ export type KpiResultat = {
   bemannatKundbehovH: number;
   obemannatKundbehovH: number;
   tacktBehovPct: number;
+  /** Sant när täljaren överskred nämnaren – då kapas KPI:n till invariant, inte kosmetiskt i UI. */
+  modellFel: boolean;
 };
 
 export function beraknaKpi(d: KpiIndata): KpiResultat {
   const schematidH = Math.max(0, d.schematidH);
-  const kundnaraH = Math.max(0, d.kundnaraArbetstidH);
+  const rawKundnara = Math.max(0, d.kundnaraArbetstidH);
+  const modellFel = rawKundnara > schematidH + 1e-9;
+  const kundnaraH = Math.min(rawKundnara, schematidH);
   const totalt = Math.max(0, d.totaltKundbehovH);
   const bemannat = Math.max(0, Math.min(d.bemannatKundbehovH, totalt));
   return {
@@ -37,5 +41,6 @@ export function beraknaKpi(d: KpiIndata): KpiResultat {
     bemannatKundbehovH: bemannat,
     obemannatKundbehovH: Math.max(0, totalt - bemannat),
     tacktBehovPct: totalt > 0 ? (bemannat / totalt) * 100 : 100,
+    modellFel,
   };
 }

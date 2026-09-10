@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { beraknaKpi } from "@/lib/bb/kpi";
-import { expanderaAktiviteter, standardKatalog, kunderUtanKontakt } from "@/lib/bb/aktiviteter";
+import { expanderaAktiviteter, standardKatalog, kunderUtanKontakt, aktivitetstimmar } from "@/lib/bb/aktiviteter";
 import { ssgForDag, gallerIPeriod, type MedarbetarVillkor } from "@/lib/bb/villkor";
 
 describe("KPI kundnära tid och täckt behov", () => {
@@ -16,16 +16,18 @@ describe("KPI kundnära tid och täckt behov", () => {
     expect(k.tacktBehovPct).toBeCloseTo((350 / 600) * 100, 5);
   });
 
-  it("scenario B: 340 / 400 = 85 %", () => {
+  it("scenario B: 8 h pass, 6 h insats, 30 min journal inom pass → 81,25 %, inte 8,5 h", () => {
     const k = beraknaKpi({
-      schematidH: 400,
-      kundnaraArbetstidH: 300 + 20 + 20,
-      totaltKundbehovH: 300,
-      bemannatKundbehovH: 300,
+      schematidH: 8,
+      kundnaraArbetstidH: 6 + 0.25 + 0.25,
+      totaltKundbehovH: 6,
+      bemannatKundbehovH: 6,
     });
-    expect(k.kundnaraH).toBe(340);
-    expect(k.ejKundnaraH).toBe(60);
-    expect(k.kundnaraPct).toBeCloseTo(85, 5);
+    expect(k.schematidH).toBe(8);
+    expect(k.kundnaraH).toBeCloseTo(6.5, 5);
+    expect(k.ejKundnaraH).toBeCloseTo(1.5, 5);
+    expect(k.kundnaraPct).toBeCloseTo(81.25, 5);
+    expect(k.modellFel).toBe(false);
   });
 
   it("scenario C: obemannat behov höjer inte kundnära tid", () => {
@@ -47,14 +49,17 @@ describe("KPI kundnära tid och täckt behov", () => {
     expect(medObemannat.obemannatKundbehovH).toBe(200);
   });
 
-  it("kapas inte till 100 % – felaktig täljare syns", () => {
+  it("överskriden täljare är modellfel och KPI håller invariant", () => {
     const k = beraknaKpi({
       schematidH: 400,
       kundnaraArbetstidH: 500,
       totaltKundbehovH: 100,
       bemannatKundbehovH: 100,
     });
-    expect(k.kundnaraPct).toBeCloseTo(125, 5);
+    expect(k.modellFel).toBe(true);
+    expect(k.kundnaraH).toBe(400);
+    expect(k.kundnaraPct).toBeCloseTo(100, 5);
+    expect(k.ejKundnaraH).toBe(0);
   });
 });
 
@@ -105,9 +110,55 @@ describe("planeringsaktiviteter", () => {
     expect(exp.filter((e) => e.typ === "gp")).toHaveLength(0);
   });
 
-  it("kontaktpersonsaktiviteter kräver koppling", () => {
-    const katalog = standardKatalog().map((a) => (a.id === "veckoavstamning" ? { ...a, aktiv: true } : a));
-    expect(kunderUtanKontakt(["A", "B"], { A: "Med 1" }, katalog)).toEqual(["B"]);
+  it("ändrad schablon används", () => {
+    const katalog = standardKatalog().map((a) =>
+      a.id === "lasa_journal" ? { ...a, aktiv: true, omfattning: 20 } : a,
+    );
+    const exp = expanderaAktiviteter({
+      aktiviteter: katalog,
+      fran: "2026-09-01",
+      till: "2026-09-07",
+      arbetspass: 10,
+      kunder: [],
+      kontaktpersoner: {},
+    });
+    expect(exp.find((e) => e.typ === "lasa_journal")?.timmar).toBeCloseTo(10 * 20 / 60, 5);
+  });
+
+  it("inom_pass räknas separat från separat_tid", () => {
+    const katalog = standardKatalog().map((a) =>
+      a.id === "lasa_journal" || a.id === "verksamhetsmote" ? { ...a, aktiv: true } : a,
+    );
+    const exp = expanderaAktiviteter({
+      aktiviteter: katalog,
+      fran: "2026-09-01",
+      till: "2026-09-30",
+      arbetspass: 10,
+      kunder: [],
+      kontaktpersoner: {},
+    });
+    const tim = aktivitetstimmar(exp);
+    expect(tim.inomPassKundnaraH).toBeCloseTo(10 * 10 / 60, 5);
+    expect(tim.separatEjKundnaraH).toBeGreaterThan(0);
+    expect(exp.find((e) => e.typ === "lasa_journal")?.tidstyp).toBe("inom_pass");
+    expect(exp.find((e) => e.typ === "verksamhetsmote")?.tidstyp).toBe("separat_tid");
+  });
+
+  it("kontaktpersonstid knyts till medarbetare 1", () => {
+    const katalog = standardKatalog().map((a) =>
+      a.id === "kontaktpersonstid" || a.id === "veckoavstamning" || a.id === "manadsuppfoljning"
+        ? { ...a, aktiv: true }
+        : a,
+    );
+    const exp = expanderaAktiviteter({
+      aktiviteter: katalog,
+      fran: "2026-09-01",
+      till: "2026-09-28",
+      arbetspass: 0,
+      kunder: ["Kund A"],
+      kontaktpersoner: { "Kund A": "Medarbetare 1" },
+    });
+    expect(exp.filter((e) => e.medarbetare === "Medarbetare 1").length).toBeGreaterThanOrEqual(3);
   });
 });
 

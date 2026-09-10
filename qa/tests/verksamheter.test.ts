@@ -59,7 +59,10 @@ describe("samma motor för tre verksamhetsprofiler", () => {
       timkostnad: 270,
       mallar: [{ id: "dag", type: "day", start: "07:00", end: "16:00", breaks: [], skills: [] }],
     });
-    const katalog = standardKatalog().map((x) => (x.id === "veckoavstamning" ? { ...x, aktiv: true } : x));
+    const katalog = standardKatalog().map((x) =>
+      x.id === "veckoavstamning" ? { ...x, aktiv: true, tidstyp: "separat_tid" as const } : x,
+    );
+    const inomPass = standardKatalog().map((x) => (x.id === "veckoavstamning" ? { ...x, aktiv: true } : x));
     const c = byggMotorPayload({
       rader: rader(2),
       medarbetare: personal(3, { helg: "vartredje" }),
@@ -69,11 +72,22 @@ describe("samma motor för tre verksamhetsprofiler", () => {
       planAktiviteter: katalog,
       kontaktpersoner: { "Kund 1": "P1", "Kund 2": "P1" },
     });
+    const utanSeparat = byggMotorPayload({
+      rader: rader(2),
+      medarbetare: personal(3),
+      from: "2026-09-07",
+      dagar: 28,
+      timkostnad: 270,
+      planAktiviteter: inomPass,
+      kontaktpersoner: { "Kund 1": "P1", "Kund 2": "P1" },
+    });
     expect(a.payload.schemaVersion).toBe(1);
     expect(b.payload.schemaVersion).toBe(1);
     expect(c.payload.schemaVersion).toBe(1);
     const insC = (c.payload.interventions as { name: string; requiredEmployeeId?: string }[]) || [];
     expect(insC.some((i) => i.name === "Veckoavstämning kund" && i.requiredEmployeeId === "e1")).toBe(true);
+    const insInom = (utanSeparat.payload.interventions as { name: string }[]) || [];
+    expect(insInom.some((i) => i.name === "Veckoavstämning kund")).toBe(false);
   });
 
   it("datumstyrd SSG och kundförbud går in i samma payload utan verksamhetsgren", () => {

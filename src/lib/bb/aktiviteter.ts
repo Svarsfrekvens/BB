@@ -2,6 +2,7 @@
 
 export type AktivitetsKalla = "sekoia" | "schemaimport" | "manuellt" | "systemstandard";
 export type AktivitetsEnhet = "minuter" | "timmar";
+export type AktivitetsTidstyp = "inom_pass" | "separat_tid";
 export type AktivitetsFrekvens =
   | "per_pass"
   | "per_kund_vecka"
@@ -20,6 +21,7 @@ export type PlanAktivitet = {
   kalla: AktivitetsKalla;
   omfattning: number;
   enhet: AktivitetsEnhet;
+  tidstyp: AktivitetsTidstyp;
   frekvens: AktivitetsFrekvens;
   kundId?: string;
   medarbetareId?: string;
@@ -37,6 +39,7 @@ export type ExpanderadAktivitet = {
   typ: string;
   namn: string;
   kundnara: boolean;
+  tidstyp: AktivitetsTidstyp;
   timmar: number;
   kund?: string;
   medarbetare?: string;
@@ -44,19 +47,26 @@ export type ExpanderadAktivitet = {
 };
 
 export const STANDARD_AKTIVITETER: Omit<PlanAktivitet, "verksamhetsId">[] = [
-  { id: "lasa_journal", aktivitetstyp: "lasa_journal", namn: "Läsa journal vid passstart", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 10, enhet: "minuter", frekvens: "per_pass", aktiv: false, styrka: "onskemal" },
-  { id: "skriva_journal", aktivitetstyp: "skriva_journal", namn: "Skriva journal vid passlut", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 15, enhet: "minuter", frekvens: "per_pass", aktiv: false, styrka: "onskemal" },
-  { id: "kontaktpersonstid", aktivitetstyp: "kontaktpersonstid", namn: "Kontaktpersonstid", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 30, enhet: "minuter", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
-  { id: "veckoavstamning", aktivitetstyp: "veckoavstamning", namn: "Veckoavstämning kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
-  { id: "manadsuppfoljning", aktivitetstyp: "manadsuppfoljning", namn: "Månadsuppföljning kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
-  { id: "gp", aktivitetstyp: "gp", namn: "Genomförandeplan", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
-  { id: "sip", aktivitetstyp: "sip", namn: "SIP", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 2, enhet: "timmar", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
-  { id: "husmote", aktivitetstyp: "husmote", namn: "Husmöte", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
-  { id: "samverkan_kund", aktivitetstyp: "samverkan_kund", namn: "Samverkan kring kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 30, enhet: "minuter", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
-  { id: "verksamhetsmote", aktivitetstyp: "verksamhetsmote", namn: "Verksamhetsmöte", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
-  { id: "kvalitetsrad", aktivitetstyp: "kvalitetsrad", namn: "Regionalt kvalitetsråd", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
-  { id: "handledning", aktivitetstyp: "handledning", namn: "Handledning", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
+  { id: "lasa_journal", aktivitetstyp: "lasa_journal", namn: "Läsa journal vid passstart", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 10, enhet: "minuter", tidstyp: "inom_pass", frekvens: "per_pass", aktiv: false, styrka: "onskemal" },
+  { id: "skriva_journal", aktivitetstyp: "skriva_journal", namn: "Skriva journal vid passlut", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 15, enhet: "minuter", tidstyp: "inom_pass", frekvens: "per_pass", aktiv: false, styrka: "onskemal" },
+  { id: "kontaktpersonstid", aktivitetstyp: "kontaktpersonstid", namn: "Kontaktpersonstid", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 30, enhet: "minuter", tidstyp: "inom_pass", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
+  { id: "veckoavstamning", aktivitetstyp: "veckoavstamning", namn: "Veckoavstämning kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", tidstyp: "inom_pass", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
+  { id: "manadsuppfoljning", aktivitetstyp: "manadsuppfoljning", namn: "Månadsuppföljning kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", tidstyp: "inom_pass", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
+  { id: "gp", aktivitetstyp: "gp", namn: "Genomförandeplan", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", tidstyp: "inom_pass", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
+  { id: "sip", aktivitetstyp: "sip", namn: "SIP", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 2, enhet: "timmar", tidstyp: "inom_pass", frekvens: "per_kund_manad", aktiv: false, styrka: "onskemal" },
+  { id: "husmote", aktivitetstyp: "husmote", namn: "Husmöte", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 1, enhet: "timmar", tidstyp: "inom_pass", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
+  { id: "samverkan_kund", aktivitetstyp: "samverkan_kund", namn: "Samverkan kring kund", kategori: "kundnara", kundnara: true, kalla: "systemstandard", omfattning: 30, enhet: "minuter", tidstyp: "inom_pass", frekvens: "per_kund_vecka", aktiv: false, styrka: "onskemal" },
+  { id: "verksamhetsmote", aktivitetstyp: "verksamhetsmote", namn: "Verksamhetsmöte", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", tidstyp: "separat_tid", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
+  { id: "kvalitetsrad", aktivitetstyp: "kvalitetsrad", namn: "Regionalt kvalitetsråd", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", tidstyp: "separat_tid", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
+  { id: "handledning", aktivitetstyp: "handledning", namn: "Handledning", kategori: "verksamhet", kundnara: false, kalla: "systemstandard", omfattning: 2, enhet: "timmar", tidstyp: "separat_tid", frekvens: "per_manad", aktiv: false, styrka: "onskemal" },
 ];
+
+export function defaultTidstyp(a: { kategori?: string; aktivitetstyp?: string; tidstyp?: AktivitetsTidstyp }): AktivitetsTidstyp {
+  if (a.tidstyp === "inom_pass" || a.tidstyp === "separat_tid") return a.tidstyp;
+  const mall = STANDARD_AKTIVITETER.find((s) => s.aktivitetstyp === a.aktivitetstyp);
+  if (mall) return mall.tidstyp;
+  return a.kategori === "verksamhet" ? "separat_tid" : "inom_pass";
+}
 
 const FORBJUDNA = /^(apt|arbetsplatsträff|kundmöte|individuell aktivitet)/i;
 
@@ -103,8 +113,9 @@ export function expanderaAktiviteter(opts: {
     if (a.kalla !== "sekoia" && sekoiaOverlappar(opts.sekoiaRader || [], a.aktivitetstyp)) continue;
     const tim = tillTimmar(a.omfattning, a.enhet);
     const kunder = a.kundId ? [a.kundId] : opts.kunder;
+    const tidstyp = defaultTidstyp(a);
     if (a.frekvens === "per_pass") {
-      ut.push({ typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, timmar: tim * opts.arbetspass, kalla: a.kalla });
+      ut.push({ typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, tidstyp, timmar: tim * opts.arbetspass, kalla: a.kalla });
       continue;
     }
     if (a.frekvens === "per_kund_vecka") {
@@ -113,6 +124,7 @@ export function expanderaAktiviteter(opts: {
           typ: a.aktivitetstyp,
           namn: a.namn,
           kundnara: a.kundnara,
+          tidstyp,
           timmar: tim * veckor,
           kund,
           ...(opts.kontaktpersoner[kund] ? { medarbetare: opts.kontaktpersoner[kund] } : {}),
@@ -127,6 +139,7 @@ export function expanderaAktiviteter(opts: {
           typ: a.aktivitetstyp,
           namn: a.namn,
           kundnara: a.kundnara,
+          tidstyp,
           timmar: tim * manader,
           kund,
           ...(opts.kontaktpersoner[kund] ? { medarbetare: opts.kontaktpersoner[kund] } : {}),
@@ -140,6 +153,7 @@ export function expanderaAktiviteter(opts: {
       typ: a.aktivitetstyp,
       namn: a.namn,
       kundnara: a.kundnara,
+      tidstyp,
       timmar: tim * ganger,
       ...(a.kundId ? { kund: a.kundId } : {}),
       ...(a.medarbetareId ? { medarbetare: a.medarbetareId } : {}),
@@ -150,9 +164,13 @@ export function expanderaAktiviteter(opts: {
 }
 
 export function aktivitetstimmar(expanderade: ExpanderadAktivitet[]) {
+  const inom = expanderade.filter((a) => a.tidstyp !== "separat_tid");
+  const separat = expanderade.filter((a) => a.tidstyp === "separat_tid");
   return {
-    kundnaraH: expanderade.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
-    ejKundnaraH: expanderade.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    inomPassKundnaraH: inom.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    inomPassEjKundnaraH: inom.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    separatKundnaraH: separat.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    separatEjKundnaraH: separat.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
   };
 }
 
