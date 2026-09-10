@@ -1,0 +1,26 @@
+# .github/workflows/ci.yml – körs på varje push/PR
+name: kvalitet
+on: [push, pull_request]
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npx eslint .
+      - run: npx vitest run
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test
+      - run: npx vite build
+      - run: grep -rniq vintergatan src public && exit 1 || true   # ingen demodata får komma tillbaka
+  motor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r motor/requirements.txt
+      - run: cd motor && python -m unittest discover -s tests -v
