@@ -64,8 +64,10 @@ export function delaPeriod(from: string, to: string, interventions: Insatspost[]
     sista &&
     fore &&
     sista.dagar < MIN_DAGAR_PER_FONSTER &&
-    fore.dagar + sista.dagar <= MAX_DAGAR_PER_FONSTER &&
-    fore.insatser + sista.insatser <= MAX_INSATSER_PER_FONSTER
+    // En ensam sistadag är i praktiken alltid olösbar. Låt den följa med
+    // föregående fönster även om det då blir en dag längre än normalt.
+    fore.dagar + sista.dagar <= MAX_DAGAR_PER_FONSTER + 1 &&
+    fore.insatser + sista.insatser <= MAX_INSATSER_PER_FONSTER + 120
   ) {
     fonster.splice(fonster.length - 2, 2, {
       from: fore.from,
