@@ -25,15 +25,17 @@ Svenska i all text mot användare, kommentarer och commit-meddelanden.
 | Schematid FÖRE (exkl. sovande jour) | 832,0 h |
 | Sovande jour | 210,0 h |
 | Dimensionerande resursbehov | 793,8 h |
-| Kundnära FÖRE | 69,6 % |
+| Kundbehov ÷ schematid FÖRE | 69,6 % (inte KPI:n Kundnära tid) |
 | Intäkt | 700 000 kr (10 × 2 500 × 28) |
 Faller ett facit-test har KODEN fel. Ändra koden, aldrig talen. Talen ändras bara om
 underlagsfilerna byts, i egen commit med motivering.
 
 ## Invarianter (skriv som tester, bryt aldrig)
 1. Kundbehov är oförändrat FÖRE → EFTER.
-2. `kundnära andel = kundbehov ÷ planerad schematid`. Samma formel i alla vyer. Inget annat
-   får heta "Kundnära tid". Täckningsmått heter "Täckt behov".
+2. `Kundnära tid = schemalagd kundnära arbetstid ÷ planerad schematid`. Obemannat kundbehov
+   ingår inte i täljaren. `Täckt behov = bemannat kundbehov ÷ totalt kundbehov`. Samma
+   funktion (`kpi.ts`) i Före, Efter och Översikt. Kvoten kundbehov÷schematid får inte heta
+   "Kundnära tid".
 3. Schematid EFTER räknas av EN funktion och visas identiskt i Före & efter, Bemanning, Ekonomi.
 4. Schematid härleds ALDRIG ur Sekoia när Medvind-schema finns. Sekoia = behov, Medvind = schema.
 5. Sovande jour (kod "Jo") ingår aldrig i schematid eller kostnad per arbetstimme.

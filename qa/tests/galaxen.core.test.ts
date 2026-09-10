@@ -52,13 +52,15 @@ describe("Galaxen – Medvind", () => {
 });
 
 describe("Galaxen – nyckeltal FÖRE", () => {
-  it("kundnära andel = kundbehov ÷ schematid", () => {
+  it("kundbehov ÷ schematid är 69,6 % – det är inte KPI:n Kundnära tid", () => {
     const nt = nyckeltal(sekoia.rows);
     const rk = resurskurva(sekoia.rows, "2026-08-03", "2026-08-30");
     const p = procentsatser({ kundbehovH: nt.kundbehovH, personalbehovH: nt.personalbehovH,
       dimensionerandeH: rk.dimensionerandeDirektResursbehovH, planeradeTimmar: medvind.timmarTot });
     expect(p.kundbehovAvPlanerade.varde).toBeCloseTo(69.6, 1);
     expect(rk.dimensionerandeDirektResursbehovH).toBeCloseTo(793.8, 1);
+    expect(nt.kundbehovH).toBeCloseTo(578.8, 1);
+    expect(medvind.timmarTot).toBeCloseTo(832.0, 1);
   });
   it("intäkt exkluderar Gemensam", () => {
     const kunder = perKund(sekoia.rows).filter(k => !/^gemensam/i.test(k.kund)).length;

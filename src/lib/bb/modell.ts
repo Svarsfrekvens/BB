@@ -18,6 +18,7 @@
 
 import * as C from "./core";
 import type { DatumPass } from "./medvind";
+import { beraknaKpi } from "./kpi";
 
 export type Slot = { datum: string; klockan: string; behov: number; dimensionerat: number; bemanning: number; jour: number };
 
@@ -29,12 +30,14 @@ export type Lage = {
   jourH: number;
   kundbehovH: number;
   personalbehovH: number;
-  /** Behovstimmar som verkligen är bemannade i schemat. */
+  /** Schemalagd kundnära arbetstid (bemannade insatser + kundnära aktiviteter). */
   kundnaraH: number;
-  /** En enda definition i hela appen: kundbehov ÷ planerad schematid. */
+  /** Kundnära tid % = kundnaraH ÷ schematidH. */
   kundnaraPct: number;
-  /** Täckt behov: Σ min(dimensionerat, bemanning) ÷ planerad schematid. */
+  /** Täckt behov % = bemannat kundbehov ÷ totalt kundbehov. */
   tackningPct: number;
+  ejKundnaraH: number;
+  bemannatKundbehovH: number;
   kostnad: number;
   obemannadeIntervall: number;
   obemannatH: number;
@@ -107,6 +110,10 @@ export function analysera(opts: {
   /** Antal kunder och kronor per kund och dygn – ger beräknad intäkt. */
   antalKunder?: number;
   dygnsErsattning?: number;
+  /** Kundnära aktivitetstimmar som faktiskt ska schemaläggas (journal, avstämning, …). */
+  extraKundnaraH?: number;
+  /** Ej kundnära verksamhetstid som läggs på schemat (möte, handledning, …). */
+  extraEjKundnaraH?: number;
 }): Lage {
   const { rader, pass, fran, till, timkostnad } = opts;
   const lista = dagar(fran, till);
@@ -118,7 +125,7 @@ export function analysera(opts: {
   let obemannadeIntervall = 0;
   let obemannatH = 0;
   let overkapacitetH = 0;
-  let kundnaraH = 0;
+  let bemannatKundbehovH = 0;
   let toppBehov = 0;
   let dimH = 0;
   const timBehov = new Array(24).fill(0);
@@ -129,7 +136,7 @@ export function analysera(opts: {
     const jo = jour[i] || 0;
     slots.push({ datum: iv.datum, klockan: iv.klockan, behov: iv.rabehov, dimensionerat: iv.dimensionerat, bemanning: bem, jour: jo });
     dimH += iv.dimensionerat * 0.5;
-    kundnaraH += Math.min(iv.dimensionerat, bem) * 0.5;
+    bemannatKundbehovH += Math.min(iv.rabehov, bem) * 0.5;
     if (iv.dimensionerat > bem + 1e-9) {
       obemannadeIntervall += 1;
       obemannatH += (iv.dimensionerat - bem) * 0.5;
@@ -142,9 +149,18 @@ export function analysera(opts: {
   });
 
   const arbetspass = pass.filter((p) => !p.jour);
-  const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0);
+  const extraKundnara = Math.max(0, opts.extraKundnaraH || 0);
+  const extraEj = Math.max(0, opts.extraEjKundnaraH || 0);
+  const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0) + extraKundnara + extraEj;
   const jourH = pass.filter((p) => p.jour).reduce((s, p) => s + p.timmar, 0);
-  const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0);
+  const kpi = beraknaKpi({
+    schematidH,
+    kundnaraArbetstidH: bemannatKundbehovH + extraKundnara,
+    totaltKundbehovH: n.kundbehovH,
+    bemannatKundbehovH,
+  });
+  const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0)
+    + (extraKundnara + extraEj) * timkostnad;
   const intakt = (opts.antalKunder || 0) * (opts.dygnsErsattning || 0) * lista.length;
   const delare = lista.length * 2; // två intervall per timme och dag
   return {
@@ -155,9 +171,11 @@ export function analysera(opts: {
     jourH,
     kundbehovH: n.kundbehovH,
     personalbehovH: n.personalbehovH,
-    kundnaraH,
-    kundnaraPct: schematidH > 0 ? Math.min(100, (n.kundbehovH / schematidH) * 100) : 0,
-    tackningPct: schematidH > 0 ? Math.min(100, (kundnaraH / schematidH) * 100) : 0,
+    kundnaraH: kpi.kundnaraH,
+    kundnaraPct: kpi.kundnaraPct,
+    tackningPct: kpi.tacktBehovPct,
+    ejKundnaraH: kpi.ejKundnaraH,
+    bemannatKundbehovH: kpi.bemannatKundbehovH,
     kostnad,
     obemannadeIntervall,
     obemannatH,

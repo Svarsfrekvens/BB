@@ -10,6 +10,8 @@ import * as MV from "./medvind";
 import * as MODELL from "./modell";
 import { parseSekoiaRapport } from "./sekoia";
 export { parseSekoiaRapport } from "./sekoia";
+import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt } from "./aktiviteter";
+import { beraknaKpi } from "./kpi";
 
 declare global {
   interface Window {
@@ -99,7 +101,7 @@ function gaTill(id) {
 
 
 
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 
 const store = {
   load() {
@@ -126,7 +128,8 @@ const DEFAULT_VERKS = () => ({
   continuitySek: 50, spreadSekPerPermille: 2.5,
   reservePct: 6, absencePct: 4,
   kundGodkand: false, schemaGodkand: false,
-
+  planAktiviteter: standardKatalog(),
+  kontaktpersoner: {},
 });
 const MAX_VERKS = 4;
 
@@ -139,6 +142,8 @@ function migrate(old) {
   // Säkerhetsnät: gamla exempelnamn får aldrig smyga med från sparat tillstånd.
   for (const v of rot.verks) {
     if (v.org === "Vintergatan" || v.org === "Ny verksamhet") v.org = "";
+    if (!Array.isArray(v.planAktiviteter) || !v.planAktiviteter.length) v.planAktiviteter = standardKatalog();
+    if (!v.kontaktpersoner || typeof v.kontaktpersoner !== "object") v.kontaktpersoner = {};
     // Ett kundbehovsblad kunde i en äldre version feltolkas som personalschema.
     // Ett riktigt schema kan inte rimligen ha långt fler personer än pass.
     const schema = v.schemaOriginal;
@@ -547,6 +552,26 @@ function harleddBerakningar(rows, period, individschema, antag) {
   const kunder = C.perKund(rows);
   const intaktKunder = kunder.filter((k) => !/^gemensam/i.test(k.kund));
   const manadsintakt = intaktKunder.reduce((s) => s + grundKr * dagar, 0);
+  let kpiAndel = beraknaKpi({
+    schematidH: schematid,
+    kundnaraArbetstidH: 0,
+    totaltKundbehovH: kundbehovH,
+    bemannatKundbehovH: 0,
+  });
+  if (state.schemaOriginal && state.period) {
+    const extra = aktivitetTillägg(schemaPass());
+    const a = MODELL.analysera({
+      rader: rows,
+      pass: schemaPass(),
+      fran,
+      till,
+      timkostnad,
+      extraKundnaraH: extra.kundnaraH,
+      extraEjKundnaraH: extra.ejKundnaraH,
+    });
+    kpiAndel = { kundnaraPct: a.kundnaraPct };
+    schematid = a.schematidH;
+  }
   return {
     "Antal dagar i period": { value: dagar, def: "Periodslut minus periodstart plus en dag" },
     "Summerade kundinsatser": { value: kundbehovH, def: "Alla justerade insatstimmar; visar arbetsvolym men inte samtidighet" },
@@ -557,7 +582,7 @@ function harleddBerakningar(rows, period, individschema, antag) {
     "Tillgänglig personaltid": { value: tillgangligTid, def: "Efter korttidsfrånvaro" },
     "Vakanta timmar": { value: vakanta, def: "Budgeterad minus tillgänglig tid" },
     "Övrig planerad tid": { value: ovrigPlanerad, def: "Schematid minus summerade kundinsatser" },
-    "Planerad kundnära andel": { value: schematid > 0 ? kundbehovH / schematid : 0, def: "Kundinsatser dividerat med schematid" },
+    "Planerad kundnära andel": { value: kpiAndel.kundnaraPct / 100, def: "Schemalagd kundnära arbetstid dividerat med schematid" },
     "Mål kundnära tid": { value: 0.75, def: "Pilotmål" },
     "Månadsintäkt": { value: manadsintakt, def: "Grundersättning per kund och dygn" },
     "Ren schemakostnad": { value: schemakostnad, def: "Schematid × timkostnad" },
@@ -718,6 +743,39 @@ function schematidKalla() {
   return medvindSchematidH() > 0 ? "medvind" : "sekoia";
 }
 
+function aktivitetTillägg(pass) {
+  const { from, to } = state.period ? analysPeriod() : { from: "", to: "" };
+  if (!from || !to) return { kundnaraH: 0, ejKundnaraH: 0, rader: [] };
+  const kunder = C.perKund(C.filtreraPeriod(state.rows || [], from, to))
+    .filter((k) => !/^gemensam/i.test(k.kund))
+    .map((k) => k.kund);
+  const arbetspass = (pass || []).filter((p) => !p.jour).length;
+  const rader = expanderaAktiviteter({
+    aktiviteter: state.planAktiviteter || standardKatalog(),
+    fran: from,
+    till: to,
+    arbetspass,
+    kunder,
+    kontaktpersoner: state.kontaktpersoner || {},
+    sekoiaRader: state.rows || [],
+  });
+  return { ...aktivitetstimmar(rader), rader };
+}
+
+function analyseraMedAktiviteter(pass, rader) {
+  const { from, to } = analysPeriod();
+  const extra = aktivitetTillägg(pass);
+  return MODELL.analysera({
+    rader,
+    pass,
+    fran: from,
+    till: to,
+    extraKundnaraH: extra.kundnaraH,
+    extraEjKundnaraH: extra.ejKundnaraH,
+    ...ekonomiBas(),
+  });
+}
+
 function raderEfter() {
   const flyttade = (state.balans && state.balans.flyttade) || [];
   if (!flyttade.length) return arbetsRader();
@@ -796,19 +854,30 @@ function villkorsVarningar() {
 function foreLage() {
   if (!state.rows.length || !state.period || !state.schemaOriginal) return null;
   const { from, to } = analysPeriod();
-  const a = MODELL.analysera({
-    rader: C.filtreraPeriod(state.rows, from, to), pass: schemaPass(),
-    fran: from, till: to, ...ekonomiBas(),
-  });
+  const a = analyseraMedAktiviteter(schemaPass(), C.filtreraPeriod(state.rows, from, to));
   return { ...a, kundnaraAndel: a.kundnaraPct, schemakostnad: a.kostnad };
 }
 function foreEfterModell() {
   if (!state.rows.length || !state.period || !state.schemaOriginal) return null;
   const { from, to } = analysPeriod();
   const bas = { fran: from, till: to, ...ekonomiBas() };
-  const fore = MODELL.analysera({ ...bas, pass: schemaPass(), rader: C.filtreraPeriod(state.rows, from, to) });
+  const extraFore = aktivitetTillägg(schemaPass());
+  const fore = MODELL.analysera({
+    ...bas,
+    pass: schemaPass(),
+    rader: C.filtreraPeriod(state.rows, from, to),
+    extraKundnaraH: extraFore.kundnaraH,
+    extraEjKundnaraH: extraFore.ejKundnaraH,
+  });
   if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [], obemannade: [] };
-  const efter = MODELL.analysera({ ...bas, pass: efterPass(), rader: C.filtreraPeriod(raderEfter(), from, to) });
+  const extraEfter = aktivitetTillägg(efterPass());
+  const efter = MODELL.analysera({
+    ...bas,
+    pass: efterPass(),
+    rader: C.filtreraPeriod(raderEfter(), from, to),
+    extraKundnaraH: extraEfter.kundnaraH,
+    extraEjKundnaraH: extraEfter.ejKundnaraH,
+  });
   const schemaVarningar = (state.balans.schemaVarningar || []).map((v) => v.text);
   const varningar = [...new Set([...villkorsVarningar(), ...schemaVarningar])];
   const j = MODELL.jamfor(fore, efter, state.balans.flyttade || [], {
@@ -950,6 +1019,7 @@ function medarbetarLista() {
       franvaro: v("franvaro", MEDARB_STANDARD.franvaro),
       timkostnad: Number(v("timkostnad", state.hourlyCost || MEDARB_STANDARD.timkostnad)),
       anstallning: v("anstallning", MEDARB_STANDARD.anstallning),
+      villkor: Array.isArray(i.villkor) ? i.villkor : [],
     };
   });
 }
@@ -2757,6 +2827,38 @@ function render() {
       hanteraSchemaFil: (f) => handleSchemaFil(f),
       medarbetare: () => medarbetarLista(),
       medarbetareSet: (namn, falt, varde) => medarbetareSet(namn, falt, varde),
+      planAktiviteter: () => state.planAktiviteter || standardKatalog(),
+      setPlanAktivitet: (id, falt, varde) => {
+        if (!Array.isArray(state.planAktiviteter)) state.planAktiviteter = standardKatalog();
+        state.planAktiviteter = state.planAktiviteter.map((a) => (a.id === id ? { ...a, [falt]: varde } : a));
+        persist(); render();
+      },
+      kontaktpersoner: () => state.kontaktpersoner || {},
+      setKontaktperson: (kund, namn) => {
+        state.kontaktpersoner = { ...(state.kontaktpersoner || {}), [kund]: namn };
+        persist(); render();
+      },
+      underlagKoll: () => {
+        const { from, to } = state.period ? analysPeriod() : { from: "", to: "" };
+        const kunder = from ? C.perKund(C.filtreraPeriod(state.rows || [], from, to)).filter((k) => !/^gemensam/i.test(k.kund)).map((k) => k.kund) : [];
+        const aktiva = (state.planAktiviteter || []).filter((a) => a.aktiv);
+        const saknas = kunderUtanKontakt(kunder, state.kontaktpersoner || {}, state.planAktiviteter || []);
+        const villkorN = medarbetarLista().reduce((s, m) => s + ((medarbetarInfoKarta()[m.namn] || {}).villkor || []).filter((v) => v.aktiv).length, 0);
+        return {
+          kundGodkand: !!state.kundGodkand,
+          schemaGodkand: !!state.schemaGodkand,
+          aktiviteter: aktiva.length,
+          medarbetare: medarbetarLista().length,
+          villkor: villkorN,
+          kontakt: Object.keys(state.kontaktpersoner || {}).filter((k) => state.kontaktpersoner[k]).length,
+          saknarKontakt: saknas,
+        };
+      },
+      kunderForKontakt: () => {
+        const { from, to } = state.period ? analysPeriod() : { from: "", to: "" };
+        if (!from) return [];
+        return C.perKund(C.filtreraPeriod(state.rows || [], from, to)).filter((k) => !/^gemensam/i.test(k.kund)).map((k) => k.kund);
+      },
       medarbetareLaggTill: (namn) => medarbetareLaggTill(namn),
       godkannSchema: () => {
         if (!state.schemaOriginal) return;

@@ -54,6 +54,7 @@ export type Medarbetare = {
   franvaro: string;
   timkostnad: number;
   anstallning: string;
+  villkor?: { id: string; typ: string; styrka: string; from?: string; till?: string; aktiv: boolean; payload?: Record<string, unknown> }[];
 };
 
 export type VikarieBeslut = {
@@ -129,6 +130,20 @@ export type VyApi = {
 
   medarbetareSet: (namn: string, falt: string, varde: unknown) => void;
   medarbetareLaggTill: (namn: string) => void;
+  planAktiviteter: () => import("./aktiviteter").PlanAktivitet[];
+  setPlanAktivitet: (id: string, falt: string, varde: unknown) => void;
+  kontaktpersoner: () => Record<string, string>;
+  setKontaktperson: (kund: string, namn: string) => void;
+  underlagKoll: () => {
+    kundGodkand: boolean;
+    schemaGodkand: boolean;
+    aktiviteter: number;
+    medarbetare: number;
+    villkor: number;
+    kontakt: number;
+    saknarKontakt: string[];
+  };
+  kunderForKontakt: () => string[];
   rensaSchemaOriginal: () => void;
   skapaBalans: () => void;
   aterstallBalans: () => void;

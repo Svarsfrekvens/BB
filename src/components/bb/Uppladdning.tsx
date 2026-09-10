@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { bbVy, fmtH } from "@/lib/bb/vy";
 import type { VyProps } from "@/lib/bb/vy";
 import { Medarbetare } from "./Medarbetare";
+import { Planering } from "./Planering";
 
 /** Ett steg i underlagslistan: ikon, rubrik, status och en filknapp med släppyta. */
 function Steg({
@@ -192,6 +193,12 @@ export function Uppladdning(props: VyProps) {
                 last
               />
             )}
+
+            {filerKlara ? (
+              <div className="bb-steg-in animated fadeInUp border-b border-border">
+                <Planering api={api} />
+              </div>
+            ) : null}
 
             {filerKlara ? (
               <div className="bb-steg-in animated fadeInUp space-y-4 px-6 py-7">

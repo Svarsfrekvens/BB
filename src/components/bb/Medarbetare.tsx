@@ -138,6 +138,13 @@ export function Medarbetare({ api }: VyProps) {
                           vikarie
                         </span>
                       ) : null}
+                      <div className="mt-1 text-[12px] font-medium text-muted-foreground">
+                        {m.grad} % · {PASSPROFIL.find((p) => p.v === m.passprofil)?.t || m.passprofil}
+                        {m.jour ? " · Kan arbeta jour" : ""}
+                        {(m.villkor || []).filter((v) => v.aktiv).length
+                          ? ` · ${(m.villkor || []).filter((v) => v.aktiv).length} individuella villkor`
+                          : ""}
+                      </div>
                     </td>
                     <td className="border-t border-border px-3 py-2 text-center">
                       <Input
@@ -233,6 +240,127 @@ export function Medarbetare({ api }: VyProps) {
                               onChange={(e) => api.medarbetareSet(m.namn, "timkostnad", Number(e.target.value) || 0)}
                             />
                           </label>
+                        </div>
+                        <div className="mt-5 space-y-2">
+                          <span className="block text-sm font-semibold text-deep">Individuella villkor</span>
+                          <p className="text-[12px] text-muted-foreground">
+                            Datumfönster per person. Hårda villkor styr motorn; önskemål sparas men vägs inte in i
+                            CP-SAT i den här versionen.
+                          </p>
+                          {(m.villkor || []).map((v, ix) => (
+                            <div key={v.id || ix} className="flex flex-wrap items-end gap-2 rounded-lg bg-background p-2">
+                              <select
+                                className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+                                value={v.typ}
+                                onChange={(e) => {
+                                  const nasta = (m.villkor || []).map((x, i) =>
+                                    i === ix ? { ...x, typ: e.target.value } : x,
+                                  );
+                                  api.medarbetareSet(m.namn, "villkor", nasta);
+                                }}
+                              >
+                                <option value="ssg">SSG</option>
+                                <option value="ingen_natt">Ingen natt</option>
+                                <option value="endast_dag">Endast dag</option>
+                                <option value="ingen_jour">Ingen jour</option>
+                                <option value="kundforbud">Kundförbud</option>
+                              </select>
+                              <select
+                                className="h-9 rounded-lg border border-input bg-background px-2 text-sm"
+                                value={v.styrka}
+                                onChange={(e) => {
+                                  const nasta = (m.villkor || []).map((x, i) =>
+                                    i === ix ? { ...x, styrka: e.target.value } : x,
+                                  );
+                                  api.medarbetareSet(m.namn, "villkor", nasta);
+                                }}
+                              >
+                                <option value="maste">Måste</option>
+                                <option value="onskemal">Önskemål</option>
+                              </select>
+                              <Input
+                                type="date"
+                                className="h-9 w-36"
+                                value={v.from || ""}
+                                onChange={(e) => {
+                                  const nasta = (m.villkor || []).map((x, i) =>
+                                    i === ix ? { ...x, from: e.target.value } : x,
+                                  );
+                                  api.medarbetareSet(m.namn, "villkor", nasta);
+                                }}
+                              />
+                              <Input
+                                type="date"
+                                className="h-9 w-36"
+                                value={v.till || ""}
+                                onChange={(e) => {
+                                  const nasta = (m.villkor || []).map((x, i) =>
+                                    i === ix ? { ...x, till: e.target.value } : x,
+                                  );
+                                  api.medarbetareSet(m.namn, "villkor", nasta);
+                                }}
+                              />
+                              {v.typ === "ssg" ? (
+                                <Input
+                                  className="h-9 w-20 tabular-nums"
+                                  inputMode="numeric"
+                                  value={String(v.payload?.["ssg"] ?? "")}
+                                  onChange={(e) => {
+                                    const nasta = (m.villkor || []).map((x, i) =>
+                                      i === ix ? { ...x, payload: { ...x.payload, ssg: Number(e.target.value) || 0 } } : x,
+                                    );
+                                    api.medarbetareSet(m.namn, "villkor", nasta);
+                                  }}
+                                />
+                              ) : null}
+                              {v.typ === "kundforbud" ? (
+                                <Input
+                                  className="h-9 w-40"
+                                  placeholder="Kundnamn"
+                                  value={String(v.payload?.["kund"] ?? "")}
+                                  onChange={(e) => {
+                                    const nasta = (m.villkor || []).map((x, i) =>
+                                      i === ix ? { ...x, payload: { ...x.payload, kund: e.target.value } } : x,
+                                    );
+                                    api.medarbetareSet(m.namn, "villkor", nasta);
+                                  }}
+                                />
+                              ) : null}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() =>
+                                  api.medarbetareSet(
+                                    m.namn,
+                                    "villkor",
+                                    (m.villkor || []).filter((_, i) => i !== ix),
+                                  )
+                                }
+                              >
+                                Ta bort
+                              </Button>
+                            </div>
+                          ))}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() =>
+                              api.medarbetareSet(m.namn, "villkor", [
+                                ...(m.villkor || []),
+                                {
+                                  id: `v${Date.now()}`,
+                                  typ: "ssg",
+                                  styrka: "maste",
+                                  aktiv: true,
+                                  from: "",
+                                  till: "",
+                                  payload: { ssg: m.grad },
+                                },
+                              ])
+                            }
+                          >
+                            Lägg till villkor
+                          </Button>
                         </div>
                       </td>
                     </tr>

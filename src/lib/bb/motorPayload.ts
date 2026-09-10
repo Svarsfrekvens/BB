@@ -5,6 +5,8 @@
 
 import type { Insats } from "./typer";
 import type { Medarbetare } from "./vy";
+import { expanderaAktiviteter, kunderUtanKontakt, type PlanAktivitet } from "./aktiviteter";
+import { ssgWindows, harHårt, forbudnaKunder, type MedarbetarVillkor } from "./villkor";
 
 export type MotorPayload = Record<string, unknown>;
 
@@ -234,6 +236,8 @@ export function byggMotorPayload(opts: {
   mallar?: Passmall[];
   revision?: number;
   objectiveWeights?: { continuitySek: number; spreadSekPerPermille: number; uncoveredSekPerMinute?: number };
+  planAktiviteter?: PlanAktivitet[];
+  kontaktpersoner?: Record<string, string>;
 }): PayloadResultat {
   const varningar: string[] = [];
   const dagar = Math.max(1, Math.min(42, Math.round(opts.dagar || 7)));
@@ -428,19 +432,64 @@ export function byggMotorPayload(opts: {
     // som har delegering; utan delegeringskrav kan alla ta insatsen.
     for (const k of kravSet) if (m.delegering || !/delegerin|sjuksk/.test(k)) skills.add(k);
     const farTillsattas = (m as { vikarieFarTillsattas?: boolean }).vikarieFarTillsattas;
+    const villkor = ((m as Medarbetare).villkor || []) as MedarbetarVillkor[];
+    const night = Boolean(m.nattbehorig || m.jour) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to);
+    const jourOk = Boolean(m.jour) && !harHårt(villkor, "ingen_jour", from, to);
     return {
       id,
       code,
       name: m.namn,
       ssg: Math.max(0, Math.min(100, Number(m.grad) || 100)),
-      night: Boolean(m.nattbehorig || m.jour),
+      ssgWindows: ssgWindows(Number(m.grad) || 100, villkor, from, to),
+      night,
       status: arVikarie && farTillsattas === false ? "inactive" : "active",
-      profiles: profilerFor(m, mallar),
+      profiles: profilerFor({ ...m, jour: jourOk, nattbehorig: night }, mallar),
       hourlyCost: Number(m.timkostnad) > 0 ? Number(m.timkostnad) : null,
       skills: [...skills],
     };
   });
   if (!employees.length) varningar.push("Ingen personal är inläst – motorn kan inte lägga pass.");
+
+  const namnTillEid: Record<string, string> = {};
+  for (const [id, m] of Object.entries(medarbetarKarta)) namnTillEid[m.namn] = id;
+  const expanderade = expanderaAktiviteter({
+    aktiviteter: opts.planAktiviteter || [],
+    fran: from,
+    till: to,
+    arbetspass: (opts.schemaPass || []).filter((p) => !p.jour).length,
+    kunder: [...kundNr.keys()].filter((n) => !/^gemensam/i.test(n)),
+    kontaktpersoner: opts.kontaktpersoner || {},
+    sekoiaRader: opts.rader,
+  });
+  for (const a of expanderade) {
+    if (a.typ === "lasa_journal" || a.typ === "skriva_journal") continue;
+    let kvar = Math.round(a.timmar * 60);
+    if (kvar < 1) continue;
+    const cid = kundId(a.kund || "Gemensamt");
+    const krav = a.medarbetare ? namnTillEid[a.medarbetare] : undefined;
+    let n = 0;
+    while (kvar > 0) {
+      const minuter = Math.min(480, kvar);
+      kvar -= minuter;
+      n += 1;
+      const id = `p${interventions.length + 1}`;
+      interventions.push({
+        id,
+        customerId: cid,
+        name: a.namn,
+        type: "flexible",
+        minutes: minuter,
+        doubleStaff: false,
+        weekdays: [1, 2, 3, 4, 5, 6, 7],
+        skills: [],
+        date: from,
+        start: "09:00",
+        latestEnd: "17:00",
+        ...(krav ? { requiredEmployeeId: krav } : {}),
+      });
+      insatsKarta[id] = { radId: `${a.typ}-${a.kund || "gemensam"}-${n}`, kund: a.kund || "Gemensamt", insats: a.namn, start: "09:00" };
+    }
+  }
 
   // Motorn måste kunna bemanna varje insats. Ordinarie sysselsättningsgrader
   // räcker sällan till full täckning, så beräkningen får tillgång till några
@@ -463,6 +512,7 @@ export function byggMotorPayload(opts: {
         code: `V${++vikarieNr}`,
         name: `Extra vikarie ${k + 1}`,
         ssg: 100,
+        ssgWindows: [],
         status: "active",
         hourlyCost: opts.timkostnad > 0 ? opts.timkostnad : null,
       });
@@ -545,6 +595,37 @@ export function byggMotorPayload(opts: {
       skills: [],
       breaks: langd >= 360 ? [{ offset: 240, minutes: 30 }] : [],
     });
+  }
+
+  const kundSkill = (cid: string) => `kund:${cid}`;
+  for (const i of interventions) {
+    const cid = String(i["customerId"] || "");
+    const sk = Array.isArray(i["skills"]) ? (i["skills"] as string[]).slice() : [];
+    if (cid && !sk.includes(kundSkill(cid))) sk.push(kundSkill(cid));
+    i["skills"] = sk;
+  }
+  const forbudPerNamn = new Map<string, string[]>();
+  for (const m of opts.medarbetare.slice(0, 80)) {
+    forbudPerNamn.set(m.namn, forbudnaKunder(((m as Medarbetare).villkor || []) as MedarbetarVillkor[], from, to));
+  }
+  for (const e of employees) {
+    const forbud = forbudPerNamn.get(String(e.name)) || [];
+    for (const [kundNamn, nr] of kundNr) {
+      if (forbud.includes(kundNamn)) continue;
+      const sk = kundSkill(`k${nr}`);
+      if (!e.skills.includes(sk)) e.skills.push(sk);
+    }
+  }
+
+  const saknarKontakt = kunderUtanKontakt(
+    [...kundNr.keys()].filter((n) => !/^gemensam/i.test(n)),
+    opts.kontaktpersoner || {},
+    opts.planAktiviteter || [],
+  );
+  if (saknarKontakt.length) {
+    varningar.push(
+      `${saknarKontakt.length} kund${saknarKontakt.length > 1 ? "er" : ""} saknar kontaktperson medan en kontaktpersonsaktivitet är aktiv.`,
+    );
   }
 
   const payload: MotorPayload = {

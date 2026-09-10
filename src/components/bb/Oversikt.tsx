@@ -402,6 +402,36 @@ function Kpier({ d, state, api }: DataProps) {
   );
 }
 
+function ProcessStatus({ api }: { api: VyApi }) {
+  const k = api.underlagKoll();
+  const steg = [
+    { t: "Kundbehov", ok: k.kundGodkand, tab: "uppladdning" as const },
+    { t: "Schema", ok: k.schemaGodkand, tab: "uppladdning" as const },
+    { t: "Planeringsaktiviteter", ok: k.kundGodkand && k.schemaGodkand, tab: "uppladdning" as const, sub: `${k.aktiviteter} aktiva` },
+    { t: "Individuella villkor", ok: k.medarbetare > 0, tab: "medarbetare" as const, sub: `${k.villkor} aktiva` },
+    { t: "Före och Efter", ok: api.harBalans(), tab: "foreefter" as const },
+  ];
+  return (
+    <Card className="p-6">
+      <Eyebrow>Översikt</Eyebrow>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {steg.map((s) => (
+          <button
+            key={s.t}
+            type="button"
+            onClick={() => api.setTab(s.tab)}
+            className="rounded-full bg-muted px-3 py-1.5 text-[13px] font-semibold text-deep"
+          >
+            {s.ok ? "✓ " : "○ "}
+            {s.t}
+            {s.sub ? ` · ${s.sub}` : ""}
+          </button>
+        ))}
+      </div>
+    </Card>
+  );
+}
+
 const FLODE = [
   { t: "Kundbehov", u: "vad kunderna behöver", tab: "kundbehov" },
   { t: "Tid", u: "när insatserna sker", tab: "sprid" },
@@ -641,6 +671,7 @@ export function Oversikt({ d, state, api }: Props) {
   return (
     <div className="flex flex-col gap-7">
       <Statusband {...p} />
+      <ProcessStatus api={api} />
       <Periodval {...p} />
       <Hjulet {...p} />
       <Kpier {...p} />

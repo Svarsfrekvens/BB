@@ -71,6 +71,8 @@ export function Motor({ state, api }: VyProps) {
       heltidVecka: heltid,
       regler: api.motorRegler(),
       schemaPass: api.schemaPassOriginal(),
+      planAktiviteter: api.planAktiviteter(),
+      kontaktpersoner: api.kontaktpersoner(),
       objectiveWeights: {
         continuitySek: Number(state?.["continuitySek"] ?? 50),
         spreadSekPerPermille: Number(state?.["spreadSekPerPermille"] ?? 2.5),
