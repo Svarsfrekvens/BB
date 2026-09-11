@@ -60,3 +60,38 @@ class SolverTests(unittest.TestCase):
         self.assertGreaterEqual(perf['totalSolverMs'], 0)
         self.assertNotEqual(perf.get('timeoutReason'), 'budget_exhausted_before_phase')
         self.assertGreaterEqual(perf['supportCombinationsBeforePruning'], perf['supportCombinationsAfterPruning'])
+
+    def test_lexico_locks_and_hints(self):
+        d,_=fixture()
+        r=solve(d,5)
+        perf=(r.get('diagnostics') or {}).get('performance') or {}
+        self.assertTrue(perf['coverageIncumbentAvailable'])
+        self.assertTrue(perf['coverageTargetLocked'])
+        self.assertTrue(perf['costIncumbentAvailable'])
+        phases=perf['hintVariablesAppliedPerPhase']
+        self.assertGreaterEqual(len(phases), 2)
+        self.assertGreater(sum(p.get('hintVariablesApplied') or 0 for p in phases), 0)
+        lex=(r['schedule'].get('lexicographic') or {})
+        self.assertEqual(lex.get('uncoveredMinutes'), 0)
+
+    def test_ui_summary_object(self):
+        d,_=fixture()
+        r=solve(d,5)
+        s=r['summary']
+        for key in ('status','coveragePercent','customerNearPercent','cost','hardViolations','warnings',
+                    'changedShiftCount','lockedShiftCount','explanationSummary','performanceSummary'):
+            self.assertIn(key, s)
+        self.assertIn(s['status'], ['OPTIMAL','FEASIBLE'])
+        self.assertEqual(s['hardViolations'], [])
+        self.assertTrue(s['explanationSummary'])
+        self.assertIn('täckt', s['performanceSummary'].lower())
+
+    def test_model_build_diagnostics(self):
+        d,_=fixture()
+        r=solve(d,5)
+        perf=(r.get('diagnostics') or {}).get('performance') or {}
+        self.assertGreaterEqual(perf['modelBuildTotalMs'], 0)
+        self.assertGreaterEqual(perf['constraintBuildMs'], 0)
+        self.assertGreaterEqual(perf['assignmentBuildMs'], 0)
+        self.assertGreaterEqual(perf['indexBuildMs'], 0)
+        self.assertGreaterEqual(perf['shiftVariablesBeforePruning'], perf['shiftVariablesAfterPruning'])

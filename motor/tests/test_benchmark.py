@@ -14,7 +14,11 @@ PERF_KEYS = {
     'assignmentVariables', 'totalVariables', 'totalConstraints',
     'generationMs', 'precheckMs', 'supportBuildMs', 'solverMs', 'validationMs', 'totalMs',
     'requestedSolveBudgetMs', 'actualCoverageSolveMs', 'actualCostSolveMs', 'actualQualitySolveMs',
-    'remainingBudgetBeforeEachPhaseMs', 'totalSolverMs',
+    'generatedShiftTemplatesBeforePruning', 'generatedShiftTemplatesAfterPruning', 'generatedShiftPrunedPercent',
+    'shiftVariablesBeforePruning', 'shiftVariablesAfterPruning',
+    'indexBuildMs', 'assignmentBuildMs', 'constraintBuildMs', 'modelBuildTotalMs',
+    'coverageTargetLocked', 'costTargetLocked', 'coverageIncumbentAvailable', 'costIncumbentAvailable',
+    'hintVariablesAppliedPerPhase',
 }
 
 
@@ -63,6 +67,12 @@ class BenchmarkScaleA(unittest.TestCase):
         self.assertEqual(perf['coveredNeedPct'], 100)
         self.assertLess(perf['customerNearPct'], 99)
         self.assertLess(perf['totalMs'], 60000)
+        self.assertGreaterEqual(perf['generatedShiftTemplatesBeforePruning'], perf['generatedShiftTemplatesAfterPruning'])
+        self.assertGreaterEqual(perf['shiftVariablesBeforePruning'], perf['shiftVariablesAfterPruning'])
+        self.assertTrue(perf['coverageTargetLocked'])
+        self.assertIn('summary', row['result'])
+        self.assertIn(row['result']['summary']['status'], ['OPTIMAL', 'FEASIBLE'])
+        self.assertEqual(row['result']['summary']['coveragePercent'], 100)
 
     def test_normal(self):
         row = run_benchmark('normal')

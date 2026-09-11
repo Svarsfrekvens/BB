@@ -15,14 +15,17 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      rest_days_target, f01_known_span, f01_window_known,
                      candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
                      shift_profiles, required_rest_after_minutes)
-from .assign import index_candidates_by_employee, support_options_for_occurrence
+from .assign import (
+    index_candidates_by_employee, index_candidates_by_employee_day,
+    prune_unusable_generated_templates, support_options_for_occurrence,
+)
 from .generate import generated_template_stats, planning_mode, shift_templates_for_solve
 from .precheck import (
     enumerate_person_shift_slots, explain_with_precheck, feasibility_precheck,
     has_critical_precheck, planning_diagnostics,
 )
 from .replan import collect_locked_shifts
-from .perf import peak_memory_mb, schedule_kpis
+from .perf import peak_memory_mb, planning_summary, schedule_kpis
 from .validate import validate
 
 
@@ -94,10 +97,18 @@ def solve(data, seconds=30):
     employees=[e for e in data['employees'] if e['status']=='active']
     t0=perf_counter()
     t_gen=perf_counter()
-    template_list=shift_templates_for_solve(data)
+    raw_templates=shift_templates_for_solve(data)
+    t_idx=perf_counter()
+    enum_raw=enumerate_person_shift_slots(data, raw_templates)
+    shift_vars_before=sum(1 for s in enum_raw['slots'] if s['eligible'])
+    template_list, tpl_prune=prune_unusable_generated_templates(data, raw_templates)
+    index_ms=int(round((perf_counter()-t_idx)*1000))
     generate_ms=int(round((perf_counter()-t_gen)*1000))
     templates={t['id']:t for t in template_list}
     occ=occurrences(data)
+    occ_by_date={}
+    for o in occ:
+        occ_by_date.setdefault(o['date'], []).append(o)
     reserve=int(rules.get('withinPassMinutesPerShift') or 0)
     mode=planning_mode(data)
     tpl_stats=generated_template_stats(template_list)
@@ -108,6 +119,7 @@ def solve(data, seconds=30):
     pre_ms=int(round((perf_counter()-t_pre)*1000))
     enum=enumerate_person_shift_slots(data, template_list)
     generated_n=tpl_stats.get('total') or sum(1 for t in templates.values() if t.get('generated'))
+    shift_vars_after=sum(1 for s in enum['slots'] if s['eligible'])
 
     def diagnostics(status, solve_ms=0, nvars=0, ncons=0, validate_ms=0, kpis=None, phases=None, extra_perf=None):
         extra=dict(
@@ -144,17 +156,17 @@ def solve(data, seconds=30):
         explanation=explain_with_precheck(status, diagnoses, message, locked=bool(locked_shifts))
         diag=diagnostics(status)
         schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=status,explanation=explanation,feasibilityNotes=[],preCheck=diagnoses,seconds=pre_ms/1000,objective=None,bound=None)
-        return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=0,occurrences=len(occ),startStep=rules['flexibilityStep'],**diag),diagnostics=dict(performance=diag))
+        out=dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=0,occurrences=len(occ),startStep=rules['flexibilityStep'],**diag),diagnostics=dict(performance=diag))
+        out['summary']=planning_summary(data, schedule, None, diag)
+        return out
 
     if has_critical_precheck(diagnoses):
         return empty_infeasible('Ingen lösning uppfyller alla hårda villkor.')
 
     weekend_notes=[]
     from datetime import date as _date
-    for day in period_days:
+    for day, need in occ_by_date.items():
         if _date.fromisoformat(day).isoweekday() not in (6,7): continue
-        need=[o for o in occ if o['date']==day]
-        if not need: continue
         eligible=[e for e in employees if weekend_allowed(e,day)]
         if not eligible:
             weekend_notes.append(f'{day}: helgbehov finns men ingen medarbetare får arbeta enligt helgmönstret.')
@@ -164,6 +176,7 @@ def solve(data, seconds=30):
                 weekend_notes.append(f'{day}: {o["task"]["name"]} saknar helgbehörig kompetens.')
 
     jour_floor=int(rules.get('jourFloor') or 0)
+    t_model=perf_counter()
     model=cp_model.CpModel()
     candidates=[]
     boundaries=[]
@@ -176,6 +189,7 @@ def solve(data, seconds=30):
         locked_fixed.append(dict(shift=s,a=a,b=b,work=paid(s),x=1))
     duty_anchor=boundaries+locked_fixed
     by_emp={e['id']:e for e in employees}
+    cand_by_emp={e['id']:[] for e in employees}
     for slot in enum['slots']:
         if not slot['eligible']:
             continue
@@ -188,18 +202,21 @@ def solve(data, seconds=30):
         a,b=slot['a'],slot['b']
         work=paid(s)
         x=model.new_bool_var('shift:'+s['id'])
-        candidates.append(dict(shift=s,a=a,b=b,work=work,x=x,generated=bool(t.get('generated'))))
+        row=dict(shift=s,a=a,b=b,work=work,x=x,generated=bool(t.get('generated')))
+        candidates.append(row)
+        cand_by_emp[e['id']].append(row)
     if len(candidates)>10000:
         raise ValueError('För många passalternativ. Begränsa personal, passmallar eller period.')
 
     def min_period(c):
         return sum(intersect(a,b,lo,hi) for a,b in c['work'])
 
+    t_cons=perf_counter()
     utilisations=[]
     workday_flags={}
     night_series_flags={}
     for e in employees:
-        rows=sorted((c for c in candidates if c['shift']['employeeId']==e['id']),key=lambda c:c['a'])
+        rows=sorted(cand_by_emp.get(e['id']) or [], key=lambda c:c['a'])
         fixed=[b for b in duty_anchor if b['shift']['employeeId']==e['id']]
         for i,a in enumerate(rows):
             for b in rows[i+1:]:
@@ -374,6 +391,8 @@ def solve(data, seconds=30):
         for grupp in per_manad.values():
             model.add(sum((c['b']-c['a'])*c['x'] for c in grupp)<=50*60)
 
+    constraint_ms=int(round((perf_counter()-t_cons)*1000))
+
     # Awake-night floor counts on-duty, eligible people. Rest constraints prevent
     # a person from being counted through two simultaneous candidate shifts.
     for a,b in night_intervals(wp['start'],wp['end']):
@@ -404,16 +423,21 @@ def solve(data, seconds=30):
     supports_count=0
     support_before=support_after=0
     assign_vars=0
+    hint_bools=[]
     t_support=perf_counter()
-    by_emp=index_candidates_by_employee(candidates+duty_anchor)
+    t_idx2=perf_counter()
+    by_emp_cand=index_candidates_by_employee(candidates+duty_anchor)
+    by_emp_day=index_candidates_by_employee_day(candidates+duty_anchor)
+    index_ms += int(round((perf_counter()-t_idx2)*1000))
     gaps=[]
+    t_assign=perf_counter()
     for o in occ:
         starts=list(range(o['earliest']-lo,o['latest']-lo+1,rules['flexibilityStep']))
         start=model.new_int_var_from_domain(cp_model.Domain.from_values(starts),'start:'+o['id'])
         duration=o['task']['minutes']
         end=model.new_int_var(starts[0]+duration,starts[-1]+duration,'end:'+o['id'])
         model.add(end==start+duration)
-        packed=support_options_for_occurrence(o, employees, by_emp, data, reserve)
+        packed=support_options_for_occurrence(o, employees, by_emp_cand, data, reserve, by_emp_day)
         support_before+=packed['before']
         support_after+=packed['after']
         assigns=[]
@@ -427,9 +451,11 @@ def solve(data, seconds=30):
                 model.add(start>=a-lo).only_enforce_if(z)
                 model.add(end<=b-lo).only_enforce_if(z)
                 options.append(z)
+                hint_bools.append(z)
             if not options: continue
             selected=model.new_bool_var('assign:'+o['id']+':'+e['id'])
             assign_vars+=1
+            hint_bools.append(selected)
             model.add(sum(options)==selected)
             interval=model.new_optional_interval_var(start,duration,end,selected,'task:'+o['id']+':'+e['id'])
             per_employee[e['id']].append(interval)
@@ -439,6 +465,7 @@ def solve(data, seconds=30):
         model.add(sum(x for _,x in assigns)+gap==o['count'])
         gaps.append((o,gap))
         task_vars.append((o,start,end,assigns))
+    assignment_ms=int(round((perf_counter()-t_assign)*1000))
     support_build_ms=int(round((perf_counter()-t_support)*1000))
     for intervals in per_employee.values():
         model.add_no_overlap(intervals)
@@ -578,10 +605,6 @@ def solve(data, seconds=30):
     model.add(cost_var==cost)
     qual_var=model.new_int_var(0,10**12,'quality_ore')
     model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread+prefer_ore*prefer_miss+quality_extra)
-    hard_floor=bool(int(rules.get('nightFloor') or 0) or int(rules.get('jourFloor') or 0))
-    if not hard_floor:
-        for c in candidates:
-            model.add_hint(c['x'],0)
     for o,start,end,_ in task_vars:
         first=o['earliest']-lo
         model.add_hint(start,first)
@@ -591,14 +614,19 @@ def solve(data, seconds=30):
     proto=model.Proto()
     nvars=len(proto.variables)
     ncons=len(proto.constraints)
+    model_build_ms=int(round((perf_counter()-t_model)*1000))
     requested_ms=int(round(seconds*1000))
-    share=dict(coverage=0.60, cost=0.25, quality=0.15)
     remaining_before=[]
     timeout_reason=None
     solver_deadline=perf_counter()+seconds
     phases=[]
     last=None
     last_solver=None
+    coverage_locked=False
+    cost_locked=False
+    coverage_incumbent=False
+    cost_incumbent=False
+    hints_per_phase=[]
 
     def snapshot(sv,code,phase):
         cost_val=int(sv.value(cost_var))
@@ -619,7 +647,20 @@ def solve(data, seconds=30):
             spreadOre=int(spread_val),
             qualityOre=int(sv.value(qual_var)),
             proven=code=='OPTIMAL',
+            solver=sv,
         )
+
+    def apply_incumbent_hints(sv):
+        """Bara skift-booler. Support/start-hints har gett MODEL_INVALID i nästa fas."""
+        n=0
+        for c in candidates:
+            if isinstance(c['x'], int):
+                continue
+            val=int(sv.value(c['x']))
+            if val in (0, 1):
+                model.add_hint(c['x'], val)
+                n+=1
+        return n
 
     def run_phase(name,objective,lock=None):
         nonlocal last, last_solver, timeout_reason
@@ -628,8 +669,17 @@ def solve(data, seconds=30):
         if left<0.5:
             timeout_reason='budget_exhausted_before_phase'
             phases.append(dict(name=name,status='SKIPPED',seconds=0,actualMs=0,limitMs=0,remainingBeforeMs=max(0,int(round(left*1000)))))
+            hints_per_phase.append(dict(phase=name, hintVariablesApplied=0))
             return None
-        planned=max(1.0, seconds*share[name])
+        if name=='coverage':
+            planned=max(1.0, seconds*0.40)
+        elif name=='cost':
+            if last and last.get('uncoveredMinutes')==0:
+                planned=min(left, 12.0)
+            else:
+                planned=min(left, max(8.0, seconds*0.35))
+        else:
+            planned=min(left, 8.0 if (last and last.get('uncoveredMinutes')==0) else 12.0)
         limit=max(1.0, min(planned, left))
         if lock is not None:
             lock()
@@ -646,7 +696,12 @@ def solve(data, seconds=30):
         last_solver=sv
         if st in (cp_model.OPTIMAL,cp_model.FEASIBLE):
             last=snapshot(sv,code,name)
+            hinted=0
+            if name=='coverage':
+                hinted=apply_incumbent_hints(sv)
+            hints_per_phase.append(dict(phase=name, hintVariablesApplied=hinted))
             return last
+        hints_per_phase.append(dict(phase=name, hintVariablesApplied=0))
         if last is None:
             if actual_ms+50<limit*1000*0.4:
                 timeout_reason=timeout_reason or 'early_unknown'
@@ -657,11 +712,23 @@ def solve(data, seconds=30):
     t_solve=perf_counter()
     run_phase('coverage', unc_var)
     if last:
+        coverage_incumbent=True
         best_unc=last['uncoveredMinutes']
-        run_phase('cost', cost_var, lambda: model.add(unc_var<=best_unc))
+        def _lock_cov():
+            nonlocal coverage_locked
+            model.add(unc_var<=best_unc)
+            model.add(unc_var>=best_unc)
+            coverage_locked=True
+        run_phase('cost', cost_var, _lock_cov)
     if last:
+        cost_incumbent=True
         best_cost=last['costOre']
-        run_phase('quality', qual_var, lambda: model.add(cost_var<=best_cost))
+        def _lock_cost():
+            nonlocal cost_locked
+            model.add(cost_var<=best_cost)
+            model.add(cost_var>=best_cost)
+            cost_locked=True
+        run_phase('quality', qual_var, _lock_cost)
     solve_ms=int(round((perf_counter()-t_solve)*1000))
     fallback_status=phases[-1]['status'] if phases else 'UNKNOWN'
     code=(last or {}).get('code') or fallback_status
@@ -701,6 +768,20 @@ def solve(data, seconds=30):
         generationMs=generate_ms,
         precheckMs=pre_ms,
         supportBuildMs=support_build_ms,
+        assignmentBuildMs=assignment_ms,
+        indexBuildMs=index_ms,
+        constraintBuildMs=constraint_ms,
+        modelBuildTotalMs=model_build_ms,
+        generatedShiftTemplatesBeforePruning=tpl_prune.get('generatedShiftTemplatesBeforePruning', generated_n),
+        generatedShiftTemplatesAfterPruning=tpl_prune.get('generatedShiftTemplatesAfterPruning', generated_n),
+        generatedShiftPrunedPercent=tpl_prune.get('generatedShiftPrunedPercent', 0),
+        shiftVariablesBeforePruning=shift_vars_before,
+        shiftVariablesAfterPruning=shift_vars_after,
+        coverageTargetLocked=coverage_locked,
+        costTargetLocked=cost_locked,
+        coverageIncumbentAvailable=coverage_incumbent,
+        costIncumbentAvailable=cost_incumbent,
+        hintVariablesAppliedPerPhase=hints_per_phase,
         solverMs=solve_ms,
         validationMs=0,
         totalMs=0,
@@ -737,4 +818,5 @@ def solve(data, seconds=30):
     extra_perf['totalMs']=int(round((perf_counter()-t0)*1000))
     diag=diagnostics(schedule['solverStatus'], solve_ms, nvars, ncons, validate_ms, kpis, phases, extra_perf)
     scope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep'],**diag)
-    return dict(schedule=schedule,validation=result,modelScope=scope,diagnostics=dict(performance=diag))
+    summary=planning_summary(data, schedule, result, diag)
+    return dict(schedule=schedule,validation=result,modelScope=scope,diagnostics=dict(performance=diag),summary=summary)

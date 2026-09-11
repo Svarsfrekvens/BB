@@ -63,3 +63,45 @@ class SupportPruning(unittest.TestCase):
         kept = prune_duplicate_cover_windows([(a, 1, 2), (b, 1, 2), (a, 1, 2)])
         ids = [c['shift']['id'] for c, _, _ in kept]
         self.assertEqual(ids, ['short', 'long'])
+
+
+class GeneratedShiftPruning(unittest.TestCase):
+    def test_short_generated_without_capacity_is_dropped(self):
+        from bb.assign import prune_unusable_generated_templates
+        from bb.generate import generate_shift_templates, merge_templates
+        d, _ = fixture()
+        d['planningMode'] = 'generateFromNeeds'
+        d['employees'][0]['profiles'] = ['D']
+        d['interventions'][0].update(start='08:00', latestEnd='11:00', minutes=180)
+        d['rules']['withinPassMinutesPerShift'] = 30
+        d['templates'] = [dict(id='D', name='Dag', start='07:00', end='16:00', type='day', skills=['Omsorg'], breaks=[],
+                               dates=['2026-09-07'])]
+        raw = merge_templates(d['templates'], generate_shift_templates(d))
+        pruned, stats = prune_unusable_generated_templates(d, raw)
+        gen_after = [t for t in pruned if t.get('generated')]
+        self.assertGreater(stats['generatedShiftTemplatesBeforePruning'], stats['generatedShiftTemplatesAfterPruning'])
+        self.assertTrue(any(t['id'] == 'D' for t in pruned))
+        self.assertFalse(any(t.get('start') == '08:00' and t.get('end') == '11:00' for t in gen_after))
+
+    def test_short_that_can_cover_is_kept(self):
+        from bb.assign import prune_unusable_generated_templates
+        from bb.generate import generate_shift_templates
+        d, _ = fixture()
+        d['planningMode'] = 'generateFromNeeds'
+        d['employees'][0]['profiles'] = []
+        d['templates'] = []
+        d['rules']['withinPassMinutesPerShift'] = 0
+        raw = generate_shift_templates(d)
+        pruned, _ = prune_unusable_generated_templates(d, raw)
+        self.assertTrue(any(t['start'] == '09:00' and t['end'] == '10:00' for t in pruned))
+
+    def test_night_generated_is_not_pruned(self):
+        from bb.assign import prune_unusable_generated_templates
+        from bb.generate import generate_shift_templates
+        from test_generate_from_needs import gen_base, task
+        d, _ = gen_base()
+        d['interventions'] = [task('n1', '22:00', 480)]
+        raw = generate_shift_templates(d)
+        self.assertTrue(any(t['type'] == 'night' for t in raw))
+        pruned, _ = prune_unusable_generated_templates(d, raw)
+        self.assertTrue(any(t['type'] == 'night' for t in pruned))

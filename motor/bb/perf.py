@@ -67,3 +67,60 @@ def schedule_kpis(data, schedule):
         customerNearPct=round(100.0 * near_m / paid_m, 2) if paid_m else 0.0,
         scheduleCostOre=int(cost or 0),
     )
+
+
+def _shift_fingerprint(s):
+    return (s.get('id'), s.get('employeeId'), s.get('date'), s.get('start'), s.get('end'), s.get('type'))
+
+
+def planning_summary(data, schedule, validation=None, performance=None):
+    """Stabil sammanfattning för UI. Ingen ny domänlogik."""
+    performance = performance or {}
+    validation = validation or {}
+    kpis = schedule_kpis(data, schedule) if schedule else {}
+    coverage = kpis.get('coveredNeedPct')
+    if coverage is None:
+        coverage = performance.get('coveredNeedPct')
+    near = kpis.get('customerNearPct')
+    if near is None:
+        near = performance.get('customerNearPct')
+    cost = kpis.get('scheduleCostOre')
+    if cost is None:
+        cost = performance.get('scheduleCostOre') or 0
+    errors = list(validation.get('errors') or [])
+    hard = [e for e in errors if e.get('rule') != 'BOUNDARY_INCOMPLETE']
+    if (schedule or {}).get('solverStatus') == 'INFEASIBLE':
+        hard = hard or [{'rule': 'INFEASIBLE', 'message': (schedule.get('explanation') or '')[:180]}]
+    warns = list(validation.get('warnings') or [])
+    for note in schedule.get('feasibilityNotes') or []:
+        warns.append({'rule': 'NOTE', 'message': note})
+    for d in schedule.get('preCheck') or []:
+        if d.get('severity') != 'critical':
+            warns.append({'rule': d.get('code') or 'PRECHECK', 'message': d.get('message') or ''})
+    old = ((data.get('existingSchedule') or data.get('current') or {}).get('shifts') if isinstance(data.get('existingSchedule') or data.get('current'), dict) else None) or []
+    old_by = {s.get('id'): _shift_fingerprint(s) for s in old if s.get('id')}
+    changed = 0
+    for s in schedule.get('shifts') or []:
+        fp = _shift_fingerprint(s)
+        prev = old_by.get(s.get('id'))
+        if prev != fp:
+            changed += 1
+    expl = (schedule.get('explanation') or '').strip()
+    summary_line = expl.split('.')[0].strip()
+    if summary_line and not summary_line.endswith('.'):
+        summary_line += '.'
+    total_ms = performance.get('totalMs') or performance.get('totalTimeMs') or 0
+    status = (schedule or {}).get('solverStatus') or performance.get('solverStatus') or 'NOT_RUN'
+    perf_line = f"{status}, {coverage if coverage is not None else '–'} % täckt behov, {round((total_ms or 0)/1000, 1)} s"
+    return dict(
+        status=status,
+        coveragePercent=coverage,
+        customerNearPercent=near,
+        cost=int(cost or 0),
+        hardViolations=[{'rule': e.get('rule'), 'message': e.get('message')} for e in hard],
+        warnings=[{'rule': w.get('rule'), 'message': w.get('message')} for w in warns],
+        changedShiftCount=changed,
+        lockedShiftCount=int(performance.get('lockedShifts') or 0),
+        explanationSummary=summary_line,
+        performanceSummary=perf_line,
+    )
