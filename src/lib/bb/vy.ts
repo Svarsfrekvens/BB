@@ -250,7 +250,7 @@ export type VyState = {
   nonce: number;
 };
 
-let vy: VyState = { tab: "oversikt", verks: [], aktivVerks: "", maxVerks: 4, pending: null, pendingMeta: null, laser: false, d: null, state: null, api: null, nonce: 0 };
+let vy: VyState = { tab: "hem", verks: [], aktivVerks: "", maxVerks: 4, pending: null, pendingMeta: null, laser: false, d: null, state: null, api: null, nonce: 0 };
 const lyssnare = new Set<() => void>();
 
 export function publiceraVy(delar: Partial<VyState>) {

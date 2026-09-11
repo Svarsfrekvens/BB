@@ -31,7 +31,7 @@ export function Uppfoljning({ api }: VyProps) {
     { l: "Personalkostnad", Ic: Coins, plan: api.kr(plan.kostnad), faktiskt: "Utfall kräver tidrapport" },
     { l: "Underkapacitet", Ic: Users, plan: api.h1(plan.obemannatH) },
     { l: "Överkapacitet", Ic: Users, plan: api.h1(plan.overkapacitetH) },
-    { l: "Ekonomiskt resultat", Ic: Coins, plan: api.kr(plan.resultat) },
+    { l: "Intäkt − schemakostnad", Ic: Coins, plan: api.kr(plan.resultat) },
   ] as { l: string; Ic: typeof Target; plan: string; faktiskt?: string }[];
 
   const u = api.utfall();

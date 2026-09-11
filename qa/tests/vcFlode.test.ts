@@ -24,6 +24,9 @@ import {
   UNDERKAPACITET_FORMEL,
   OVERKAPACITET_FORMEL,
   raknaSaknadeKompetenskrav,
+  visningEffekt,
+  konfigureratKundnaraMalPct,
+  behoverUppmarksamhet,
   jamforTon,
   kundUnderlagStatus,
   lasMotorSummary,
@@ -484,5 +487,37 @@ describe("Före / Balans / Utfall", () => {
     expect(tre).toContain("Matchning mot behov");
     expect(tre).toContain("↳");
     expect(tre).not.toContain("Obemannat behov");
+  });
+
+  it("tar bort äldre Före/Efter-begrepp ur synlig UI", () => {
+    const filer = [
+      "src/components/bb/ForeEfter.tsx",
+      "src/components/bb/Motor.tsx",
+      "src/components/bb/Oversikt.tsx",
+      "src/components/bb/Hem.tsx",
+      "src/components/bb/Uppfoljning.tsx",
+      "src/components/bb/ProcessFlode.tsx",
+    ];
+    for (const f of filer) {
+      const src = readFileSync(join(rot, f), "utf8");
+      expect(src, f).not.toContain("Underbemanning (obemannat behov)");
+      expect(src, f).not.toContain(">Efter<");
+      expect(src, f).not.toContain("Överbemanning");
+      expect(src, f).not.toContain("Ekonomiskt resultat");
+      expect(src, f).not.toMatch(/↑ −/);
+      expect(src, f).not.toMatch(/↑ -/);
+    }
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    expect(hem).not.toMatch(/Målet är 75/);
+    expect(hem).not.toContain("|| 0.75");
+    expect(hem).toContain("data-nulagekort");
+    expect(konfigureratKundnaraMalPct({ varde: 0.75, definition: "Pilotmål" })).toBeNull();
+    expect(konfigureratKundnaraMalPct({ varde: 0.8, definition: "Verksamhetsmål" })).toBe(80);
+    expect(visningEffekt("−36,0 h")).toEqual({ pil: "ner", text: "36,0 h" });
+    expect(visningEffekt("+7,1 %")).toEqual({ pil: "upp", text: "7,1 %" });
+    expect(behoverUppmarksamhet({ hardViolations: 58, underkapacitetH: 1, overkapacitetH: 1, tacktBehovPct: 82.5 }).length).toBeGreaterThan(0);
+    const flode = readFileSync(join(rot, "src/components/bb/ProcessFlode.tsx"), "utf8");
+    expect(flode).toContain('data-tidslinje="Före → Balans → Utfall"');
+    expect(flode).toContain('data-handlingar="inom-tidslinje"');
   });
 });

@@ -49,9 +49,9 @@ export type SkalState = {
 let skal: SkalState = {
   tabs: [],
   grupper: [],
-  tab: "oversikt",
+  tab: "hem",
   avanceratOppen: false,
-  eyebrow: "Översikt",
+  eyebrow: "Före",
   titel: "Bemanningsbalans",
   org: "Verksamhet ej namngiven",
   periodFoot: "",

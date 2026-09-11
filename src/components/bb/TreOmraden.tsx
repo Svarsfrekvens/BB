@@ -39,6 +39,7 @@ export function TreOmraden({
   summary,
   hardCount,
   resurs,
+  kundnaraExtra,
   tom,
   fel,
   laddar,
@@ -47,6 +48,7 @@ export function TreOmraden({
   hardCount?: number;
   locked?: number;
   resurs?: ResursSiffror;
+  kundnaraExtra?: { kundbehov?: string; insatser?: string; forklaring?: string };
   kontinuitet?: string;
   tom?: boolean;
   fel?: string;
@@ -121,7 +123,9 @@ export function TreOmraden({
       {kort(<HeartHandshake className="size-5" />, TRE_OMRADEN_RUBRIKER[0], [
         { etikett: "Täckt behov", varde: tom ? "–" : pct(s?.coveragePercent), title: TACKT_BEHOV_FORKLARING },
         { etikett: "Kundnära tid", varde: tom ? "–" : pct(s?.customerNearPercent), title: KUNDNARA_FORKLARING },
-      ])}
+        ...(kundnaraExtra?.kundbehov ? [{ etikett: "Kundbehov", varde: kundnaraExtra.kundbehov }] : []),
+        ...(kundnaraExtra?.insatser ? [{ etikett: "Planerade insatser", varde: kundnaraExtra.insatser }] : []),
+      ], kundnaraExtra?.forklaring)}
       {kort(<ShieldCheck className="size-5" />, TRE_OMRADEN_RUBRIKER[1], [
         { etikett: "Hårda regelbrott", varde: hard === 0 ? "0 hårda regelbrott" : String(hard) },
         { etikett: "Dygnsvila", varde: antalRegel(/dygnsvila/i) },

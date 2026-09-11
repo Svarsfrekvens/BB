@@ -14,7 +14,7 @@ import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKont
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
-import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, aktivProcessId, raknaSaknadeKompetenskrav } from "./vcFlode";
+import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, aktivProcessId, raknaSaknadeKompetenskrav, getTidslage, tidslageText, konfigureratKundnaraMalPct } from "./vcFlode";
 
 declare global {
   interface Window {
@@ -44,7 +44,7 @@ const $ = (sel) => document.querySelector(sel);
  * Mer (tekniska vyer, hopfällt). Flikar som kräver underlag eller resultat är
  * låsta tills förutsättningen finns. */
 const TABS = [
-  { id: "hem", label: "Hem", sub: "Välj verksamhet och sätt igång", ic: "⌂", grupp: "Start" },
+  { id: "hem", label: "Hem", sub: "Före, balans och utfall", ic: "⌂", grupp: "Start" },
   { id: "kundbehov", label: "Kundbehov", sub: "Insatser och tider per kund", ic: "♥", grupp: "Start", kravKund: true },
   { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravSchema: true },
   { id: "uppladdning", label: "Underlag", sub: "Import av datakällor", ic: "⇪", grupp: "Start" },
@@ -2154,7 +2154,8 @@ function tolkaKommando(text) {
     { tab: "villkor", ord: ["villkor", "regler", "regelverk", "avtal"] },
     { tab: "atgarder", ord: ["åtgärd", "atgard", "varning", "att göra"] },
     { tab: "simulering", ord: ["vad händer", "simulera", "reglage", "känslighet"] },
-    { tab: "oversikt", ord: ["översikt", "oversikt", "dashboard", "startsida", "hem"] },
+    { tab: "hem", ord: ["översikt", "oversikt", "dashboard", "startsida", "hem"] },
+    { tab: "oversikt", ord: ["bemanning"] },
   ];
   // Frågor om siffror (svaras direkt, även utan att byta flik) ---
   const optimerat = !!state.optimerat;
@@ -2163,8 +2164,10 @@ function tolkaKommando(text) {
     if (schematidKalla() !== "medvind") return { typ: "svar", svar: "Jag kan inte räkna kundnära tid än – läs in personalschemat från Medvind, då kommer schematiden från det riktiga schemat." };
     if (andel != null) {
       const pct = andel * 100;
-      const mal = (bv("Mål kundnära tid") || 0.75) * 100;
-      return { typ: "svar", svar: `Kundnära tid är ${h1v(pct)} % av schematiden (mål ${h1v(mal)} %) – ${pct >= mal ? "över" : "under"} målet.` };
+      const mal = konfigureratKundnaraMalPct({ varde: bv("Mål kundnära tid"), definition: berDef("Mål kundnära tid") });
+      return { typ: "svar", svar: mal != null
+        ? `Kundnära tid är ${h1v(pct)} % av schematiden (mål ${h1v(mal)} %).`
+        : `Kundnära tid är ${h1v(pct)} % av schematiden.` };
     }
   }
 
@@ -2245,6 +2248,7 @@ function renderNav() {
   if (curTab && curTab.grupp === "Avancerat") window.__avanceratOppen = true;
   const cur = curTab || TABS[0];
   const filled = root.verks.filter((v) => v.rows.length).length;
+  const tidslage = tidslageText(getTidslage({ harBalans: harResultat() }));
   publiceraSkal({
     tabs: TABS.map((t) => ({
       ...t,
@@ -2254,8 +2258,8 @@ function renderNav() {
     grupper: TAB_GRUPPER,
     tab,
     avanceratOppen: !!window.__avanceratOppen,
-    eyebrow: cur.grupp || cur.label,
-    titel: state.org || "Bemanningsbalans",
+    eyebrow: tab === "hem" || tab === "oversikt" ? tidslage.label : (cur.grupp || cur.label),
+    titel: tab === "hem" || tab === "oversikt" ? "Bemanningsbalans" : (state.org || "Bemanningsbalans"),
     org: visningsNamnVerksamhet(state.org),
     periodFoot: state.period
       ? `${state.period.from} – ${addDays(state.period.from, state.importDays - 1)} · ${filled} av ${root.verks.length} importerade`

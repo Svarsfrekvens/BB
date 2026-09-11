@@ -17,7 +17,8 @@ import type { ProcessStegLage } from "@/lib/bb/vcFlode";
 
 /** Kort förklarande undertext per sida – gör menyn självinstruerande. */
 const UNDERTEXT: Record<string, string> = {
-  hem: "Översikt och flöde",
+  hem: "Så ser bemanningen ut i det underlag som lästs in.",
+  oversikt: "Samma översikt som Hem",
   verksamhet: "Vilken enhet",
   kundgrupp: "Kundernas behov (Sekoia)",
   schemafil: "Nuvarande personalschema",
@@ -25,7 +26,7 @@ const UNDERTEXT: Record<string, string> = {
   underlag: "Filerna appen räknar på",
   foreefter: "Före mot planerad balans",
   schemaforslag: "Godkänn balans",
-  oversikt: "Efter inläst underlag",
+  oversikt: "Samma översikt som Hem",
   kundbehov: "Insatser och tider per kund",
   resurskurva: "Behov över dygnet",
   personal: "Medarbetare och kapacitet",

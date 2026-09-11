@@ -502,6 +502,37 @@ export function effektPilFranForandring(forandring: string): "upp" | "ner" | "li
   return "lika";
 }
 
+/** Pil följer talets riktning. Tecken tas bort så UI inte visar ↑ −36 h. */
+export function visningEffekt(forandring: string) {
+  const pil = effektPilFranForandring(forandring);
+  const text = String(forandring || "").replace(/^[+\-−]\s*/, "").trim();
+  if (pil === "lika") return { pil, text: forandring || "–" };
+  return { pil, text: text || forandring };
+}
+
+/** Visa mål för kundnära tid bara om verksamheten har ett riktigt konfigurerat mål – inte pilotexemplet 75 %. */
+export function konfigureratKundnaraMalPct(d: { varde?: number | null; definition?: string | null }) {
+  if (d.varde == null || !Number.isFinite(Number(d.varde))) return null;
+  const def = String(d.definition || "").toLowerCase();
+  if (!def.trim() || /pilot|exempel|referens/.test(def)) return null;
+  const n = Number(d.varde);
+  return n <= 1.5 ? n * 100 : n;
+}
+
+export function behoverUppmarksamhet(d: {
+  hardViolations: number;
+  underkapacitetH: number;
+  overkapacitetH: number;
+  tacktBehovPct: number | null | undefined;
+}) {
+  const punkter: string[] = [];
+  if ((d.hardViolations || 0) > 0) punkter.push(`${d.hardViolations} regelvarningar i befintligt schema`);
+  if ((d.underkapacitetH || 0) > 0.05) punkter.push("underkapacitet vid vissa tider");
+  if ((d.overkapacitetH || 0) > 0.05) punkter.push("överkapacitet vid andra tider");
+  if (d.tacktBehovPct != null && d.tacktBehovPct < 100 - 1e-6) punkter.push("kundbehov inte fullt täckt");
+  return punkter;
+}
+
 export const FORE_BALANS_NYCKLAR = [
   "Planerade personaltimmar",
   "Matchning mot behov",

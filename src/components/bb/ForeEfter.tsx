@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
-import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText } from "@/lib/bb/vcFlode";
+import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -128,13 +128,14 @@ export function ForeEfter({ api }: VyProps) {
                   <th className="px-6 py-3 text-left">Mått</th>
                   <th className="px-6 py-3 text-right">Före</th>
                   <th className="px-6 py-3 text-right">Balans</th>
-                  <th className="px-6 py-3 text-right">Effekt</th>
+                  <th className="px-6 py-3 text-right">Förändring</th>
                 </tr>
               </thead>
               <tbody>
                 {visade.concat(extra as typeof visade).map((r) => {
                   const ton = jamforTon({ namn: r.namn, riktning: r.riktning, tackningSank });
-                  const pil = "pil" in r && r.pil ? r.pil : r.riktning;
+                  const effekt = visningEffekt(r.forandring);
+                  const pil = "pil" in r && r.pil ? r.pil : effekt.pil;
                   return (
                   <tr key={r.namn} className="border-t border-border">
                     <th className={cn("border-t border-border px-6 py-3 text-left text-sm font-bold text-deep", "underMatchning" in r && r.underMatchning && "pl-10 font-semibold text-muted-foreground")}>
@@ -154,7 +155,7 @@ export function ForeEfter({ api }: VyProps) {
                         )}
                       >
                         {pil === "upp" ? <ArrowUp className="size-3" /> : pil === "ner" ? <ArrowDown className="size-3" /> : <Minus className="size-3" />}
-                        {r.forandring}
+                        {effekt.text}
                       </span>
                     </td>
                   </tr>

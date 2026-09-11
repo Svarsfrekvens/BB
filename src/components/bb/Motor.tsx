@@ -14,7 +14,7 @@ import { delaPeriod, payloadForFonster, svansPass, type Fonster } from "@/lib/bb
 import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "@/lib/bb/motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "@/lib/bb/motor.functions";
 import { byggMotorPayload, type PayloadResultat } from "@/lib/bb/motorPayload";
-import { vcStatusText } from "@/lib/bb/vcFlode";
+import { vcStatusText, filtreraJamforRader, visningEffekt } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -518,36 +518,33 @@ export function Motor({ state, api }: VyProps) {
 
             {fe.tabell.length ? (
               <div className="mt-6 overflow-x-auto">
-                <h4 className="mb-2 text-sm font-bold text-deep">Före och efter</h4>
+                <h4 className="mb-2 text-sm font-bold text-deep">Före → Balans</h4>
                 <table className="w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
                       <th className="py-2 pr-4 font-semibold">Mått</th>
                       <th className="py-2 pr-4 font-semibold">Före</th>
-                      <th className="py-2 pr-4 font-semibold">Efter</th>
-                      <th className="py-2 font-semibold">Ändring</th>
+                      <th className="py-2 pr-4 font-semibold">Balans</th>
+                      <th className="py-2 font-semibold">Förändring</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {fe.tabell.map((rad, i) => (
+                    {filtreraJamforRader(fe.tabell).map((rad, i) => {
+                      const effekt = visningEffekt(rad.forandring);
+                      return (
                       <tr key={i} className="border-b border-border/50">
-                        <td className="py-2 pr-4 font-medium text-deep">{rad.namn}</td>
+                        <td className="py-2 pr-4 font-medium text-deep">
+                          {rad.underMatchning ? `↳ ${rad.namn}` : rad.namn}
+                        </td>
                         <td className="py-2 pr-4 text-muted-foreground">{rad.fore}</td>
                         <td className="py-2 pr-4 font-semibold text-deep">{rad.efter}</td>
-                        <td
-                          className={
-                            "py-2 font-bold " +
-                            (rad.riktning === "upp"
-                              ? "text-success"
-                              : rad.riktning === "ner"
-                                ? "text-danger"
-                                : "text-muted-foreground")
-                          }
-                        >
-                          {rad.forandring}
+                        <td className="py-2 font-bold tabular-nums">
+                          {effekt.pil === "upp" ? "↑ " : effekt.pil === "ner" ? "↓ " : ""}
+                          {effekt.text}
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
