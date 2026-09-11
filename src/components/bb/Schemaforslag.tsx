@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { AlertTriangle, Moon, TrendingDown, TrendingUp, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { fmtH } from "@/lib/bb/vy";
 import type { VyProps } from "@/lib/bb/vy";
 import { TomtLage } from "./Tomt";
+import { balansKanGodkannas } from "@/lib/bb/vcFlode";
 
 const VECKODAG = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"];
 
@@ -62,9 +64,9 @@ export function Schemaforslag({ api }: VyProps) {
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Steg 3 · Schemaförslag</Eyebrow>
+            <Eyebrow>Godkänn balans</Eyebrow>
             <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">
-              Så bör bemanningen justeras
+              Så planerar vi schemaperioden
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               Nedan syns ert inlästa schema för perioden. Appen jämför det med kundernas behov och pekar ut när det finns
@@ -83,14 +85,22 @@ export function Schemaforslag({ api }: VyProps) {
               </option>
             ))}
           </select>
+          {(() => {
+            const g = balansKanGodkannas({ tacktBehovPct: lage.tackningPct, hardViolations: api.regelbrott() });
+            return (
+              <Button disabled={!g.ok} title={g.ok ? undefined : g.reasons.join(" ")} onClick={() => api.godkannBalans?.()}>
+                Godkänn balans
+              </Button>
+            );
+          })()}
         </div>
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kort etikett="Schemalagd tid" tal={fmtH(lage.schematidH)} forklaring="Arbetad tid i perioden, utan sovande jour." />
         <Kort etikett="Sovande jour" tal={fmtH(lage.jourH)} forklaring="Jourtid 23:00–06:30 räknas separat." />
-        <Kort etikett="Överkapacitet" tal={fmtH(lage.overkapacitetH)} forklaring="Tid med mer personal än kundbehov." />
-        <Kort etikett="Obemannat behov" tal={fmtH(lage.obemannatH)} forklaring="Tid där personalen inte räcker till behovet." />
+        <Kort etikett="Överkapacitet" tal={fmtH(lage.overkapacitetH)} forklaring="Schemalagd bemanning över rått kundbehov i intervallet." />
+        <Kort etikett="Underkapacitet" tal={fmtH(lage.obemannatH)} forklaring="Schemalagd bemanning under dimensionerande behov i intervallet." />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">

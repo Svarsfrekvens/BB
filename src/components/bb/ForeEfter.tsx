@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
-import { filtreraJamforRader, jamforTon, lasMotorSummary } from "@/lib/bb/vcFlode";
+import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -95,20 +95,16 @@ export function ForeEfter({ api }: VyProps) {
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Före och efter</Eyebrow>
+            <Eyebrow>Före → Balans</Eyebrow>
             <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">
-              Nuläge jämfört med förslaget
+              Inläst nuläge jämfört med planerad balans
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Före är ert inlästa schema. Efter är bemanningsbalansens förslag. Lägre bemanning markeras inte som
-              förbättring om täckt behov har sjunkit.
+              Före är det inlästa underlaget. Balans är hur vi planerar schemaperioden. Pilarna följer om värdet ökar
+              eller minskar.
             </p>
             {efter ? (
-              <p className="mt-2 text-xs font-semibold text-muted-foreground">
-                {api.berakningsKalla() === "motor"
-                  ? "Efter-läget kommer från den senaste beräkningen."
-                  : "Reservläge: efter-läget är beräknat i appen."}
-              </p>
+              <p className="mt-2 text-xs font-semibold text-muted-foreground">{berakningsKallaText(api.berakningsKalla())}</p>
             ) : null}
           </div>
           {efter ? (
@@ -117,7 +113,7 @@ export function ForeEfter({ api }: VyProps) {
             </Button>
           ) : (
             <Button onClick={() => api.skapaBalans()}>
-              <Sparkles /> Skapa bemanningsbalans
+              <Sparkles /> Skapa balans
             </Button>
           )}
         </div>
@@ -131,16 +127,19 @@ export function ForeEfter({ api }: VyProps) {
                 <tr className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">
                   <th className="px-6 py-3 text-left">Mått</th>
                   <th className="px-6 py-3 text-right">Före</th>
-                  <th className="px-6 py-3 text-right">Efter</th>
-                  <th className="px-6 py-3 text-right">Förändring</th>
+                  <th className="px-6 py-3 text-right">Balans</th>
+                  <th className="px-6 py-3 text-right">Effekt</th>
                 </tr>
               </thead>
               <tbody>
                 {visade.concat(extra as typeof visade).map((r) => {
                   const ton = jamforTon({ namn: r.namn, riktning: r.riktning, tackningSank });
+                  const pil = "pil" in r && r.pil ? r.pil : r.riktning;
                   return (
                   <tr key={r.namn} className="border-t border-border">
-                    <th className="border-t border-border px-6 py-3 text-left text-sm font-bold text-deep">{r.namn}</th>
+                    <th className={cn("border-t border-border px-6 py-3 text-left text-sm font-bold text-deep", "underMatchning" in r && r.underMatchning && "pl-10 font-semibold text-muted-foreground")}>
+                      {"underMatchning" in r && r.underMatchning ? `↳ ${r.namn}` : r.namn}
+                    </th>
                     <td className="border-t border-border px-6 py-3 text-right tabular-nums text-muted-foreground">{r.fore}</td>
                     <td className="border-t border-border px-6 py-3 text-right font-bold tabular-nums text-deep">{r.efter}</td>
                     <td className="border-t border-border px-6 py-3 text-right">
@@ -154,7 +153,7 @@ export function ForeEfter({ api }: VyProps) {
                               : "bg-muted text-muted-foreground",
                         )}
                       >
-                        {r.riktning === "upp" ? <ArrowUp className="size-3" /> : r.riktning === "ner" ? <ArrowDown className="size-3" /> : <Minus className="size-3" />}
+                        {pil === "upp" ? <ArrowUp className="size-3" /> : pil === "ner" ? <ArrowDown className="size-3" /> : <Minus className="size-3" />}
                         {r.forandring}
                       </span>
                     </td>
@@ -174,7 +173,7 @@ export function ForeEfter({ api }: VyProps) {
             {obemannade.reduce((s, u) => s + (u.antal || 1), 0)} insatser kunde inte bemannas
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            De kommer från motorns redovisning av obemannat behov. Hårda regler har inte lättats.
+            De kommer från motorns redovisning av insatser som inte kunde bemannas. Hårda regler har inte lättats.
           </p>
           <ul className="mt-4 space-y-2">
             {obemannade.map((u, i) => (
@@ -238,7 +237,7 @@ export function ForeEfter({ api }: VyProps) {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Kurva lage={fore} rubrik="Före" text="Inläst schema mot ursprungligt kundbehov." />
-        {efter ? <Kurva lage={efter} rubrik="Efter" text="Samma schema mot omfördelat kundbehov." /> : null}
+        {efter ? <Kurva lage={efter} rubrik="Balans" text="Så planerar vi schemaperioden." /> : null}
       </div>
 
       {flyttade.length ? (

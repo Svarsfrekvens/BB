@@ -5,19 +5,43 @@ export type ProcessStegLage = "ej" | "pa" | "klar" | "varning" | "blockerad";
 export const PROCESS_STEG = [
   { id: "kundbehov", label: "Kundbehov" },
   { id: "medarbetare", label: "Medarbetare" },
-  { id: "skapa", label: "Skapa bemanningsbalans" },
-  { id: "resultat", label: "Granska" },
-  { id: "foreefter", label: "Före och efter" },
-  { id: "schemaforslag", label: "Godkänn" },
-  { id: "nyckeltal", label: "Uppföljning" },
+  { id: "skapa", label: "Skapa balans" },
+  { id: "resultat", label: "Granska balans" },
+  { id: "foreefter", label: "Före → Balans" },
+  { id: "schemaforslag", label: "Godkänn balans" },
+  { id: "nyckeltal", label: "Utfall" },
 ] as const;
 
+export const TIDSLAGEN = [
+  { id: "fore", label: "Före", text: "Så ser bemanningen ut i det underlag som lästs in." },
+  { id: "balans", label: "Balans", text: "Så planerar vi schemaperioden." },
+  { id: "utfall", label: "Utfall", text: "Så blev schemaperioden." },
+] as const;
+
+export type TidslageId = (typeof TIDSLAGEN)[number]["id"];
+
+export function getTidslage(d: { harUnderlag?: boolean; harBalans: boolean; harUtfall?: boolean }): TidslageId {
+  if (d.harUtfall) return "utfall";
+  if (d.harBalans) return "balans";
+  return "fore";
+}
+
+export function tidslageText(id: TidslageId) {
+  return TIDSLAGEN.find((t) => t.id === id)!;
+}
+
 export const TACKT_BEHOV_FORKLARING =
-  "Täckt behov = bemannat kundbehov / totalt kundbehov.";
+  "Täckt behov = bemannat kundbehov / totalt kundbehov. Svarar på om det dimensionerande kund- och verksamhetsbehovet är bemannat (inkl. dubbelbemanning och närvarokrav när de ingår i behovet).";
 export const KUNDNARA_FORKLARING =
-  "Kundnära tid = schemalagd kundnära arbetstid / total schemalagd arbetstid.";
+  "Kundnära tid = schemalagd kundnära arbetstid / total schemalagd arbetstid. Effektivitetsmått; behöver inte vara 100 %. Sovande jour räknas inte som kundnära om ingen kundnära aktivitet utförs.";
+export const MATCHNING_FORKLARING =
+  "Matchning mot behov = 1 − (otäckt dimensionerande resurstid / totalt dimensionerande resursbehov). Mäter hur bemanningen träffar behovskurvan i tiden, inte samma sak som täckt behov eller kundnära tid.";
+export const UNDERKAPACITET_FORKLARING =
+  "Underkapacitet = summa (dimensionerande behov − schemalagd bemanning) × 0,5 h i 30-minutersintervall där bemanningen understiger det dimensionerande behovet.";
+export const OVERKAPACITET_FORKLARING =
+  "Överkapacitet = summa (schemalagd bemanning − rått kundbehov) × 0,5 h i intervall där bemanningen överstiger rått kundbehov. Formeln är oförändrad; den använder rått kundbehov, inte samma dimensionerande kurva som underkapacitet.";
 export const KAPACITET_FORKLARING =
-  "Överkapacitet betyder att bemanning finns när behovet är lägre. Underkapacitet betyder att kundbehov saknar motsvarande bemanning vid andra tider.";
+  "Överkapacitet betyder att bemanning finns när behovet är lägre. Underkapacitet betyder att bemanningsbehov saknar motsvarande bemanning vid andra tider. De är inte samma sak som täckt behov.";
 export const MEDARBETARE_ANDRAD_TEXT =
   "Medarbetarvillkoren har ändrats. Granska förändringen innan du skapar bemanningsbalans.";
 
@@ -37,7 +61,7 @@ export function vcTextArRen(text: string) {
   return !VC_FORBJUDNA_ORD.some((ord) => t.includes(ord.toLowerCase()));
 }
 
-export const TRE_OMRADEN_RUBRIKER = ["Kundnytta", "Hållbar bemanning", "Rätt resurser i rätt tid"] as const;
+export const TRE_OMRADEN_RUBRIKER = ["Kundnära tid", "Hållbara scheman", "Rätt resurs i rätt tid"] as const;
 
 export type MotorUiSummary = {
   status: string;
@@ -370,29 +394,121 @@ export function tomSummary() {
   return { ...TOM_SUMMARY };
 }
 
-export const FORE_EFTER_NYCKLAR = [
-  "Täckt behov",
-  "Kundnära tid",
-  "Personalkostnad",
-  "Ekonomiskt resultat",
+export const MATCHNING_FORMEL = {
+  täljare: "dimensionerandeResursbehovH − otacktDimensionerandeResursH",
+  nämnare: "dimensionerandeResursbehovH",
+  kod: "max(0, 1 - obemannatH / dimH) * 100",
+  kalla: "modell.analysera: dimH = Σ dimensionerat×0,5 h; obemannatH = Σ max(0, dimensionerat−bemanning)×0,5 h",
+  tidsmassigMatchning: true,
+  overlapparTacktBehov: false,
+  overlapparKundnara: false,
+} as const;
+
+export const UNDERKAPACITET_FORMEL = {
+  falt: "obemannatH / otacktDimensionerandeResursH",
+  kod: "Σ (dimensionerat − bemanning) × 0,5 h där dimensionerat > bemanning",
+  kalla: "modell.analysera 30-minutersintervall mot dimensionerande kurva",
+} as const;
+
+export const OVERKAPACITET_FORMEL = {
+  falt: "overkapacitetH",
+  kod: "Σ (bemanning − rabehov) × 0,5 h där bemanning > rabehov",
+  kalla: "modell.analysera 30-minutersintervall mot rått kundbehov (inte dimensionerat)",
+  anvanderDimensionerandeKurva: false,
+} as const;
+
+export function balansKanGodkannas(d: {
+  tacktBehovPct: number | null | undefined;
+  hardViolations: number;
+}) {
+  const reasons: string[] = [];
+  const tackt = d.tacktBehovPct;
+  if (tackt == null || !(tackt >= 100 - 1e-6)) {
+    reasons.push("Balans kan inte godkännas – kundbehov återstår att bemanna.");
+  }
+  if ((d.hardViolations || 0) > 0) {
+    reasons.push("Balans kan inte godkännas – hårda regelbrott finns.");
+  }
+  return { ok: reasons.length === 0, reasons };
+}
+
+export function hemHuvudCta(d: {
+  lage: TidslageId;
+  ready: boolean;
+  godkannbar: boolean;
+  balansGodkand?: boolean;
+}) {
+  if (d.lage === "utfall") return { id: "utfall" as const, label: "Följ upp utfall", disabled: false };
+  if (d.lage === "balans") {
+    if (d.balansGodkand) return { id: "godkand" as const, label: "Balans godkänd", disabled: true };
+    if (d.godkannbar) return { id: "godkann" as const, label: "Godkänn balans", disabled: false };
+    return { id: "granska" as const, label: "Granska balans", disabled: false };
+  }
+  return { id: "skapa" as const, label: "Skapa balans", disabled: !d.ready };
+}
+
+export function hemStatusText(d: {
+  lage: TidslageId;
+  ready: boolean;
+  blockingReasons: string[];
+  godkannbar: boolean;
+  balansGodkand?: boolean;
+  tacktBehovPct?: number | null;
+}) {
+  if (d.lage === "utfall") return "Utfall kan följas upp";
+  if (d.lage === "fore") return d.ready ? "Redo att skapa balans" : d.blockingReasons[0] || "Underlaget behöver kompletteras";
+  if (d.balansGodkand) return "Balans godkänd";
+  if (!d.godkannbar) return "Balansen behöver kompletteras";
+  return "Redo att godkänna balans";
+}
+
+export function effektPilFranForandring(forandring: string): "upp" | "ner" | "lika" {
+  const t = String(forandring || "").trim();
+  if (!t || t === "–" || t === "-") return "lika";
+  if (t.startsWith("−") || t.startsWith("-")) return "ner";
+  if (t.startsWith("+")) return "upp";
+  return "lika";
+}
+
+export const FORE_BALANS_NYCKLAR = [
+  "Planerade personaltimmar",
+  "Matchning mot behov",
+  "Otäckt dimensionerande resursbehov",
   "Överbemanning",
-  "Obemannat kundbehov",
+  "Kundnära tid",
+  "Täckt behov",
+  "Personalkostnad",
+  "Beräknad intäkt",
+  "Ekonomiskt resultat",
 ] as const;
 
-const FORE_EFTER_RUBRIK: Record<string, string> = {
-  Personalkostnad: "Schemakostnad",
-  "Ekonomiskt resultat": "Intäkt − schemakostnad",
+/** Bakåtkompatibelt alias – jämförelsen heter Före → Balans. */
+export const FORE_EFTER_NYCKLAR = FORE_BALANS_NYCKLAR;
+
+const FORE_BALANS_RUBRIK: Record<string, string> = {
+  "Otäckt dimensionerande resursbehov": "Underkapacitet",
   Överbemanning: "Överkapacitet",
-  "Obemannat kundbehov": "Underkapacitet",
+  "Beräknad intäkt": "Intäkt",
+  "Ekonomiskt resultat": "Intäkt − schemakostnad",
 };
 
 export function filtreraJamforRader(
   tabell: { namn: string; fore: string; efter: string; forandring: string; riktning: "upp" | "ner" | "lika" }[],
 ) {
-  const tillat = new Set<string>(FORE_EFTER_NYCKLAR);
+  const tillat = new Set<string>(FORE_BALANS_NYCKLAR);
+  const ordning = FORE_BALANS_NYCKLAR as readonly string[];
   return tabell
     .filter((r) => tillat.has(r.namn))
-    .map((r) => ({ ...r, namn: FORE_EFTER_RUBRIK[r.namn] || r.namn }));
+    .sort((a, b) => ordning.indexOf(a.namn) - ordning.indexOf(b.namn))
+    .map((r) => {
+      const namn = FORE_BALANS_RUBRIK[r.namn] || r.namn;
+      return {
+        ...r,
+        namn,
+        underMatchning: namn === "Underkapacitet" || namn === "Överkapacitet",
+        pil: effektPilFranForandring(r.forandring),
+      };
+    });
 }
 
 export function kundUnderlagStatus(d: { godkand: boolean; redigerad?: boolean; ofullstandig?: boolean }) {

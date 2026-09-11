@@ -26,10 +26,11 @@ export function Uppfoljning({ api }: VyProps) {
 
   const rader = [
     { l: "Kundnära tid", Ic: Target, plan: `${plan.kundnaraPct.toFixed(1)} %`.replace(".", ",") },
+    { l: "Täckt behov", Ic: Target, plan: `${plan.tackningPct.toFixed(1)} %`.replace(".", ",") },
     { l: "Planerade personaltimmar", Ic: Clock, plan: api.h1(plan.schematidH) },
     { l: "Personalkostnad", Ic: Coins, plan: api.kr(plan.kostnad), faktiskt: "Utfall kräver tidrapport" },
-    { l: "Underbemannade timmar", Ic: Users, plan: api.h1(plan.obemannatH) },
-    { l: "Överbemannade timmar", Ic: Users, plan: api.h1(plan.overkapacitetH) },
+    { l: "Underkapacitet", Ic: Users, plan: api.h1(plan.obemannatH) },
+    { l: "Överkapacitet", Ic: Users, plan: api.h1(plan.overkapacitetH) },
     { l: "Ekonomiskt resultat", Ic: Coins, plan: api.kr(plan.resultat) },
   ] as { l: string; Ic: typeof Target; plan: string; faktiskt?: string }[];
 
@@ -41,11 +42,11 @@ export function Uppfoljning({ api }: VyProps) {
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Uppföljning</Eyebrow>
-            <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Planerat mot faktiskt utfall</h2>
+            <Eyebrow>Utfall</Eyebrow>
+            <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Så blev schemaperioden</h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Här står det planerade läget för perioden. Det faktiska utfallet fylls i när perioden är slut och nya
-              filer läses in – appen hittar inte på några siffror i förväg.
+              Här jämförs planerad balans med faktiskt utfall när perioden är genomförd. Planering och utfall är två
+              olika saker. Utfallsdata fylls i när källorna finns – appen hittar inte på siffror.
             </p>
           </div>
           <Badge className="rounded-full bg-muted px-4 py-1.5 text-xs font-bold text-muted-foreground">
@@ -60,8 +61,8 @@ export function Uppfoljning({ api }: VyProps) {
             <thead>
               <tr className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">
                 <th className="px-6 py-3 text-left">Mått</th>
-                <th className="px-6 py-3 text-right">Planerat</th>
-                <th className="px-6 py-3 text-right">Faktiskt</th>
+                <th className="px-6 py-3 text-right">Planerad balans</th>
+                <th className="px-6 py-3 text-right">Utfall</th>
                 <th className="px-6 py-3 text-right">Skillnad</th>
               </tr>
             </thead>

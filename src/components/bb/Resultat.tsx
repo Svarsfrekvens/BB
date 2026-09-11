@@ -2,10 +2,11 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VyProps } from "@/lib/bb/vy";
-import { berakningsKallaText, lasMotorSummary, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
+import { berakningsKallaText, balansKanGodkannas, lasMotorSummary, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
-import { TreOmraden } from "./TreOmraden";
+import { fmtPct } from "@/lib/bb/vy";
 import { ForeEfter } from "./ForeEfter";
+import { TreOmraden } from "./TreOmraden";
 
 export function Resultat(props: VyProps) {
   const { api, state } = props;
@@ -19,7 +20,7 @@ export function Resultat(props: VyProps) {
       <Card className="rounded-2xl p-8 text-center shadow-lift">
         <h2 className="text-2xl font-extrabold text-deep">Inget förslag att granska ännu</h2>
         <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
-          Skapa bemanningsbalans först. Du möter resultatet här, inte schemat.
+          Skapa balans först. Du granskar här hur vi planerar schemaperioden.
         </p>
         <Button
           className="mt-6"
@@ -27,7 +28,7 @@ export function Resultat(props: VyProps) {
           disabled={!readiness.ready}
           onClick={() => void korBemanningsbalans({ api, state })}
         >
-          <Sparkles /> Skapa bemanningsbalans
+          <Sparkles /> Skapa balans
         </Button>
       </Card>
     );
@@ -38,17 +39,29 @@ export function Resultat(props: VyProps) {
     schemakostnad: efter ? api.kr(efter.kostnad) : summary ? `${Math.round(summary.cost / 100).toLocaleString("sv-SE")} kr` : "–",
     marginal: efter ? api.kr(efter.resultat) : "–",
     overkapacitet: efter ? `${api.h1(efter.overkapacitetH)} h` : "–",
-    underkapacitet: efter ? `${api.h1(efter.obemannatKundbehovH)} h` : "–",
+    underkapacitet: efter ? `${api.h1(efter.obemannatH)} h` : "–",
+    matchning: efter ? fmtPct(efter.matchningPct) : "–",
+    personaltimmar: efter ? `${api.h1(efter.schematidH)} h` : "–",
     vikarie: fe?.vikarie ? `${fe.vikarie.antalBehalls} pass att tillsätta` : "–",
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-[11px] font-bold tracking-widest text-primary uppercase">Granska</div>
-        <h2 className="mt-1 text-3xl font-extrabold text-deep">Resultat av bemanningsbalansen</h2>
+        <div className="text-[11px] font-bold tracking-widest text-primary uppercase">Balans</div>
+        <h2 className="mt-1 text-3xl font-extrabold text-deep">Så planerar vi schemaperioden</h2>
         <p className="mt-2 max-w-2xl text-base text-muted-foreground">{vcStatusText(summary?.status)}</p>
         <p className="mt-1 text-sm font-semibold text-deep">{berakningsKallaText(api.berakningsKalla())}</p>
+        {!balansKanGodkannas({ tacktBehovPct: efter?.tackningPct, hardViolations: api.regelbrott() }).ok ? (
+          <p className="mt-3 text-sm font-semibold text-warning">
+            {balansKanGodkannas({ tacktBehovPct: efter?.tackningPct, hardViolations: api.regelbrott() }).reasons.join(" ")}
+            {efter && efter.obemannatKundbehovH > 0
+              ? ` ${efter.obemannatKundbehovH.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} h kundbehov saknar bemanning.`
+              : ""}
+          </p>
+        ) : (
+          <p className="mt-3 text-sm font-semibold text-success">Täckt behov 100 % och 0 hårda regelbrott – balansen kan godkännas.</p>
+        )}
       </div>
       <TreOmraden
         summary={

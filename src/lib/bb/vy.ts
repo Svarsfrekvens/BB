@@ -150,6 +150,7 @@ export type VyApi = {
   kunderForKontakt: () => string[];
   rensaSchemaOriginal: () => void;
   skapaBalans: () => void;
+  godkannBalans?: () => void;
   aterstallBalans: () => void;
   harBalans: () => boolean;
   foreEfter: () => ForeEfter | null;

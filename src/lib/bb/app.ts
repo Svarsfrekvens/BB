@@ -14,7 +14,7 @@ import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKont
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
-import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet } from "./vcFlode";
+import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas } from "./vcFlode";
 
 declare global {
   interface Window {
@@ -48,15 +48,15 @@ const TABS = [
   { id: "kundbehov", label: "Kundbehov", sub: "Insatser och tider per kund", ic: "♥", grupp: "Start", kravKund: true },
   { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravSchema: true },
   { id: "uppladdning", label: "Underlag", sub: "Import av datakällor", ic: "⇪", grupp: "Start" },
-  { id: "resultat", label: "Granska", sub: "Resultatet av balansen", ic: "☑", grupp: "Start", kravResultat: true },
-  { id: "foreefter", label: "Före och efter", sub: "Nuläge mot förslag", ic: "⇄", grupp: "Start", kravResultat: true },
-  { id: "schemaforslag", label: "Godkänn", sub: "Pass och justeringar", ic: "▦", grupp: "Start", kravResultat: true },
+  { id: "resultat", label: "Granska balans", sub: "Så planerar vi schemaperioden", ic: "☑", grupp: "Start", kravResultat: true },
+  { id: "foreefter", label: "Före → Balans", sub: "Inläst nuläge mot planerad balans", ic: "⇄", grupp: "Start", kravResultat: true },
+  { id: "schemaforslag", label: "Godkänn balans", sub: "Pass och justeringar", ic: "▦", grupp: "Start", kravResultat: true },
   { id: "motor", label: "Beräkningslogg", sub: "Felsökning", ic: "⚡", grupp: "Mer", kravUnderlag: true },
   { id: "omplanering", label: "Omplanering", sub: "Förändring under perioden", ic: "↻", grupp: "Följ upp", kravResultat: true },
   { id: "resurskurva", label: "Resursbehov", sub: "Behov över dygnet", ic: "∿", grupp: "Planera", kravUnderlag: true },
   { id: "oversikt", label: "Bemanning", sub: "Verksamheten i siffror", ic: "◫", grupp: "Planera", kravUnderlag: true },
-  { id: "nyckeltal", label: "Uppföljning", sub: "Planerat mot utfall", ic: "◔", grupp: "Följ upp" },
-  { id: "ekonomi", label: "Rätt resurser i rätt tid", sub: "Intäkt, kostnad och kapacitet", ic: "kr", grupp: "Följ upp", kravUnderlag: true },
+  { id: "nyckeltal", label: "Utfall", sub: "Så blev schemaperioden", ic: "◔", grupp: "Följ upp" },
+  { id: "ekonomi", label: "Rätt resurs i rätt tid", sub: "Intäkt, kostnad och kapacitet", ic: "kr", grupp: "Följ upp", kravUnderlag: true },
   { id: "kunder", label: "Per kund", sub: "Timmar per kund", ic: "⁝", grupp: "Följ upp", kravUnderlag: true },
   { id: "sprid", label: "Sprid behov", sub: "Flytta rörliga insatser", ic: "⇕", grupp: "Mer", kravUnderlag: true },
   { id: "intakter", label: "Intäkter", sub: "Ersättning och underlag", ic: "▲", grupp: "Mer", kravUnderlag: true },
@@ -134,7 +134,7 @@ const DEFAULT_VERKS = () => ({
   analysisDays: 28, hourlyCost: 270, dygnKr: 2500, plannedHours: 1972, budget: 460000,
   continuitySek: 50, spreadSekPerPermille: 2.5,
   reservePct: 6, absencePct: 4,
-  kundGodkand: false, schemaGodkand: false, kundAndrad: false, medarbetareAndrad: false,
+  kundGodkand: false, schemaGodkand: false, kundAndrad: false, medarbetareAndrad: false, balansGodkand: false,
   planAktiviteter: standardKatalog(),
   kontaktpersoner: {},
 });
@@ -1148,6 +1148,7 @@ function skapaBalans() {
   state.balans.vikarieBeslut = vik.beslut;
   state.balans.vikarie = { antalBorttagna: vik.antalBorttagna, antalBehalls: vik.antalBehalls };
   state.optimerat = true;
+  state.balansGodkand = false;
   tab = "resultat";
   persist();
   notera("Förhandsberäkning i appen", "ok",
@@ -1155,7 +1156,29 @@ function skapaBalans() {
   render();
 }
 
-/** Värden ur styrande villkor i den form optimeringsmotorn läser dem. */
+function godkannBalans() {
+  const fe = foreEfterModell();
+  const efter = fe && fe.efter;
+  let hard = 0;
+  try {
+    const m = buildSchemaModel();
+    if (m) {
+      const v = schemaVarningar(m, schemaEffektiv(m));
+      hard = Object.values(v.varningar).reduce((s, ws) => s + ws.filter((x) => !x.indikation).length, 0);
+    }
+  } catch (e) { hard = 0; }
+  const r = balansKanGodkannas({ tacktBehovPct: efter ? efter.tackningPct : null, hardViolations: hard });
+  if (!r.ok) {
+    notera(r.reasons[0], "info", { detalj: r.reasons.join(" ") });
+    return;
+  }
+  state.balansGodkand = true;
+  persist();
+  notera("Balansen är godkänd", "ok", { detalj: "Täckt behov är 100 % och det finns inga hårda regelbrott." });
+  render();
+}
+
+/** Värden ur styrande villkor i den form bemanningsberäkningen läser dem. */
 function motorRegler() {
   const varden = {};
   for (const g of MODELL.STYRANDE_VILLKOR) for (const rad of g.villkor) varden[rad[0]] = rad[1];
@@ -1203,6 +1226,7 @@ function anvandMotorResultat(res) {
   };
   state.motorResultat = { ...res, summary: res.summary || null, kalla: "motor", skapad };
   state.optimerat = true;
+  state.balansGodkand = false;
   tab = "resultat";
   persist();
   notera("Bemanningsbalans skapad med motor", "ok", {
@@ -1213,7 +1237,7 @@ function anvandMotorResultat(res) {
 }
 
 function aterstallBalans() {
-  state.balans = null; state.optimerat = false; state.motorResultat = null; persist();
+  state.balans = null; state.optimerat = false; state.motorResultat = null; state.balansGodkand = false; persist();
   notera("Tillbaka till originaldata", "ok", { detalj: "Både schemat och kundbehovet visas som de lästes in." });
   render();
 }
@@ -2924,6 +2948,7 @@ function render() {
       },
       rensaSchemaOriginal: () => { state.schemaOriginal = null; state.schemaGodkand = false; state.balans = null; state.optimerat = false; persist(); render(); },
       skapaBalans: () => skapaBalans(),
+      godkannBalans: () => godkannBalans(),
       aterstallBalans: () => aterstallBalans(),
       harBalans: () => harResultat(),
       harUnderlag: () => harUnderlag(),
@@ -3162,7 +3187,7 @@ function wireView() {
     sim[e.target.dataset.sim] = Number(e.target.value); render();
   });
   if ($("#simReset")) $("#simReset").onclick = () => { sim = {}; render(); };
-  // Före/efter: läs in optimerat schema
+  // Före → Balans: läs in planerat schema
   if ($("#fePick")) $("#fePick").onclick = () => $("#nyttFileInput").click();
   if ($("#feDrop")) {
     const dz = $("#feDrop");
@@ -3322,7 +3347,7 @@ function borjaOm() {
   state.rows = []; state.period = null; state.importDays = 0;
   state.schemaOriginal = null; state.kundGodkand = false; state.schemaGodkand = false;
   state.kundAndrad = false; state.medarbetareAndrad = false;
-  state.balans = null; state.optimerat = false; state.motorResultat = null;
+  state.balans = null; state.optimerat = false; state.motorResultat = null; state.balansGodkand = false;
   state.org = "";
   state.resurs = null; state.berakningar = null; state.berakningarDerived = false;
   state.kontroller = null; state.personal = null; state.intakter = null; state.passmallar = null;

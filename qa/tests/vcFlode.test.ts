@@ -14,6 +14,13 @@ import {
   filtreraJamforRader,
   genomsnittligSsgPct,
   getBemanningsbalansReadiness,
+  getTidslage,
+  hemHuvudCta,
+  balansKanGodkannas,
+  effektPilFranForandring,
+  MATCHNING_FORMEL,
+  UNDERKAPACITET_FORMEL,
+  OVERKAPACITET_FORMEL,
   jamforTon,
   kundUnderlagStatus,
   lasMotorSummary,
@@ -50,11 +57,11 @@ describe("processsteg", () => {
     expect(PROCESS_STEG.map((s) => s.label)).toEqual([
       "Kundbehov",
       "Medarbetare",
-      "Skapa bemanningsbalans",
-      "Granska",
-      "Före och efter",
-      "Godkänn",
-      "Uppföljning",
+      "Skapa balans",
+      "Granska balans",
+      "Före → Balans",
+      "Godkänn balans",
+      "Utfall",
     ]);
     const src = readFileSync(join(rot, "src/components/bb/ProcessFlode.tsx"), "utf8");
     expect(src).toContain("→");
@@ -200,8 +207,8 @@ describe("KPI-benämningar", () => {
     expect(snitt).toBe(85);
     expect(utnytt).toBeNull();
     const tre = readFileSync(join(rot, "src/components/bb/TreOmraden.tsx"), "utf8");
-    expect(tre).toContain("Genomsnittlig SSG");
     expect(tre).toMatch(/ssgUtnyttjande/);
+    expect(tre).not.toContain("etikett: \"Genomsnittlig SSG\"");
   });
 
   it("vakanta rader är inte vakanta timmar och vikarieantal inte vikarietimmar", () => {
@@ -320,32 +327,53 @@ describe("summary-adapter", () => {
 
 describe("Rätt resurser i rätt tid", () => {
   it("används som rubrik, inte Ekonomi", () => {
-    expect(TRE_OMRADEN_RUBRIKER).toContain("Rätt resurser i rätt tid");
+    expect(TRE_OMRADEN_RUBRIKER).toEqual(["Kundnära tid", "Hållbara scheman", "Rätt resurs i rätt tid"]);
     expect(TRE_OMRADEN_RUBRIKER.join(" ")).not.toMatch(/Ekonomi/);
     const tre = readFileSync(join(rot, "src/components/bb/TreOmraden.tsx"), "utf8");
-    expect(tre).toContain("Rätt resurser i rätt tid");
+    expect(tre).toContain("TRE_OMRADEN_RUBRIKER");
     expect(tre).toContain("lg:grid-cols-3");
+    expect(tre).toContain('data-huvudomraden="3"');
     const eko = readFileSync(join(rot, "src/components/bb/Ekonomi.tsx"), "utf8");
-    expect(eko).toContain("Rätt resurser i rätt tid");
+    expect(eko).toContain("Rätt resurs i rätt tid");
   });
 });
 
 describe("före/efter och polaritet", () => {
-  it("visar bara relevanta nyckeltal med verksamhetsnära namn", () => {
+  it("visar Före → Balans-mått med underkapacitet under matchning", () => {
     const rader = filtreraJamforRader([
       { namn: "Täckt behov", fore: "80 %", efter: "90 %", forandring: "+10 %", riktning: "upp" },
       { namn: "Personalkostnad", fore: "10", efter: "9", forandring: "−1", riktning: "upp" },
       { namn: "Planerade personaltimmar", fore: "100", efter: "80", forandring: "−20", riktning: "upp" },
       { namn: "Överbemanning", fore: "10", efter: "4", forandring: "−6", riktning: "upp" },
+      { namn: "Matchning mot behov", fore: "63 %", efter: "67 %", forandring: "+4 %", riktning: "upp" },
+      { namn: "Otäckt dimensionerande resursbehov", fore: "372", efter: "334", forandring: "−38", riktning: "upp" },
+      { namn: "Obemannat kundbehov", fore: "100", efter: "50", forandring: "−50", riktning: "upp" },
     ]);
-    expect(rader.map((r) => r.namn)).toEqual(["Täckt behov", "Schemakostnad", "Överkapacitet"]);
+    expect(rader.map((r) => r.namn)).toEqual([
+      "Planerade personaltimmar",
+      "Matchning mot behov",
+      "Underkapacitet",
+      "Överkapacitet",
+      "Täckt behov",
+      "Personalkostnad",
+    ]);
+    expect(rader.find((r) => r.namn === "Underkapacitet")?.underMatchning).toBe(true);
+    expect(rader.find((r) => r.namn === "Överkapacitet")?.underMatchning).toBe(true);
+    expect(rader.map((r) => r.namn)).not.toContain("Obemannat kundbehov");
     expect(FORE_EFTER_NYCKLAR).toContain("Täckt behov");
+    expect(FORE_EFTER_NYCKLAR).toContain("Matchning mot behov");
   });
 
   it("markerar inte lägre bemanning som bra när täckningen sjunker", () => {
     expect(jamforTon({ namn: "Överkapacitet", riktning: "upp", tackningSank: true })).toBe("varn");
     expect(jamforTon({ namn: "Täckt behov", riktning: "upp", tackningSank: false })).toBe("bra");
     expect(jamforTon({ namn: "Täckt behov", riktning: "ner", tackningSank: true })).toBe("varn");
+  });
+
+  it("effektpilar följer talets riktning, inte förbättring", () => {
+    expect(effektPilFranForandring("−9 720 kr")).toBe("ner");
+    expect(effektPilFranForandring("+4 %")).toBe("upp");
+    expect(effektPilFranForandring("–")).toBe("lika");
   });
 });
 
@@ -380,5 +408,51 @@ describe("tomma, laddande och fel-lägen", () => {
     expect(kundUnderlagStatus({ godkand: true }).text).toBe("Klar");
     expect(kundUnderlagStatus({ godkand: false }).text).toBe("Behöver kompletteras");
     expect(kundUnderlagStatus({ godkand: true, redigerad: true }).text).toBe("Förändrad sedan senaste godkännande");
+  });
+});
+
+describe("Före / Balans / Utfall", () => {
+  it("väljer läge utan att blanda plan och utfall", () => {
+    expect(getTidslage({ harBalans: false })).toBe("fore");
+    expect(getTidslage({ harBalans: true })).toBe("balans");
+    expect(getTidslage({ harBalans: true, harUtfall: true })).toBe("utfall");
+  });
+
+  it("har en CTA per läge", () => {
+    expect(hemHuvudCta({ lage: "fore", ready: true, godkannbar: false }).label).toBe("Skapa balans");
+    expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: false }).label).toBe("Granska balans");
+    expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: true }).label).toBe("Godkänn balans");
+    expect(hemHuvudCta({ lage: "utfall", ready: true, godkannbar: true }).label).toBe("Följ upp utfall");
+  });
+
+  it("kan inte godkänna Balans under 100 % täckt behov eller med hårda regelbrott", () => {
+    expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).ok).toBe(false);
+    expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 1 }).ok).toBe(false);
+    expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 0 }).ok).toBe(true);
+    expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).reasons[0]).toMatch(/kundbehov återstår/);
+  });
+
+  it("håller Täckt behov och Kundnära tid isär", () => {
+    expect(TACKT_BEHOV_FORKLARING).not.toBe(KUNDNARA_FORKLARING);
+    expect(TACKT_BEHOV_FORKLARING).toMatch(/bemannat kundbehov/);
+    expect(KUNDNARA_FORKLARING).toMatch(/schemalagd kundnära/);
+  });
+
+  it("dokumenterar matchning och kapacitet utan att ändra formeln", () => {
+    expect(MATCHNING_FORMEL.kod).toContain("obemannatH / dimH");
+    expect(MATCHNING_FORMEL.tidsmassigMatchning).toBe(true);
+    expect(MATCHNING_FORMEL.overlapparTacktBehov).toBe(false);
+    expect(UNDERKAPACITET_FORMEL.falt).toContain("obemannatH");
+    expect(OVERKAPACITET_FORMEL.anvanderDimensionerandeKurva).toBe(false);
+  });
+
+  it("Hem har tre huvudområden och CTA, inte underbemanning som etikett för dimensionerande gap", () => {
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    const tre = readFileSync(join(rot, "src/components/bb/TreOmraden.tsx"), "utf8");
+    expect(hem).toContain("data-cta={cta.id}");
+    expect(hem).toContain("data-statusrad");
+    expect(tre).toContain("Matchning mot behov");
+    expect(tre).toContain("↳");
+    expect(tre).not.toContain("Obemannat behov");
   });
 });
