@@ -59,7 +59,7 @@ function Statusband({ d, state, api }: DataProps) {
   const bemanningPunkt = {
     ok: obemannade === 0,
     txt: obemannade === 0 ? "Alla insatser bemannade" : `${obemannade} halvtimmar saknar bemanning`,
-    sub: obemannade === 0 ? `${d.n.antalInsatser} insatser` : `${api.h1(lage ? lage.obemannatH : 0)} obemannat behov`,
+    sub: obemannade === 0 ? `${d.n.antalInsatser} insatser` : `${api.h1(lage ? lage.otacktDimensionerandeResursH ?? lage.obemannatH : 0)} otäckt dimensionerande resursbehov`,
   };
   if (optimerat) {
     const andel = api.ber("Planerad kundnära andel") as number | null;

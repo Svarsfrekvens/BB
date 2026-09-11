@@ -1,4 +1,4 @@
-/** Gemensam KPI-definition för Före, Efter, Översikt och tester.
+/** Gemensam KPI-definition för Före, Efter, Översikt, Uppföljning och tester.
  * Kundnära tid = schemalagd kundnära arbetstid ÷ total schemalagd arbetstid.
  * Täckt behov = bemannat kundbehov ÷ totalt kundbehov.
  * Obemannat kundbehov får aldrig ingå i kundnära täljare. */
@@ -21,9 +21,36 @@ export type KpiResultat = {
   bemannatKundbehovH: number;
   obemannatKundbehovH: number;
   tacktBehovPct: number;
-  /** Sant när täljaren överskred nämnaren – då kapas KPI:n till invariant, inte kosmetiskt i UI. */
+  /** Sant när indata bröt invarianten – KPI:n hålls inom 0…schematid, inte kosmetiskt i UI. */
   modellFel: boolean;
 };
+
+/** Rymmer inom-pass-aktiviteter i kvarvarande passkapacitet. Skapar ingen osynlig tid. */
+export function rymInomPass(d: {
+  schematidH: number;
+  direktKundnaraH: number;
+  inomPassKundnaraH: number;
+  inomPassEjKundnaraH?: number;
+}) {
+  const schematidH = Math.max(0, d.schematidH);
+  const direkt = Math.max(0, d.direktKundnaraH);
+  const extraK = Math.max(0, d.inomPassKundnaraH);
+  const extraE = Math.max(0, d.inomPassEjKundnaraH || 0);
+  const kvar = Math.max(0, schematidH - direkt);
+  const rymdKundnaraH = Math.min(extraK, kvar);
+  const kvarEfter = Math.max(0, kvar - rymdKundnaraH);
+  const rymdEjKundnaraH = Math.min(extraE, kvarEfter);
+  const overflowH = extraK - rymdKundnaraH + (extraE - rymdEjKundnaraH) + Math.max(0, direkt - schematidH);
+  return {
+    schematidH,
+    direktKundnaraH: Math.min(direkt, schematidH),
+    rymdKundnaraH,
+    rymdEjKundnaraH,
+    overflowH,
+    platsBrist: overflowH > 1e-9,
+    kundnaraH: Math.min(schematidH, Math.min(direkt, schematidH) + rymdKundnaraH),
+  };
+}
 
 export function beraknaKpi(d: KpiIndata): KpiResultat {
   const schematidH = Math.max(0, d.schematidH);

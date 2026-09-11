@@ -573,6 +573,7 @@ function harleddBerakningar(rows, period, individschema, antag) {
       till,
       timkostnad,
       extraInomPassKundnaraH: extra.inomPassKundnaraH,
+      extraInomPassEjKundnaraH: extra.inomPassEjKundnaraH,
     });
     kpiAndel = { kundnaraPct: a.kundnaraPct };
     schematid = a.schematidH;
@@ -776,6 +777,7 @@ function analyseraMedAktiviteter(pass, rader) {
     fran: from,
     till: to,
     extraInomPassKundnaraH: extra.inomPassKundnaraH,
+    extraInomPassEjKundnaraH: extra.inomPassEjKundnaraH,
     ...ekonomiBas(),
   });
 }
@@ -871,6 +873,7 @@ function foreEfterModell() {
     pass: schemaPass(),
     rader: C.filtreraPeriod(state.rows, from, to),
     extraInomPassKundnaraH: extraFore.inomPassKundnaraH,
+    extraInomPassEjKundnaraH: extraFore.inomPassEjKundnaraH,
   });
   if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [], obemannade: [] };
   const extraEfter = aktivitetTillägg(efterPass());
@@ -879,6 +882,7 @@ function foreEfterModell() {
     pass: efterPass(),
     rader: C.filtreraPeriod(raderEfter(), from, to),
     extraInomPassKundnaraH: extraEfter.inomPassKundnaraH,
+    extraInomPassEjKundnaraH: extraEfter.inomPassEjKundnaraH,
   });
   const schemaVarningar = (state.balans.schemaVarningar || []).map((v) => v.text);
   const varningar = [...new Set([...villkorsVarningar(), ...schemaVarningar])];

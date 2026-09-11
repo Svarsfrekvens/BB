@@ -47,7 +47,7 @@ describe("tolkaMotorSchema – sommartid", () => {
       }),
       { medarbetare: {}, insatser: {} },
     );
-    expect(schema?.objectiveBreakdown).toEqual({ costOre: 1000, continuityOre: 5000, spreadOre: 250 });
+    expect(schema?.objectiveBreakdown).toEqual({ costOre: 1000, continuityOre: 5000, spreadOre: 250, uncoveredMinutes: 0 });
   });
 
   it("märker type jour som sovande jour", () => {

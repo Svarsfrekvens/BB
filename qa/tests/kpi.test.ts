@@ -30,6 +30,19 @@ describe("KPI kundnära tid och täckt behov", () => {
     expect(k.modellFel).toBe(false);
   });
 
+  it("Test 2: kundnära får aldrig överstiga schematid", () => {
+    const k = beraknaKpi({
+      schematidH: 8,
+      kundnaraArbetstidH: 8.5,
+      totaltKundbehovH: 6,
+      bemannatKundbehovH: 6,
+    });
+    expect(k.kundnaraH).toBeLessThanOrEqual(k.schematidH);
+    expect(k.kundnaraH).not.toBeCloseTo(8.5, 5);
+    expect(k.modellFel).toBe(true);
+    expect(k.kundnaraPct).toBeLessThanOrEqual(100);
+  });
+
   it("scenario C: obemannat behov höjer inte kundnära tid", () => {
     const utan = beraknaKpi({
       schematidH: 400,
@@ -142,6 +155,58 @@ describe("planeringsaktiviteter", () => {
     expect(tim.separatEjKundnaraH).toBeGreaterThan(0);
     expect(exp.find((e) => e.typ === "lasa_journal")?.tidstyp).toBe("inom_pass");
     expect(exp.find((e) => e.typ === "verksamhetsmote")?.tidstyp).toBe("separat_tid");
+  });
+
+  it("Test 3: inaktiv GP ger 0 minuter", () => {
+    const katalog = standardKatalog();
+    const exp = expanderaAktiviteter({
+      aktiviteter: katalog,
+      fran: "2026-09-01",
+      till: "2026-09-30",
+      arbetspass: 10,
+      kunder: ["Kund A"],
+      kontaktpersoner: {},
+    });
+    expect(exp.find((e) => e.typ === "gp")).toBeUndefined();
+    expect(aktivitetstimmar(exp).inomPassKundnaraH).toBe(0);
+  });
+
+  it("Test 4–5: aktiverad GP använder schablon 60 min och sedan 45 min", () => {
+    const bas = standardKatalog().map((a) => (a.id === "gp" ? { ...a, aktiv: true, omfattning: 1, enhet: "timmar" as const } : a));
+    const exp60 = expanderaAktiviteter({
+      aktiviteter: bas,
+      fran: "2026-09-01",
+      till: "2026-09-30",
+      arbetspass: 0,
+      kunder: ["Kund A"],
+      kontaktpersoner: {},
+    });
+    expect(exp60.find((e) => e.typ === "gp")?.timmar).toBeCloseTo(1, 5);
+    const exp45 = expanderaAktiviteter({
+      aktiviteter: bas.map((a) => (a.id === "gp" ? { ...a, omfattning: 45, enhet: "minuter" as const } : a)),
+      fran: "2026-09-01",
+      till: "2026-09-30",
+      arbetspass: 0,
+      kunder: ["Kund A"],
+      kontaktpersoner: {},
+    });
+    expect(exp45.find((e) => e.typ === "gp")?.timmar).toBeCloseTo(0.75, 5);
+  });
+
+  it("samma aktivitet-id dubbelräknas inte", () => {
+    const en = standardKatalog().find((a) => a.id === "gp")!;
+    const exp = expanderaAktiviteter({
+      aktiviteter: [
+        { ...en, aktiv: true },
+        { ...en, aktiv: true },
+      ],
+      fran: "2026-09-01",
+      till: "2026-09-30",
+      arbetspass: 0,
+      kunder: ["Kund A"],
+      kontaktpersoner: {},
+    });
+    expect(exp.filter((e) => e.typ === "gp")).toHaveLength(1);
   });
 
   it("kontaktpersonstid knyts till medarbetare 1", () => {

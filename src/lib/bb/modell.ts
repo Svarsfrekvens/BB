@@ -18,7 +18,7 @@
 
 import * as C from "./core";
 import type { DatumPass } from "./medvind";
-import { beraknaKpi } from "./kpi";
+import { beraknaKpi, rymInomPass } from "./kpi";
 
 export type Slot = { datum: string; klockan: string; behov: number; dimensionerat: number; bemanning: number; jour: number };
 
@@ -38,10 +38,19 @@ export type Lage = {
   tackningPct: number;
   ejKundnaraH: number;
   bemannatKundbehovH: number;
+  /** totalt kundbehov − bemannat kundbehov. Aldrig större än totalt kundbehov. */
+  obemannatKundbehovH: number;
+  /** Samtidighets-/nattgolvskurvan, kan vara större än rått kundbehov. */
+  dimensionerandeResursbehovH: number;
+  /** Gap mellan dimensionerande resursbehov och faktisk bemanning. */
+  otacktDimensionerandeResursH: number;
   kostnad: number;
   obemannadeIntervall: number;
+  /** Alias för otacktDimensionerandeResursH (historiskt fältnamn). */
   obemannatH: number;
   overkapacitetH: number;
+  modellFel: boolean;
+  inomPassOverflowH: number;
   /** Hur stor del av det dimensionerande behovet som är bemannat, i procent. */
   matchningPct: number;
   /** Beräknad intäkt: antal kunder × dygnsersättning × antal dygn. */
@@ -112,6 +121,7 @@ export function analysera(opts: {
   dygnsErsattning?: number;
   /** Kundnära tid som ryms i redan schemalagda pass (tidstyp inom_pass). Ökar inte schematid. */
   extraInomPassKundnaraH?: number;
+  extraInomPassEjKundnaraH?: number;
 }): Lage {
   const { rader, pass, fran, till, timkostnad } = opts;
   const lista = dagar(fran, till);
@@ -147,15 +157,21 @@ export function analysera(opts: {
   });
 
   const arbetspass = pass.filter((p) => !p.jour);
-  const extraInom = Math.max(0, opts.extraInomPassKundnaraH || 0);
   const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0);
   const jourH = pass.filter((p) => p.jour).reduce((s, p) => s + p.timmar, 0);
-  const kpi = beraknaKpi({
+  const rymd = rymInomPass({
     schematidH,
-    kundnaraArbetstidH: bemannatKundbehovH + extraInom,
+    direktKundnaraH: bemannatKundbehovH,
+    inomPassKundnaraH: opts.extraInomPassKundnaraH || 0,
+    inomPassEjKundnaraH: opts.extraInomPassEjKundnaraH || 0,
+  });
+  const kpiRaw = beraknaKpi({
+    schematidH,
+    kundnaraArbetstidH: rymd.kundnaraH,
     totaltKundbehovH: n.kundbehovH,
     bemannatKundbehovH,
   });
+  const kpi = { ...kpiRaw, modellFel: kpiRaw.modellFel || rymd.platsBrist };
   const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0);
   const intakt = (opts.antalKunder || 0) * (opts.dygnsErsattning || 0) * lista.length;
   const delare = lista.length * 2; // två intervall per timme och dag
@@ -172,10 +188,15 @@ export function analysera(opts: {
     tackningPct: kpi.tacktBehovPct,
     ejKundnaraH: kpi.ejKundnaraH,
     bemannatKundbehovH: kpi.bemannatKundbehovH,
+    obemannatKundbehovH: kpi.obemannatKundbehovH,
+    dimensionerandeResursbehovH: dimH,
+    otacktDimensionerandeResursH: obemannatH,
     kostnad,
     obemannadeIntervall,
     obemannatH,
     overkapacitetH,
+    modellFel: kpi.modellFel,
+    inomPassOverflowH: rymd.overflowH,
     matchningPct: dimH > 0 ? Math.max(0, (1 - obemannatH / dimH)) * 100 : 100,
     intakt,
     resultat: intakt - kostnad,
@@ -359,7 +380,8 @@ export function jamfor(
   const tabell: JamforRad[] = [
     rad("Planerade personaltimmar", fore.schematidH, efter.schematidH, fmt.h, true),
     rad("Kundernas behov", fore.personalbehovH, efter.personalbehovH, fmt.h, false, true),
-    rad("Underbemanning (obemannat behov)", fore.obemannatH, efter.obemannatH, fmt.h, true),
+    rad("Obemannat kundbehov", fore.obemannatKundbehovH, efter.obemannatKundbehovH, fmt.h, true),
+    rad("Otäckt dimensionerande resursbehov", fore.otacktDimensionerandeResursH, efter.otacktDimensionerandeResursH, fmt.h, true),
     rad("Överbemanning", fore.overkapacitetH, efter.overkapacitetH, fmt.h, true),
     rad("Matchning mot behov", fore.matchningPct, efter.matchningPct, fmt.pct, false),
     rad("Kundnära tid", fore.kundnaraPct, efter.kundnaraPct, fmt.pct, false),
@@ -391,6 +413,14 @@ export function jamfor(
   if (diffObem !== 0) punkter.push(`Antalet intervall med obemannat behov ändras med ${diffObem > 0 ? "+" : "−"}${Math.abs(diffObem)}.`);
   const diffOver = efter.overkapacitetH - fore.overkapacitetH;
   if (Math.abs(diffOver) >= 0.05) punkter.push(`Överkapaciteten ändras med ${diffOver > 0 ? "+" : "−"}${fmt.h(Math.abs(diffOver))}.`);
+  if (efter.tackningPct + 0.05 < fore.tackningPct) {
+    punkter.push(
+      `Täckt behov sjönk från ${fmt.pct(fore.tackningPct)} till ${fmt.pct(efter.tackningPct)}. Lexikografisk optimering maximerar täckning före kostnad, så detta betyder att högre täckning inte gick att nå utan att bryta hårda regler eller utan mer tillgänglig personal – inte att kostnaden har prioriterats.`,
+    );
+  }
+  if (fore.modellFel || efter.modellFel) {
+    punkter.push("Modellfel: planerad inom-pass-tid rymdes inte i arbetspassen och har inte räknats som osynlig extra tid.");
+  }
   for (const v of varningar || []) punkter.push(v);
   punkter.push("Appen föreslår justeringar och räknar om siffrorna – den lägger inte ett färdigt lagligt schema automatiskt.");
 
@@ -517,6 +547,16 @@ export function optimeraSchema(opts: {
   const slots = (p: DatumPass): number[] => { const di = idx.get(p.datum); if (di == null) return []; const s = toMinR(p.start); let e = toMinR(p.slut); if (e <= s) e += 1440; const out: number[] = []; for (let sl = Math.floor(s / 30); sl < Math.ceil(e / 30); sl++) { const d2 = di + (sl >= 48 ? 1 : 0); if (d2 >= nD) break; out.push(d2 * 48 + (sl % 48)); } return out; };
   const app = (p: DatumPass, t: number) => { for (const c of slots(p)) bem[c] = (bem[c] ?? 0) + t; };
   for (const p of P) if (!p.jour) app(p, +1);
+  const kundBrist = () => {
+    let s = 0;
+    for (let c = 0; c < N; c++) s += Math.max(0, (ra[c] ?? 0) - (bem[c] ?? 0));
+    return s;
+  };
+  const dimBrist = () => {
+    let s = 0;
+    for (let c = 0; c < N; c++) s += Math.max(0, (dim[c] ?? 0) - (bem[c] ?? 0));
+    return s;
+  };
   const kostSlot = (c: number) => { const b = bem[c] ?? 0; return Math.max(0, (dim[c] ?? 0) - b) * 3 + Math.max(0, b - (ra[c] ?? 0)) * 1.5; };
   const kostFor = (cells: number[]) => cells.reduce((k, c) => k + kostSlot(c), 0);
   const timPer = () => { const m = new Map<string, number>(); for (const p of P) if (!p.jour) m.set(p.namn, (m.get(p.namn) || 0) + p.timmar); return m; };
@@ -525,18 +565,31 @@ export function optimeraSchema(opts: {
   const farJobba = (namn: string, datum: string) => { const m = medMap.get(namn); if (!m) return true; const v = veckaNr(datum, fran); if (m.franvaro === "ledig1v" && v % 4 === 3) return false; if (m.franvaro === "halvtid" && v % 2 === 1) return false; if (m.franvaro === "semester" && v >= veckor - 2) return false; if (arHelg(datum) && m.helggrad && !(new Set(m.helggrad === "alla" ? Array.from({ length: veckor }, (_, i) => i) : m.helggrad === "var3" ? Array.from({ length: veckor }, (_, i) => i).filter((i) => i % 3 === 0) : m.helggrad === "inga" ? [] : Array.from({ length: veckor }, (_, i) => i).filter((i) => i % 2 === 0))).has(v)) return false; return true; };
   const inomTid = (namn: string, s: number, e: number) => { const m = medMap.get(namn); let lo = jE, hi = jS; if (m) { if (m.tidigast) lo = Math.max(lo, toMinR(m.tidigast)); if (m.senast) hi = Math.min(hi, toMinR(m.senast)); if (m.passprofil === "dag") hi = Math.min(hi, 17 * 60); else if (m.passprofil === "kvall") lo = Math.max(lo, 14 * 60); else if (m.passprofil === "natt") return false; } return s >= lo && e <= hi && e - s >= 120 && e - s <= 600; };
   const forandringar: SchemaForandring[] = [];
-  const testa = (p: DatumPass, q: DatumPass) => { const beror = [...new Set([...slots(p), ...slots(q)])]; const k0 = kostFor(beror); app(p, -1); app(q, +1); const k1 = kostFor(beror); app(q, -1); app(p, +1); return k1 - k0; };
+  const testa = (p: DatumPass, q: DatumPass) => {
+    const brist0 = kundBrist();
+    const dim0 = dimBrist();
+    const beror = [...new Set([...slots(p), ...slots(q)])];
+    const k0 = kostFor(beror);
+    app(p, -1); app(q, +1);
+    const brist1 = kundBrist();
+    const dim1 = dimBrist();
+    const k1 = kostFor(beror);
+    app(q, -1); app(p, +1);
+    return { dBrist: brist1 - brist0, dDim: dim1 - dim0, dTim: q.timmar - p.timmar, dKost: k1 - k0 };
+  };
+  const battre = (t: { dBrist: number; dTim: number; dKost: number }) =>
+    t.dBrist < -1e-9 || (Math.abs(t.dBrist) < 1e-9 && t.dTim < -1e-9) || (Math.abs(t.dBrist) < 1e-9 && Math.abs(t.dTim) < 1e-9 && t.dKost < -0.51);
   const gor = (i: number, q: Partial<DatumPass>, typ: string, text: string) => { const p = P[i]; if (!p) return false; app(p, -1); const g = { ...p }; Object.assign(p, q); if (!regelOK(p.namn)) { Object.assign(p, g); app(p, +1); return false; } app(p, +1); forandringar.push({ typ, namn: p.namn, datum: p.datum, text }); return true; };
 
   let forbattrat = true, varv = 0;
   while (forbattrat && varv < 20) { forbattrat = false; varv++; let tim = timPer();
     for (let i = 0; i < P.length; i++) { const p = P[i]; if (!p || p.jour || p.vakant || p.vikarie) continue; if (!farJobba(p.namn, p.datum)) continue;
       const s = toMinR(p.start); let e = toMinR(p.slut); if (e <= s) e += 1440; const dur = e - s;
-      let bast: any = null, bd = -0.51;
-      for (const d of [-300, -240, -180, -120, -90, -60, -45, -30, -15, 15, 30, 45, 60, 90, 120, 180, 240, 300]) { const ns = s + d, ne = e + d; if (ns < 0 || !inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne) }; const dl = testa(p, q); if (dl < bd) { bd = dl; bast = { q, typ: "flyttat", text: `${p.namn} ${p.datum}: pass flyttat ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } }
-      for (const d of [30, 60]) { if (dur - d < 180) break; for (const sida of ["slut", "start"]) { const ns = sida === "start" ? s + d : s, ne = sida === "slut" ? e - d : e; if (!inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne), timmar: (ne - ns) / 60 }; const dl = testa(p, q); if (dl < bd) { bd = dl; bast = { q, typ: "kortat", text: `${p.namn} ${p.datum}: pass kortat ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } } }
+      let bast: { q: DatumPass; typ: string; text: string } | null = null, bd: ReturnType<typeof testa> | null = null;
+      for (const d of [-300, -240, -180, -120, -90, -60, -45, -30, -15, 15, 30, 45, 60, 90, 120, 180, 240, 300]) { const ns = s + d, ne = e + d; if (ns < 0 || !inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne) }; const t = testa(p, q); if (battre(t) && (!bd || t.dBrist < bd.dBrist - 1e-9 || (Math.abs(t.dBrist - bd.dBrist) < 1e-9 && (t.dTim < bd.dTim - 1e-9 || (Math.abs(t.dTim - bd.dTim) < 1e-9 && t.dKost < bd.dKost))))) { bd = t; bast = { q, typ: "flyttat", text: `${p.namn} ${p.datum}: pass flyttat ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } }
+      for (const d of [30, 60]) { if (dur - d < 180) break; for (const sida of ["slut", "start"]) { const ns = sida === "start" ? s + d : s, ne = sida === "slut" ? e - d : e; if (!inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne), timmar: (ne - ns) / 60 }; const t = testa(p, q); if (battre(t) && (!bd || t.dBrist < bd.dBrist - 1e-9 || (Math.abs(t.dBrist - bd.dBrist) < 1e-9 && (t.dTim < bd.dTim - 1e-9 || (Math.abs(t.dTim - bd.dTim) < 1e-9 && t.dKost < bd.dKost))))) { bd = t; bast = { q, typ: "kortat", text: `${p.namn} ${p.datum}: pass kortat ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } } }
       const utr = (tak.get(p.namn) || 0) - (tim.get(p.namn) || 0);
-      if (utr >= 0.5) for (const d of [30, 60]) { if (d / 60 > utr + 0.01) break; for (const sida of ["slut", "start"]) { const ns = sida === "start" ? s - d : s, ne = sida === "slut" ? e + d : e; if (ns < 0 || !inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne), timmar: (ne - ns) / 60 }; const dl = testa(p, q); if (dl < bd) { bd = dl; bast = { q, typ: "forlangt", text: `${p.namn} ${p.datum}: pass förlängt ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } } }
+      if (utr >= 0.5) for (const d of [30, 60]) { if (d / 60 > utr + 0.01) break; for (const sida of ["slut", "start"]) { const ns = sida === "start" ? s - d : s, ne = sida === "slut" ? e + d : e; if (ns < 0 || !inomTid(p.namn, ns, ne)) continue; const q = { ...p, start: klockaR(ns), slut: klockaR(ne), timmar: (ne - ns) / 60 }; const t = testa(p, q); if (battre(t) && (!bd || t.dBrist < bd.dBrist - 1e-9 || (Math.abs(t.dBrist - bd.dBrist) < 1e-9 && (t.dTim < bd.dTim - 1e-9 || (Math.abs(t.dTim - bd.dTim) < 1e-9 && t.dKost < bd.dKost))))) { bd = t; bast = { q, typ: "forlangt", text: `${p.namn} ${p.datum}: pass förlängt ${p.start}–${p.slut} → ${q.start}–${q.slut}` }; } } }
       if (bast && gor(i, bast.q, bast.typ, bast.text)) { forbattrat = true; tim = timPer(); }
     }
   }

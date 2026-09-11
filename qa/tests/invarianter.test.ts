@@ -107,4 +107,14 @@ describe("invarianter Galaxen", () => {
     const efterTal = Number(String(rad!.efter).replace(/\s/g, "").replace("h", "").replace(",", "."));
     expect(efterTal).toBeCloseTo(k.efter.schematidH, 1);
   });
+
+  it("Galaxen Före matchar känt underlag", () => {
+    expect(k.fore.schematidH).toBeCloseTo(832, 1);
+    expect(k.fore.kundbehovH).toBeCloseTo(578.8, 1);
+    expect(k.fore.tackningPct).toBeCloseTo(82.5, 1);
+  });
+
+  it("lexikografisk lokal sökning sänker inte täckt kundbehov", () => {
+    expect(k.efter.tackningPct).toBeGreaterThanOrEqual(k.fore.tackningPct - 0.05);
+  });
 });

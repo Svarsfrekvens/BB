@@ -69,7 +69,14 @@ export type MotorSchema = {
   obemannade: MotorObemannad[];
   objective: number | null;
   bound: number | null;
-  objectiveBreakdown: { costOre: number; continuityOre: number; spreadOre: number } | null;
+  objectiveBreakdown: { costOre: number; continuityOre: number; spreadOre: number; uncoveredMinutes?: number } | null;
+  lexicographic?: {
+    uncoveredMinutes: number;
+    costOre: number;
+    qualityOre: number;
+    coverageProven: boolean;
+    phases: { name: string; status: string; seconds: number }[];
+  } | null;
 };
 
 type Rast = { offset?: number; minutes?: number };
@@ -176,6 +183,16 @@ export function tolkaMotorSchema(schemaJson: string, upp: Uppslag): MotorSchema 
           costOre: Number(schema.objectiveBreakdown.costOre) || 0,
           continuityOre: Number(schema.objectiveBreakdown.continuityOre) || 0,
           spreadOre: Number(schema.objectiveBreakdown.spreadOre) || 0,
+          uncoveredMinutes: Number(schema.objectiveBreakdown.uncoveredMinutes) || 0,
+        }
+      : null,
+    lexicographic: schema.lexicographic
+      ? {
+          uncoveredMinutes: Number(schema.lexicographic.uncoveredMinutes) || 0,
+          costOre: Number(schema.lexicographic.costOre) || 0,
+          qualityOre: Number(schema.lexicographic.qualityOre) || 0,
+          coverageProven: Boolean(schema.lexicographic.coverageProven),
+          phases: Array.isArray(schema.lexicographic.phases) ? schema.lexicographic.phases : [],
         }
       : null,
   };
@@ -199,6 +216,16 @@ export function slaSamman(delar: MotorSchema[]): MotorSchema | null {
           costOre: delar.reduce((s, d) => s + (d.objectiveBreakdown?.costOre || 0), 0),
           continuityOre: delar.reduce((s, d) => s + (d.objectiveBreakdown?.continuityOre || 0), 0),
           spreadOre: delar.reduce((s, d) => s + (d.objectiveBreakdown?.spreadOre || 0), 0),
+          uncoveredMinutes: delar.reduce((s, d) => s + (d.objectiveBreakdown?.uncoveredMinutes || 0), 0),
+        }
+      : null,
+    lexicographic: delar.some((d) => d.lexicographic)
+      ? {
+          uncoveredMinutes: delar.reduce((s, d) => s + (d.lexicographic?.uncoveredMinutes || 0), 0),
+          costOre: delar.reduce((s, d) => s + (d.lexicographic?.costOre || 0), 0),
+          qualityOre: delar.reduce((s, d) => s + (d.lexicographic?.qualityOre || 0), 0),
+          coverageProven: delar.every((d) => d.lexicographic?.coverageProven),
+          phases: delar.flatMap((d) => d.lexicographic?.phases || []),
         }
       : null,
   };

@@ -80,14 +80,19 @@ export function ForeEfter({ api }: VyProps) {
               </p>
             ) : null}
             {(() => {
-              const br = (api.motorResultat() as { objectiveBreakdown?: { costOre: number; continuityOre: number; spreadOre: number } } | null)
-                ?.objectiveBreakdown;
-              if (!br || api.berakningsKalla() !== "motor") return null;
+              const res = api.motorResultat() as {
+                objectiveBreakdown?: { costOre: number; continuityOre: number; spreadOre: number; uncoveredMinutes?: number };
+                lexicographic?: { uncoveredMinutes: number; costOre: number; qualityOre: number; coverageProven: boolean };
+              } | null;
+              const br = res?.objectiveBreakdown;
+              const lex = res?.lexicographic;
+              if ((!br && !lex) || api.berakningsKalla() !== "motor") return null;
               const kr = (ore: number) => (ore / 100).toLocaleString("sv-SE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
               return (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Målfördelning: kostnad {kr(br.costOre)} kr, kontinuitet {kr(br.continuityOre)} kr, spridning{" "}
-                  {kr(br.spreadOre)} kr.
+                  {lex
+                    ? `Lexikografisk körning: obemannade insatsminuter ${lex.uncoveredMinutes}${lex.coverageProven ? " (bevisat steg 1)" : ""}, därefter kostnad ${kr(lex.costOre)} kr, därefter kvalitet.`
+                    : `Målfördelning: kostnad ${kr(br!.costOre)} kr, kontinuitet ${kr(br!.continuityOre)} kr, spridning ${kr(br!.spreadOre)} kr.`}
                 </p>
               );
             })()}

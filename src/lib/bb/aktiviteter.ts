@@ -36,6 +36,7 @@ export type PlanAktivitet = {
 };
 
 export type ExpanderadAktivitet = {
+  id: string;
   typ: string;
   namn: string;
   kundnara: boolean;
@@ -107,6 +108,13 @@ export function expanderaAktiviteter(opts: {
   const veckor = veckorIPeriod(opts.fran, opts.till);
   const manader = manaderIPeriod(opts.fran, opts.till);
   const ut: ExpanderadAktivitet[] = [];
+  const sedda = new Set<string>();
+  const pushUnik = (rad: ExpanderadAktivitet) => {
+    const nyckel = `${rad.id}|${rad.typ}|${rad.kalla}|${rad.kund || ""}|${rad.medarbetare || ""}`;
+    if (sedda.has(nyckel)) return;
+    sedda.add(nyckel);
+    ut.push(rad);
+  };
   for (const a of opts.aktiviteter) {
     if (!a.aktiv) continue;
     if (FORBJUDNA.test(a.namn)) continue;
@@ -115,12 +123,13 @@ export function expanderaAktiviteter(opts: {
     const kunder = a.kundId ? [a.kundId] : opts.kunder;
     const tidstyp = defaultTidstyp(a);
     if (a.frekvens === "per_pass") {
-      ut.push({ typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, tidstyp, timmar: tim * opts.arbetspass, kalla: a.kalla });
+      pushUnik({ id: a.id, typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, tidstyp, timmar: tim * opts.arbetspass, kalla: a.kalla });
       continue;
     }
     if (a.frekvens === "per_kund_vecka") {
       for (const kund of kunder) {
-        ut.push({
+        pushUnik({
+          id: a.id,
           typ: a.aktivitetstyp,
           namn: a.namn,
           kundnara: a.kundnara,
@@ -135,7 +144,8 @@ export function expanderaAktiviteter(opts: {
     }
     if (a.frekvens === "per_kund_manad") {
       for (const kund of kunder) {
-        ut.push({
+        pushUnik({
+          id: a.id,
           typ: a.aktivitetstyp,
           namn: a.namn,
           kundnara: a.kundnara,
@@ -149,7 +159,8 @@ export function expanderaAktiviteter(opts: {
       continue;
     }
     const ganger = a.frekvens === "per_vecka" ? veckor : a.frekvens === "per_manad" ? manader : 1;
-    ut.push({
+    pushUnik({
+      id: a.id,
       typ: a.aktivitetstyp,
       namn: a.namn,
       kundnara: a.kundnara,
