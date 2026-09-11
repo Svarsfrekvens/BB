@@ -227,4 +227,23 @@ describe("motorPayload ur Galaxen", () => {
     expect(r.payload.boundaryKnownFrom).toBe("2026-08-11");
     expect(String(r.payload.boundaryKnownTo) >= "2026-09-13").toBe(true);
   });
+
+  it("default är optimizeExisting och generateFromNeeds kräver inte standardmallar", () => {
+    const vanligt = payload(7);
+    expect(vanligt.payload.planningMode).toBe("optimizeExisting");
+    expect(((vanligt.payload.templates as unknown[]) || []).length).toBeGreaterThan(0);
+    const generera = byggMotorPayload({
+      rader: (sekoia.rows as Insats[]).slice(0, 8),
+      medarbetare: tillMedarbetare().slice(0, 3),
+      from: "2026-08-03",
+      dagar: 7,
+      timkostnad: 270,
+      regler: reglerFranVillkor(),
+      planningMode: "generateFromNeeds",
+    });
+    expect(generera.payload.planningMode).toBe("generateFromNeeds");
+    expect(generera.payload.existingSchedule).toBeNull();
+    expect(generera.payload.templates).toEqual([]);
+    expect((generera.payload.rules as { preferredMinShiftMinutes: number }).preferredMinShiftMinutes).toBe(240);
+  });
 });

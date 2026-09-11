@@ -5,6 +5,7 @@ Lexikografisk optimering: (1) minimera obemannat kundbehov,
 Hårda regler lättas aldrig. Täckning får inte sänkas för att spara kostnad.
 """
 from math import floor
+from time import perf_counter
 from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      instant, add_days, days, night_intervals, jour_intervals, is_night, monday,
@@ -14,6 +15,11 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      rest_days_target, f01_known_span, f01_window_known,
                      candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
                      shift_profiles, required_rest_after_minutes)
+from .generate import planning_mode, shift_templates_for_solve
+from .precheck import (
+    enumerate_person_shift_slots, explain_with_precheck, feasibility_precheck,
+    has_critical_precheck, planning_diagnostics,
+)
 from .validate import validate
 
 
@@ -83,9 +89,36 @@ def solve(data, seconds=30):
     lo,hi = instant(wp['start'],'00:00'),instant(add_days(wp['end'],1),'00:00')
     period_days=list(days(wp['start'],wp['end']))
     employees=[e for e in data['employees'] if e['status']=='active']
-    templates={t['id']:t for t in data['templates']}
+    templates={t['id']:t for t in shift_templates_for_solve(data)}
     occ=occurrences(data)
     reserve=int(rules.get('withinPassMinutesPerShift') or 0)
+    mode=planning_mode(data)
+
+    t_pre=perf_counter()
+    diagnoses=feasibility_precheck(data)
+    pre_ms=int(round((perf_counter()-t_pre)*1000))
+    enum=enumerate_person_shift_slots(data, list(templates.values()))
+    generated_n=sum(1 for t in templates.values() if t.get('generated'))
+
+    def diagnostics(status, solve_ms=0, nvars=0, ncons=0):
+        return planning_diagnostics(data, dict(
+            generatedShiftTemplates=generated_n,
+            before=enum['before'],
+            after=enum['after'],
+            solverVariables=nvars,
+            solverConstraints=ncons,
+            preCheckTimeMs=pre_ms,
+            solveTimeMs=solve_ms,
+            solverStatus=status,
+        ))
+
+    def empty_infeasible(message, status='INFEASIBLE'):
+        explanation=explain_with_precheck(status, diagnoses, message)
+        schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=status,explanation=explanation,feasibilityNotes=[],preCheck=diagnoses,seconds=pre_ms/1000,objective=None,bound=None)
+        return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=0,occurrences=len(occ),startStep=rules['flexibilityStep'],**diagnostics(status)))
+
+    if has_critical_precheck(diagnoses):
+        return empty_infeasible('Ingen lösning uppfyller alla hårda villkor.')
 
     def shrink_work(intervals, take):
         if take<=0: return list(intervals)
@@ -119,31 +152,20 @@ def solve(data, seconds=30):
     for s in data['boundaryShifts']:
         a,b=span(s)
         boundaries.append(dict(shift=s,a=a,b=b,work=paid(s),x=1))
-    for e in employees:
-        boundary=[b for b in boundaries if b['shift']['employeeId']==e['id']]
-        absences=[(instant(a['start'],'00:00'),instant(add_days(a['end'],1),'00:00')) for a in data['absences'] if a['employeeId']==e['id']]
-        for day in days(add_days(wp['start'],-1),wp['end']):
-            for profile in e['profiles']:
-                t=templates[profile]
-                if t['type']=='jour' and not jour_eligible(e): continue
-                s=dict(id=f"{e['id']}:{day}:{profile}",employeeId=e['id'],date=day,start=t['start'],end=t['end'],type=t['type'],skills=t['skills'],breaks=t['breaks'])
-                if t.get('dutyProfile'):
-                    s['dutyProfile']=t['dutyProfile']
-                a,b=span(s)
-                if b<=lo or a>=hi or b-a>rules['maxShiftHours']*60: continue
-                if not shift_allowed(e,t,day,a,b,rules): continue
-                if t['type']!='jour' and is_night(a,b) and not night_eligible(e): continue
-                if any(overlap(a,b,x,y) for x,y in absences): continue
-                work=paid(s)
-                if any(overlap(a,b,v['a'],v['b']) for v in boundary): continue
-                cand=dict(shift=s,a=a,b=b)
-                if any(
-                    not shifts_mergeable(candidate_as_shift(cand), candidate_as_shift(v))
-                    and not (a-v['b']>=rules['minRestHours']*60 or v['a']-b>=rules['minRestHours']*60)
-                    for v in boundary
-                ): continue
-                x=model.new_bool_var('shift:'+s['id'])
-                candidates.append(dict(shift=s,a=a,b=b,work=work,x=x))
+    by_emp={e['id']:e for e in employees}
+    for slot in enum['slots']:
+        if not slot['eligible']:
+            continue
+        t=slot['template']
+        e=by_emp[slot['employeeId']]
+        day=slot['day']
+        s=dict(id=f"{e['id']}:{day}:{t['id']}",employeeId=e['id'],date=day,start=t['start'],end=t['end'],type=t['type'],skills=t.get('skills') or [],breaks=t.get('breaks') or [])
+        if t.get('dutyProfile'):
+            s['dutyProfile']=t['dutyProfile']
+        a,b=slot['a'],slot['b']
+        work=paid(s)
+        x=model.new_bool_var('shift:'+s['id'])
+        candidates.append(dict(shift=s,a=a,b=b,work=work,x=x,generated=bool(t.get('generated'))))
     if len(candidates)>10000:
         raise ValueError('För många passalternativ. Begränsa personal, passmallar eller period.')
 
@@ -524,6 +546,14 @@ def solve(data, seconds=30):
                 model.add(sum(xs)>=1)
             else:
                 weekend_notes.append(f"{e['code']}: måste arbeta med kund {cid} men saknar giltig tilldelning.")
+    if mode=='generateFromNeeds':
+        preferred=int(rules.get('preferredMinShiftMinutes') or 4*60)
+        for c in candidates:
+            if c['shift'].get('type')=='jour':
+                continue
+            short=preferred-(c['b']-c['a'])
+            if short>0:
+                quality_extra += int(short)*c['x']
     uncovered_minutes=sum(o['task']['minutes']*gap for o,gap in gaps)
     max_unc=max(1,sum(o['task']['minutes']*o['count'] for o,_ in gaps))
     unc_var=model.new_int_var(0,max_unc,'uncovered_minutes')
@@ -542,6 +572,9 @@ def solve(data, seconds=30):
         model.add_hint(end,first+o['task']['minutes'])
     for o,gap in gaps:
         model.add_hint(gap,o['count'])
+    proto=model.Proto()
+    nvars=len(proto.variables)
+    ncons=len(proto.constraints)
     t_cov=max(1.0,seconds*0.45)
     t_cost=max(1.0,seconds*0.35)
     t_qual=max(1.0,max(seconds,t_cov+t_cost+1)-t_cov-t_cost)
@@ -586,6 +619,7 @@ def solve(data, seconds=30):
             return last
         return None
 
+    t_solve=perf_counter()
     run_phase('coverage',unc_var,t_cov)
     if last:
         best_unc=last['uncoveredMinutes']
@@ -593,6 +627,7 @@ def solve(data, seconds=30):
     if last:
         best_cost=last['costOre']
         run_phase('quality',qual_var,t_qual,lambda: model.add(cost_var<=best_cost))
+    solve_ms=int(round((perf_counter()-t_solve)*1000))
     code=(last or {}).get('code') or solver.status_name(cp_model.UNKNOWN)
     if last and all(p['status']=='OPTIMAL' for p in phases):
         code='OPTIMAL'
@@ -604,10 +639,12 @@ def solve(data, seconds=30):
         'INFEASIBLE':'Ingen lösning uppfyller alla hårda villkor inom valda passmallar och tidssteg. Kontrollera behov, kompetens, tillgänglighet och passmallar. Inga regler har lättats.',
         'UNKNOWN':'Sökningen avbröts vid tidsgränsen utan en hittad lösning. Detta bevisar inte att problemet är olösbart.',
         'MODEL_INVALID':'Optimeringsmodellen är ogiltig. Inget schemaförslag kan användas.'}
-    explanation=explanations.get(code,'Okänd beräkningsstatus.')
+    explanation=explain_with_precheck(code, diagnoses, explanations.get(code,'Okänd beräkningsstatus.'))
     if weekend_notes:
         explanation=explanation+' Helgförvarning: '+'; '.join(weekend_notes)
-    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
+    diag=diagnostics(code, solve_ms, nvars, ncons)
+    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,preCheck=diagnoses,seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
+    scope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep'],**diag)
     if last:
         schedule['shifts']=last['shifts']
         schedule['assignments']=last['assignments']
@@ -626,5 +663,5 @@ def solve(data, seconds=30):
         blocking=[e for e in result['errors'] if e['rule']!='BOUNDARY_INCOMPLETE']
         if blocking:
             schedule.update(solverStatus='MODEL_INVALID',shifts=[],assignments=[],explanation='Förslaget stoppades av den fristående kontrollen: '+blocking[0]['message'])
-        return dict(schedule=schedule,validation=result,modelScope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep']))
-    return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep']))
+        return dict(schedule=schedule,validation=result,modelScope=scope)
+    return dict(schedule=schedule,validation=None,modelScope=scope)

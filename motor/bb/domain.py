@@ -751,10 +751,21 @@ def check_input(d):
             if models:
                 require(default_model in {m['id'] for m in models}, 'Okänd default-arbetstidsmodell.')
         require(numeric(d['inputRevision'], 0, 10**10, True), 'Ogiltig revision.')
+        mode = d.get('planningMode') or 'optimizeExisting'
+        require(mode in ('optimizeExisting', 'generateFromNeeds'), 'Ogiltigt planeringsläge.')
+        if d.get('planningRange') is not None:
+            require(isinstance(d['planningRange'], dict), 'Ogiltigt planeringsintervall.')
+            for key in ('start', 'end'):
+                if d['planningRange'].get(key):
+                    date.fromisoformat(d['planningRange'][key])
+        if 'existingSchedule' in d and d['existingSchedule'] is not None:
+            require(isinstance(d['existingSchedule'], dict), 'Ogiltigt befintligt schema.')
         for key, limit in [('customers',100),('employees',80),('interventions',4000),('templates',12),('boundaryShifts',8000),('absences',2000)]:
             require(isinstance(d[key], list) and len(d[key]) <= limit, f'Ogiltig storlek: {key}.')
             require(len({x['id'] for x in d[key]}) == len(d[key]), f'Dubbla id i {key}.')
-        require(1 <= len(d['templates']) <= 12, 'Passmallar saknas.')
+        require(isinstance(d['templates'], list) and len(d['templates']) <= 12, 'Ogiltig storlek: templates.')
+        if mode != 'generateFromNeeds':
+            require(1 <= len(d['templates']) <= 12, 'Passmallar saknas.')
         customers = {c['id'] for c in d['customers']}
         employees = {e['id'] for e in d['employees']}
         profiles = {p['id'] for p in d['templates']}
@@ -768,7 +779,12 @@ def check_input(d):
             if 'jour' in e:
                 require(type(e['jour']) is bool, 'Ogiltig jourbehörighet.')
             require(e['status'] in ['active','vacant','inactive'], 'Ogiltig personalstatus.')
-            require(e['profiles'] and set(e['profiles']) <= profiles, 'Ogiltiga passprofiler.')
+            prof = e.get('profiles') or []
+            require(isinstance(prof, list), 'Ogiltiga passprofiler.')
+            if mode == 'generateFromNeeds':
+                require(set(prof) <= profiles, 'Ogiltiga passprofiler.')
+            else:
+                require(prof and set(prof) <= profiles, 'Ogiltiga passprofiler.')
             require(e['hourlyCost'] is None or numeric(e['hourlyCost'],0,100000), 'Ogiltig timkostnad.')
             require(isinstance(e['skills'],list) and all(isinstance(k,str) for k in e['skills']), 'Ogiltig kompetens.')
             if e.get('ssgWindows') is not None:
@@ -832,6 +848,10 @@ def check_input(d):
             require(numeric(d['rules']['hardMaxConsecutiveDays'], 1, 14, True), 'Ogiltig regel: hardMaxConsecutiveDays.')
         if 'withinPassMinutesPerShift' in d['rules']:
             require(numeric(d['rules']['withinPassMinutesPerShift'], 0, 180, True), 'Ogiltig regel: withinPassMinutesPerShift.')
+        if 'minGeneratedShiftMinutes' in d['rules']:
+            require(numeric(d['rules']['minGeneratedShiftMinutes'], 0, 12 * 60, True), 'Ogiltig regel: minGeneratedShiftMinutes.')
+        if 'preferredMinShiftMinutes' in d['rules']:
+            require(numeric(d['rules']['preferredMinShiftMinutes'], 0, 12 * 60, True), 'Ogiltig regel: preferredMinShiftMinutes.')
         for e in d['employees']:
             if e.get('skillWindows') is not None:
                 require(isinstance(e['skillWindows'], list), 'Ogiltiga kompetensfönster.')

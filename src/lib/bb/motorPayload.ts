@@ -215,6 +215,8 @@ export type MotorRegler = {
   minWeeklyRestHours?: number;
   withinPassMinutesPerShift?: number;
   minRestDaysInFourWeeks?: number;
+  minGeneratedShiftMinutes?: number;
+  preferredMinShiftMinutes?: number;
   jour?: { start: string; end: string; weekdays: number[] };
   shiftProfiles?: Record<string, Record<string, unknown>>;
 };
@@ -259,13 +261,20 @@ export function byggMotorPayload(opts: {
   objectiveWeights?: { continuitySek: number; spreadSekPerPermille: number; uncoveredSekPerMinute?: number };
   planAktiviteter?: PlanAktivitet[];
   kontaktpersoner?: Record<string, string>;
+  planningMode?: "optimizeExisting" | "generateFromNeeds";
 }): PayloadResultat {
   const varningar: string[] = [];
   const dagar = Math.max(1, Math.min(42, Math.round(opts.dagar || 7)));
   const from = opts.from;
   const to = isoDag(from, dagar - 1);
+  const planningMode = opts.planningMode === "generateFromNeeds" ? "generateFromNeeds" : "optimizeExisting";
   const egnaMallar = opts.mallar && opts.mallar.length ? opts.mallar : mallarFranSchema(opts.schemaPass);
-  const basMallar = (egnaMallar.length ? egnaMallar : STANDARDMALLAR).slice(0, 12);
+  const basMallar = (planningMode === "generateFromNeeds"
+    ? egnaMallar
+    : egnaMallar.length
+      ? egnaMallar
+      : STANDARDMALLAR
+  ).slice(0, 12);
 
   const regler: MotorRegler = {
     minRestHours: 11,
@@ -279,6 +288,8 @@ export function byggMotorPayload(opts: {
     minWeeklyRestHours: 36,
     withinPassMinutesPerShift: 0,
     minRestDaysInFourWeeks: 9,
+    minGeneratedShiftMinutes: 0,
+    preferredMinShiftMinutes: 240,
     jour: {
       start: opts.regler?.jour?.start || "23:00",
       end: opts.regler?.jour?.end || "06:30",
@@ -425,21 +436,25 @@ export function byggMotorPayload(opts: {
   // kompletteras därför utifrån insatsernas tider, och de insatser som ändå
   // inte kan bemannas lyfts ut med en tydlig varning i stället för att hela
   // beräkningen ska falla.
-  const mallar = kortareVarianter(
-    tackandeMallar(
-      basMallar,
-      interventions.map((i) => ({ start: String(i["start"]), minuter: Number(i["minutes"]) })),
-    ),
-  );
+  const mallar = planningMode === "generateFromNeeds"
+    ? basMallar.slice(0, 12)
+    : kortareVarianter(
+        tackandeMallar(
+          basMallar,
+          interventions.map((i) => ({ start: String(i["start"]), minuter: Number(i["minutes"]) })),
+        ),
+      );
   const otackta: string[] = [];
-  const tacktaInsatser = interventions.filter((i) => {
-    const ok = mallar.some((m) => tacker(m, String(i["start"]), Number(i["minutes"])));
-    if (!ok) {
-      otackta.push(String(i["start"]));
-      delete insatsKarta[String(i["id"])];
-    }
-    return ok;
-  });
+  const tacktaInsatser = planningMode === "generateFromNeeds"
+    ? interventions.slice()
+    : interventions.filter((i) => {
+        const ok = mallar.some((m) => tacker(m, String(i["start"]), Number(i["minutes"])));
+        if (!ok) {
+          otackta.push(String(i["start"]));
+          delete insatsKarta[String(i["id"])];
+        }
+        return ok;
+      });
   if (otackta.length) {
     const tider = [...new Set(otackta)].sort().slice(0, 6).join(", ");
     varningar.push(
@@ -587,7 +602,7 @@ export function byggMotorPayload(opts: {
   // Motorn måste kunna bemanna varje insats. Ordinarie sysselsättningsgrader
   // räcker sällan till full täckning, så beräkningen får tillgång till några
   // extra vikariepass. De används bara om de behövs, eftersom kostnaden vägs in.
-  if (employees.length && interventions.length) {
+  if (planningMode !== "generateFromNeeds" && employees.length && interventions.length) {
     const periodDays = listPeriodDays(from, to);
     const workplaceCap = { workTimeModels, defaultWorkTimeModelId };
     const behovTimmar = interventions.reduce((s, i) => s + Number(i["minutes"]), 0) / 60;
@@ -765,6 +780,8 @@ export function byggMotorPayload(opts: {
     boundaryAcknowledged: true,
     boundaryKnownFrom,
     boundaryKnownTo,
+    planningMode,
+    ...(planningMode === "generateFromNeeds" ? { existingSchedule: null } : {}),
     rules: regler,
     compensatoryRest: [],
     economy: { hourlyCost: Math.max(0, Number(opts.timkostnad) || 270) },
