@@ -18,7 +18,7 @@ export function ProcessFlode({
   onValj?: (id: string) => void;
 }) {
   return (
-    <nav aria-label="Processflöde" className="flex flex-wrap items-center gap-x-1 gap-y-3">
+    <nav aria-label="Processflöde" data-process-flode="skal" className="flex flex-wrap items-center gap-x-1 gap-y-3">
       {steg.map((s, i) => {
         const vis = LAGE[s.lage];
         return (

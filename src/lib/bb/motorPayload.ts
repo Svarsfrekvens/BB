@@ -164,8 +164,8 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   const natt = idFor("night");
   const jour = idFor("jour");
   const p = String(m.passprofil || "").toLowerCase();
-  const nattOk = Boolean(m.nattbehorig);
-  const jourOk = Boolean(m.jour);
+    const nattOk = m.nattbehorig === true;
+    const jourOk = m.jour === true;
   let ut: string[] = [];
   if (/natt|jour/.test(p) && !/dag|kväll|kvall/.test(p)) ut = [...(nattOk ? natt : []), ...(jourOk ? jour : [])];
   else if (/kväll|kvall/.test(p)) ut = kvall;
@@ -512,16 +512,16 @@ export function byggMotorPayload(opts: {
     const code = arVikarie ? `V${++vikarieNr}` : `M${++ordinarie}`;
     medarbetarKarta[id] = { namn: m.namn, vikarie: arVikarie };
     const skills = new Set<string>();
-    if (m.delegering) skills.add("delegering");
+    if (m.delegering === true) skills.add("delegering");
     if (m.samordnare) skills.add("samordnare");
     skills.add("undersköterska".toLowerCase());
     // Alla kompetenskrav som finns i underlaget måste kunna mötas av personal
     // som har delegering; utan delegeringskrav kan alla ta insatsen.
-    for (const k of kravSet) if (m.delegering || !/delegerin|sjuksk/.test(k)) skills.add(k);
+    for (const k of kravSet) if (m.delegering === true || !/delegerin|sjuksk/.test(k)) skills.add(k);
     const farTillsattas = (m as { vikarieFarTillsattas?: boolean }).vikarieFarTillsattas;
     const villkor = ((m as Medarbetare).villkor || []) as MedarbetarVillkor[];
-    const night = Boolean(m.nattbehorig) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to) && !harHårt(villkor, "endast_kvall", from, to);
-    const jourOk = Boolean(m.jour) && !harHårt(villkor, "ingen_jour", from, to);
+    const night = m.nattbehorig === true && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to) && !harHårt(villkor, "endast_kvall", from, to);
+    const jourOk = m.jour === true && !harHårt(villkor, "ingen_jour", from, to);
     const hard = hårdaMotorvillkor(m, from, to, kundId, i);
     const soft = mjukaMotorvillkor(villkor, from, to, kundId);
     const datedSkills = skillWindowsFromVillkor(villkor, from, to);

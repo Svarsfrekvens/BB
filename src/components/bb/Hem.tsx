@@ -2,62 +2,57 @@ import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import type { VyProps } from "@/lib/bb/vy";
-import { ProcessFlode } from "./ProcessFlode";
 import { TreOmraden } from "./TreOmraden";
 import { Uppladdning } from "./Uppladdning";
 import {
+  KAPACITET_FORKLARING,
+  KUNDNARA_FORKLARING,
+  TACKT_BEHOV_FORKLARING,
+  berakningsKallaText,
+  genomsnittligSsgPct,
   kostnadPerTacktKundtimme,
   lasMotorSummary,
-  processStegLagen,
-  skapaBalansHinder,
+  readinessFranApi,
+  ssgUtnyttjandePct,
+  timmarEllerTomt,
 } from "@/lib/bb/vcFlode";
-import { fmtH, fmtPct } from "@/lib/bb/vy";
+import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
+import { fmtPct } from "@/lib/bb/vy";
 
 export function Hem(props: VyProps) {
-  const { api } = props;
-  if (!api.underlag().godkand.allt && !api.underlag().godkand.kund) {
+  const { api, state } = props;
+  if (!api.underlag().godkand.kund) {
     return <Uppladdning {...props} />;
   }
 
-  const hinder = skapaBalansHinder({
-    kundGodkand: api.underlag().godkand.kund,
-    medarbetare: api.medarbetare(),
-    harUnderlag: api.harUnderlag() || api.underlag().godkand.kund,
-  });
+  const readiness = readinessFranApi(api);
   const summary = lasMotorSummary(api.motorResultat());
   const fe = api.foreEfter();
   const lage = fe?.efter ?? api.foreLage();
-  const steg = processStegLagen({
-    aktivTab: "hem",
-    kundGodkand: api.underlag().godkand.kund,
-    medarbetareOk: !hinder.skal.some((s) => s.includes("arbetstidsmodell")),
-    harResultat: api.harBalans(),
-    harVarning: api.regelbrott() > 0,
-    blockeradSkapa: !hinder.aktiv,
-  });
-
-  const aktiva = api.medarbetare().filter((m) => !m.vakant);
-  const ssg =
-    aktiva.length > 0
-      ? `${Math.round(aktiva.reduce((s, m) => s + Number(m.grad || 0), 0) / aktiva.length)} %`
-      : "–";
+  const ssgSnitt = genomsnittligSsgPct(api.medarbetare());
+  const ssgUtnytt = ssgUtnyttjandePct(null, null);
   const perTackt =
     lage && lage.bemannatKundbehovH > 0 ? kostnadPerTacktKundtimme(lage.kostnad, lage.bemannatKundbehovH) : null;
+  const vakanta = timmarEllerTomt(null);
+  const vikarie = timmarEllerTomt(null);
   const resurs = lage
     ? {
         intakt: api.kr(lage.intakt),
         schemakostnad: api.kr(lage.kostnad),
         marginal: api.kr(lage.resultat),
-        overkapacitet: `${fmtH(lage.overkapacitetH)}`,
-        underkapacitet: `${fmtH(lage.obemannatKundbehovH)}`,
-        vakanta: api.underlag().schema ? `${api.underlag().schema?.vakanta} vakanta rader` : "–",
-        ssg,
-        overtids: "–",
-        vikarie: api.underlag().schema ? `${api.underlag().schema?.vikarier} vikarier` : "–",
-        korttids: "–",
+        overkapacitet: `${api.h1(lage.overkapacitetH)} h`,
+        underkapacitet: `${api.h1(lage.obemannatKundbehovH)} h`,
+        vakanta: vakanta.text,
+        vakantaSaknas: vakanta.saknas,
+        genomsnittligSsg: ssgSnitt != null ? `${Math.round(ssgSnitt)} %` : "–",
+        ssgUtnyttjande: ssgUtnytt == null ? undefined : `${ssgUtnytt.toFixed(1)} %`,
+        vikarie: vikarie.text,
+        vikarieSaknas: vikarie.saknas,
         kostnadPerTackt: perTackt != null ? api.kr(perTackt) : "–",
       }
-    : undefined;
+    : {
+        genomsnittligSsg: ssgSnitt != null ? `${Math.round(ssgSnitt)} %` : undefined,
+      };
 
   const mapped = summary
     ? {
@@ -88,9 +83,10 @@ export function Hem(props: VyProps) {
         <p className="mt-2 max-w-2xl text-base leading-relaxed text-muted-foreground">
           Kundbehov, medarbetare, förslag, granskning och uppföljning – i den ordningen.
         </p>
+        {api.harBalans() ? (
+          <p className="mt-2 text-sm font-semibold text-deep">{berakningsKallaText(api.berakningsKalla())}</p>
+        ) : null}
       </div>
-
-      <ProcessFlode steg={steg} onValj={(id) => api.setTab(id)} />
 
       <TreOmraden
         summary={mapped}
@@ -105,24 +101,32 @@ export function Hem(props: VyProps) {
         <Button
           className="mt-4"
           size="lg"
-          disabled={!hinder.aktiv}
-          aria-disabled={!hinder.aktiv}
-          title={hinder.aktiv ? undefined : hinder.skal.join(". ")}
-          onClick={() => api.setTab("motor")}
+          data-cta="skapa-bemanningsbalans"
+          disabled={!readiness.ready}
+          aria-disabled={!readiness.ready}
+          title={readiness.ready ? undefined : readiness.blockingReasons.join(". ")}
+          onClick={() => void korBemanningsbalans({ api, state })}
         >
           <Sparkles /> Skapa bemanningsbalans
         </Button>
-        {!hinder.aktiv ? (
+        {!readiness.ready ? (
           <ul className="mt-3 space-y-1 text-sm text-warning" aria-live="polite">
-            {hinder.skal.map((r) => (
+            {readiness.blockingReasons.map((r) => (
               <li key={r}>{r}</li>
             ))}
           </ul>
         ) : (
           <p className="mt-3 text-sm text-muted-foreground">Underlaget räcker för att räkna ett förslag.</p>
         )}
+        <p className="mt-4 text-xs text-muted-foreground" title={TACKT_BEHOV_FORKLARING}>
+          {TACKT_BEHOV_FORKLARING}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground" title={KUNDNARA_FORKLARING}>
+          {KUNDNARA_FORKLARING}
+        </p>
+        <p className="mt-1 text-xs text-muted-foreground">{KAPACITET_FORKLARING}</p>
         {lage ? (
-          <p className="mt-4 text-xs text-muted-foreground">
+          <p className="mt-3 text-xs text-muted-foreground">
             Täckt behov {fmtPct(lage.tackningPct)} · kundnära {fmtPct(lage.kundnaraPct)} – två skilda mått.
           </p>
         ) : null}

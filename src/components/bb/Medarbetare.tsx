@@ -1,12 +1,12 @@
 import { Fragment, useState } from "react";
-import { ArrowRight, ChevronDown, ChevronRight, Info, Plus, Upload } from "lucide-react";
+import { ChevronDown, ChevronRight, Info, Plus, Upload } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
 import type { VyProps } from "@/lib/bb/vy";
 import { TomtLage } from "./Tomt";
 import { STANDARD_WORK_TIME_MODELS } from "@/lib/bb/arbetstid";
+import { MEDARBETARE_ANDRAD_TEXT, behorighetEtikett, readinessFranApi } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -62,11 +62,37 @@ function Val({
   );
 }
 
+function TreVal({
+  varde,
+  onValj,
+  etikett,
+}: {
+  varde: boolean | null;
+  onValj: (v: boolean | null) => void;
+  etikett: string;
+}) {
+  const kod = varde === true ? "ja" : varde === false ? "nej" : "okand";
+  return (
+    <select
+      aria-label={etikett}
+      value={kod}
+      onChange={(e) => onValj(e.target.value === "ja" ? true : e.target.value === "nej" ? false : null)}
+      className="h-9 w-28 rounded-lg border border-input bg-background px-2 text-sm text-deep"
+    >
+      <option value="okand">Ej angivet</option>
+      <option value="ja">Ja</option>
+      <option value="nej">Nej</option>
+    </select>
+  );
+}
+
 /** Medarbetare: uppgifter och villkor som styr schemaoptimeringen. */
 export function Medarbetare({ api }: VyProps) {
   const rader = api.medarbetare();
   const [nytt, setNytt] = useState("");
   const [oppen, setOppen] = useState<string | null>(null);
+  const readiness = readinessFranApi(api);
+  const andrad = !!api.underlagAndringar?.().medarbetare;
 
   if (!rader.length) {
     return (
@@ -79,9 +105,6 @@ export function Medarbetare({ api }: VyProps) {
     );
   }
 
-  const kryss = (namn: string, falt: string, varde: boolean) => (
-    <Checkbox checked={varde} onCheckedChange={(v) => api.medarbetareSet(namn, falt, !!v)} aria-label={falt} />
-  );
   const antalVikarier = rader.filter((m) => m.vikarie).length;
 
   return (
@@ -90,9 +113,13 @@ export function Medarbetare({ api }: VyProps) {
         <Eyebrow>Medarbetare</Eyebrow>
         <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Medarbetare</h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Namn, SSG, arbetstidsmodell, dag/kväll/natt/jour, kompetenser, delegeringar, helgmönster och frånvaro.
-          Öppna en rad för individuella villkor. Regelbiblioteket ligger under Styrande villkor.
+          Namn, SSG, arbetstidsmodell, natt, jour, delegering och frånvaro. Öppna en rad för helgmönster, villkor och
+          kompetenser.
         </p>
+        <p className="mt-2 text-sm font-semibold text-deep">
+          Status: {readiness.delar.medarbetare === "ej" ? "Ej påbörjad" : readiness.delar.medarbetare === "kompletteras" ? "Behöver kompletteras" : readiness.delar.medarbetare === "forandrad" ? "Förändrad" : "Klar"}
+        </p>
+        {andrad ? <p className="mt-2 text-sm text-warning">{MEDARBETARE_ANDRAD_TEXT}</p> : null}
         {antalVikarier ? (
           <p className="mt-3 inline-block rounded-lg bg-warning-soft px-3 py-1.5 text-[13px] font-semibold text-warning">
             {antalVikarier} vikarier från obemannade schemarader
@@ -105,7 +132,7 @@ export function Medarbetare({ api }: VyProps) {
           <table className="w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
-                {["", "Namn", "SSG", "Arbetstidsmodell", "Samordnare", "Delegering", "Sovande jour", "Nattbehörig", "Passprofil"].map(
+                {["", "Namn", "SSG", "Arbetstidsmodell", "Natt", "Jour", "Delegering", "Frånvaro"].map(
                   (h, i) => (
                     <th
                       key={h || i}
@@ -139,15 +166,8 @@ export function Medarbetare({ api }: VyProps) {
                         </span>
                       ) : null}
                       <div className="mt-1 text-[12px] font-medium text-muted-foreground">
-                        {m.grad} % · {PASSPROFIL.find((p) => p.v === m.passprofil)?.t || m.passprofil}
-                        {m.jour ? " · Jour" : ""}
-                        {m.nattbehorig ? " · Natt" : ""}
-                        {m.delegering ? " · Delegering" : ""}
-                        {m.helg ? ` · ${HELG.find((h) => h.v === m.helg)?.t || m.helg}` : ""}
+                        {m.grad} % · natt {behorighetEtikett(m.nattbehorig)} · jour {behorighetEtikett(m.jour)}
                         {m.franvaro && m.franvaro !== "ingen" ? ` · ${FRANVARO.find((f) => f.v === m.franvaro)?.t}` : ""}
-                        {(m.villkor || []).filter((v) => v.aktiv).length
-                          ? ` · ${(m.villkor || []).filter((v) => v.aktiv).length} individuella villkor`
-                          : ""}
                       </div>
                     </td>
                     <td className="border-t border-border px-3 py-2 text-center">
@@ -174,27 +194,55 @@ export function Medarbetare({ api }: VyProps) {
                       </select>
                     </td>
                     <td className="border-t border-border px-3 py-3 text-center">
-                      {kryss(m.namn, "samordnare", m.samordnare)}
+                      <TreVal
+                        etikett={`Natt för ${m.namn}`}
+                        varde={m.nattbehorig}
+                        onValj={(v) => api.medarbetareSet(m.namn, "nattbehorig", v)}
+                      />
                     </td>
                     <td className="border-t border-border px-3 py-3 text-center">
-                      {kryss(m.namn, "delegering", m.delegering)}
+                      <TreVal
+                        etikett={`Jour för ${m.namn}`}
+                        varde={m.jour}
+                        onValj={(v) => api.medarbetareSet(m.namn, "jour", v)}
+                      />
                     </td>
-                    <td className="border-t border-border px-3 py-3 text-center">{kryss(m.namn, "jour", m.jour)}</td>
                     <td className="border-t border-border px-3 py-3 text-center">
-                      {kryss(m.namn, "nattbehorig", m.nattbehorig)}
+                      <TreVal
+                        etikett={`Delegering för ${m.namn}`}
+                        varde={m.delegering}
+                        onValj={(v) => api.medarbetareSet(m.namn, "delegering", v)}
+                      />
                     </td>
                     <td className="border-t border-border px-3 py-3 text-center">
                       <Val
-                        varde={m.passprofil}
-                        val={PASSPROFIL}
-                        onValj={(v) => api.medarbetareSet(m.namn, "passprofil", v)}
+                        varde={m.franvaro}
+                        val={FRANVARO}
+                        onValj={(v) => api.medarbetareSet(m.namn, "franvaro", v)}
                       />
                     </td>
                   </tr>
                   {oppen === m.namn ? (
                     <tr className="border-t border-border bg-muted/50">
-                      <td colSpan={9} className="px-6 py-5">
+                      <td colSpan={8} className="px-6 py-5">
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                          <label className="space-y-1 text-sm">
+                            <span className="block font-semibold text-deep">Passprofil</span>
+                            <Val
+                              varde={m.passprofil}
+                              val={PASSPROFIL}
+                              bred
+                              onValj={(v) => api.medarbetareSet(m.namn, "passprofil", v)}
+                            />
+                          </label>
+                          <label className="space-y-1 text-sm">
+                            <span className="block font-semibold text-deep">Samordnare</span>
+                            <TreVal
+                              etikett={`Samordnare ${m.namn}`}
+                              varde={m.samordnare}
+                              onValj={(v) => api.medarbetareSet(m.namn, "samordnare", v === true)}
+                            />
+                          </label>
                           <label className="space-y-1 text-sm">
                             <span className="block font-semibold text-deep">Helgtjänstgöring</span>
                             <Val varde={m.helg} val={HELG} bred onValj={(v) => api.medarbetareSet(m.namn, "helg", v)} />
@@ -419,10 +467,14 @@ export function Medarbetare({ api }: VyProps) {
 
       <Card className="flex flex-wrap items-center justify-between gap-4 rounded-2xl p-7 shadow-lift">
         <span className="text-sm text-muted-foreground">
-          Appen optimerar kundinsatser och schema utifrån era behov och villkor.
+          {andrad
+            ? MEDARBETARE_ANDRAD_TEXT
+            : api.underlag().godkand.schema
+              ? "Personalschemat är godkänt."
+              : "Godkänn när uppgifter och arbetstidsmodeller stämmer."}
         </span>
-        <Button onClick={() => api.skapaBalans()}>
-          Skapa bemanningsbalans <ArrowRight />
+        <Button onClick={() => api.godkannSchema()}>
+          {api.underlag().godkand.schema && !andrad ? "Godkänt ✓" : andrad ? "Godkänn ändringar" : "Godkänn personalschemat"}
         </Button>
       </Card>
     </div>

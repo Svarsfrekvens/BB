@@ -1,30 +1,58 @@
 import { describe, it, expect } from "vitest";
 import {
   FORE_EFTER_NYCKLAR,
+  KUNDNARA_FORKLARING,
+  KAPACITET_FORKLARING,
+  MEDARBETARE_ANDRAD_TEXT,
   PROCESS_STEG,
+  TACKT_BEHOV_FORKLARING,
   TRE_OMRADEN_RUBRIKER,
+  VC_FORBJUDNA_ORD,
+  behorighetEtikett,
+  behorighetLage,
+  berakningsKallaText,
   filtreraJamforRader,
+  genomsnittligSsgPct,
+  getBemanningsbalansReadiness,
   jamforTon,
   kundUnderlagStatus,
   lasMotorSummary,
   oversiktVisaLage,
   processStegLagen,
+  readinessFranApi,
   skapaBalansHinder,
+  ssgUtnyttjandePct,
+  timmarEllerTomt,
   vcStatusText,
+  visningsNamnVerksamhet,
 } from "@/lib/bb/vcFlode";
+import { kanStartaFranEttKlick } from "@/lib/bb/korBemanningsbalans";
+import { byggMotorPayload } from "@/lib/bb/motorPayload";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 const rot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 
+function klarIndata(extra: Partial<Parameters<typeof getBemanningsbalansReadiness>[0]> = {}) {
+  return {
+    harKundrader: true,
+    harSchema: true,
+    kundGodkand: true,
+    schemaGodkand: true,
+    medarbetare: [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: true }],
+    ...extra,
+  };
+}
+
 describe("processsteg", () => {
-  it("har sex steg med pilar i UI, inte ett progress-streck", () => {
+  it("har ett sammanhängande VC-flöde med pilar", () => {
     expect(PROCESS_STEG.map((s) => s.label)).toEqual([
       "Kundbehov",
       "Medarbetare",
       "Skapa bemanningsbalans",
       "Granska",
+      "Före och efter",
       "Godkänn",
       "Uppföljning",
     ]);
@@ -39,75 +67,222 @@ describe("processsteg", () => {
     expect(src).toContain("sm:inline");
   });
 
+  it("visar processrad endast i skalet, inte på Hem", () => {
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    const skal = readFileSync(join(rot, "src/components/bb/Skal.tsx"), "utf8");
+    expect(hem).not.toContain("ProcessFlode");
+    expect(skal).toContain("<ProcessFlode");
+  });
+
   it("sätter blockerad när skapa inte får köras", () => {
+    const r = getBemanningsbalansReadiness({
+      harKundrader: false,
+      harSchema: false,
+      kundGodkand: false,
+      schemaGodkand: false,
+      medarbetare: [],
+    });
     const steg = processStegLagen({
       aktivTab: "hem",
-      kundGodkand: false,
-      medarbetareOk: false,
+      readiness: r,
       harResultat: false,
       harVarning: false,
-      blockeradSkapa: true,
     });
-    expect(steg.find((s) => s.id === "motor")?.lage).toBe("blockerad");
+    expect(steg.find((s) => s.id === "skapa")?.lage).toBe("blockerad");
     expect(steg.find((s) => s.id === "kundbehov")?.lage).toBe("ej");
+    expect(steg.find((s) => s.id === "medarbetare")?.lage).toBe("ej");
+  });
+
+  it("tom medarbetarlista är ej påbörjad, aldrig klar", () => {
+    const r = getBemanningsbalansReadiness({
+      harKundrader: true,
+      harSchema: false,
+      kundGodkand: true,
+      schemaGodkand: false,
+      medarbetare: [],
+    });
+    expect(r.delar.medarbetare).toBe("ej");
+    expect(r.harMedarbetare).toBe(false);
+    expect(r.ready).toBe(false);
   });
 
   it("varnar på granska när resultat finns med varning", () => {
     const steg = processStegLagen({
       aktivTab: "resultat",
-      kundGodkand: true,
-      medarbetareOk: true,
+      readiness: getBemanningsbalansReadiness(klarIndata()),
       harResultat: true,
       harVarning: true,
-      blockeradSkapa: false,
     });
     expect(steg.find((s) => s.id === "resultat")?.lage).toBe("varning");
   });
 });
 
-describe("CTA skapa bemanningsbalans", () => {
+describe("en enda readiness-selector", () => {
+  it("Hem-CTA och motoranrop använder samma funktion", () => {
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    const kor = readFileSync(join(rot, "src/lib/bb/korBemanningsbalans.ts"), "utf8");
+    expect(hem).toContain("readinessFranApi");
+    expect(hem).toContain("korBemanningsbalans");
+    expect(kor).toContain("readinessFranApi");
+    expect(kor).toContain("if (!r.ready) return \"blockerad\"");
+  });
+
   it("är inaktiv utan godkänt kundbehov", () => {
+    const r = getBemanningsbalansReadiness(klarIndata({ kundGodkand: false }));
+    expect(r.ready).toBe(false);
+    expect(r.blockingReasons).toContain("Kundbehovet är inte godkänt");
     const h = skapaBalansHinder({
       kundGodkand: false,
+      schemaGodkand: true,
       harUnderlag: true,
       medarbetare: [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: true }],
     });
     expect(h.aktiv).toBe(false);
-    expect(h.skal).toContain("Kundbehovet är inte godkänt");
   });
 
   it("räknar medarbetare utan arbetstidsmodell", () => {
-    const h = skapaBalansHinder({
-      kundGodkand: true,
-      harUnderlag: true,
+    const r = getBemanningsbalansReadiness(
+      klarIndata({
+        medarbetare: [{ namn: "Anna" }, { namn: "Bo" }, { namn: "Cia", workTimeModelId: "helgfri-40", nattbehorig: true }],
+      }),
+    );
+    expect(r.ready).toBe(false);
+    expect(r.blockingReasons.some((s) => s.includes("2 medarbetare saknar arbetstidsmodell"))).toBe(true);
+  });
+
+  it("natt unknown blockerar inte och defaultas inte till ja", () => {
+    const r = getBemanningsbalansReadiness(
+      klarIndata({ medarbetare: [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: null }] }),
+    );
+    expect(r.ready).toBe(true);
+    expect(r.blockingReasons).not.toContain("Nattbehörighet saknas");
+    expect(behorighetEtikett(null)).toBe("Ej angivet");
+    expect(behorighetLage(undefined)).toBe("okand");
+    expect(behorighetEtikett(true)).toBe("Ja");
+  });
+
+  it("är aktiv när underlaget räcker, och då startar ett klick", () => {
+    const r = getBemanningsbalansReadiness(klarIndata());
+    expect(r.ready).toBe(true);
+    expect(r.blockingReasons).toEqual([]);
+    const api = {
+      underlag: () => ({ godkand: { kund: true, schema: true }, sekoia: {}, schema: {} }),
+      medarbetare: () => [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: true as const }],
+      harBalans: () => false,
+    };
+    expect(readinessFranApi(api).ready).toBe(true);
+    expect(kanStartaFranEttKlick(api as never)).toBe(true);
+  });
+
+  it("status förändrad efter relevant ändring blockerar CTA", () => {
+    const r = getBemanningsbalansReadiness(klarIndata({ medarbetareAndradSedanGodkannande: true }));
+    expect(r.ready).toBe(false);
+    expect(r.delar.medarbetare).toBe("forandrad");
+    expect(r.blockingReasons).toContain(MEDARBETARE_ANDRAD_TEXT);
+  });
+});
+
+describe("godkännanden", () => {
+  it("import godkänner inte kundunderlag automatiskt", () => {
+    const src = readFileSync(join(rot, "src/lib/bb/app.ts"), "utf8");
+    const start = src.indexOf("function approveImport()");
+    const end = src.indexOf("function ", start + 10);
+    const fn = src.slice(start, end);
+    expect(fn).toMatch(/kundGodkand = false/);
+    expect(fn).not.toMatch(/kundGodkand = true/);
+  });
+});
+
+describe("KPI-benämningar", () => {
+  it("genomsnittlig SSG är inte SSG-utnyttjande", () => {
+    const snitt = genomsnittligSsgPct([{ grad: 80 }, { grad: 90 }]);
+    const utnytt = ssgUtnyttjandePct(null, null);
+    expect(snitt).toBe(85);
+    expect(utnytt).toBeNull();
+    const tre = readFileSync(join(rot, "src/components/bb/TreOmraden.tsx"), "utf8");
+    expect(tre).toContain("Genomsnittlig SSG");
+    expect(tre).toMatch(/ssgUtnyttjande/);
+  });
+
+  it("vakanta rader är inte vakanta timmar och vikarieantal inte vikarietimmar", () => {
+    expect(timmarEllerTomt(null).saknas).toBe(true);
+    expect(timmarEllerTomt(12).text).toMatch(/12/);
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    expect(hem).not.toMatch(/vakanta rader/);
+    expect(hem).not.toMatch(/vikarier`/);
+  });
+});
+
+describe("natt/jour i payload", () => {
+  it("unknown skickas inte som behörig", () => {
+    const p = byggMotorPayload({
+      rader: [],
       medarbetare: [
-        { namn: "Anna" },
-        { namn: "Bo" },
-        { namn: "Cia", workTimeModelId: "helgfri-40", nattbehorig: true },
+        {
+          namn: "Okand",
+          vakant: false,
+          vikarie: false,
+          grad: 100,
+          samordnare: false,
+          delegering: null,
+          jour: null,
+          nattbehorig: null,
+          passprofil: "blandat",
+          helg: "varannan",
+          tidigastStart: "06:30",
+          senastSlut: "23:00",
+          maxDagarIFoljd: 5,
+          franvaro: "ingen",
+          timkostnad: 270,
+          anstallning: "manad",
+          workTimeModelId: "helgfri-40",
+        },
       ],
+      from: "2026-01-05",
+      dagar: 7,
+      timkostnad: 270,
     });
-    expect(h.aktiv).toBe(false);
-    expect(h.skal.some((s) => s.includes("2 medarbetare saknar arbetstidsmodell"))).toBe(true);
+    const emp = (p.payload.employees as { night: boolean; skills: string[] }[])[0];
+    expect(emp?.night).toBe(false);
+    expect(emp?.skills || []).not.toContain("delegering");
   });
+});
 
-  it("varnar när nattbehörighet saknas helt", () => {
-    const h = skapaBalansHinder({
-      kundGodkand: true,
-      harUnderlag: true,
-      medarbetare: [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: false }],
-    });
-    expect(h.skal).toContain("Nattbehörighet saknas");
-    expect(h.aktiv).toBe(false);
+describe("kundnära och täckt behov", () => {
+  it("har skilda förklaringar", () => {
+    expect(KUNDNARA_FORKLARING).toMatch(/schemalagd kundnära/);
+    expect(TACKT_BEHOV_FORKLARING).toMatch(/bemannat kundbehov/);
+    expect(KUNDNARA_FORKLARING).not.toBe(TACKT_BEHOV_FORKLARING);
+    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+    expect(hem).toContain("KUNDNARA_FORKLARING");
+    expect(hem).toContain("TACKT_BEHOV_FORKLARING");
+    expect(KAPACITET_FORKLARING).toMatch(/Överkapacitet/);
   });
+});
 
-  it("är aktiv när underlaget räcker", () => {
-    const h = skapaBalansHinder({
-      kundGodkand: true,
-      harUnderlag: true,
-      medarbetare: [{ namn: "Anna", workTimeModelId: "helgfri-40", nattbehorig: true }],
-    });
-    expect(h.aktiv).toBe(true);
-    expect(h.skal).toEqual([]);
+describe("tekniska motorord", () => {
+  it("visas inte i VC-vyn", () => {
+    const filer = [
+      "src/components/bb/Hem.tsx",
+      "src/components/bb/Skal.tsx",
+      "src/components/bb/Kundbehov.tsx",
+      "src/components/bb/Medarbetare.tsx",
+      "src/components/bb/Resultat.tsx",
+      "src/components/bb/TreOmraden.tsx",
+      "src/components/bb/Uppladdning.tsx",
+    ];
+    for (const f of filer) {
+      const src = readFileSync(join(rot, f), "utf8");
+      for (const ord of VC_FORBJUDNA_ORD) {
+        expect(src.toLowerCase(), `${f} innehåller ${ord}`).not.toContain(ord.toLowerCase());
+      }
+    }
+    expect(vcStatusText("INFEASIBLE")).not.toMatch(/INFEASIBLE/);
+    expect(berakningsKallaText("lokal")).toBe("Förhandsberäkning i appen");
+    expect(berakningsKallaText("motor")).toBe("Bemanningsbalans skapad med motor");
+    expect(visningsNamnVerksamhet("")).toBe("Verksamhet ej namngiven");
+    expect(visningsNamnVerksamhet("Ny verksamhet")).toBe("Verksamhet ej namngiven");
+    expect(visningsNamnVerksamhet("Galaxen")).toBe("Galaxen");
   });
 });
 

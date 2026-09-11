@@ -5,11 +5,37 @@ export type ProcessStegLage = "ej" | "pa" | "klar" | "varning" | "blockerad";
 export const PROCESS_STEG = [
   { id: "kundbehov", label: "Kundbehov" },
   { id: "medarbetare", label: "Medarbetare" },
-  { id: "motor", label: "Skapa bemanningsbalans" },
+  { id: "skapa", label: "Skapa bemanningsbalans" },
   { id: "resultat", label: "Granska" },
+  { id: "foreefter", label: "Före och efter" },
   { id: "schemaforslag", label: "Godkänn" },
   { id: "nyckeltal", label: "Uppföljning" },
 ] as const;
+
+export const TACKT_BEHOV_FORKLARING =
+  "Täckt behov = bemannat kundbehov / totalt kundbehov.";
+export const KUNDNARA_FORKLARING =
+  "Kundnära tid = schemalagd kundnära arbetstid / total schemalagd arbetstid.";
+export const KAPACITET_FORKLARING =
+  "Överkapacitet betyder att bemanning finns när behovet är lägre. Underkapacitet betyder att kundbehov saknar motsvarande bemanning vid andra tider.";
+export const MEDARBETARE_ANDRAD_TEXT =
+  "Medarbetarvillkoren har ändrats. Granska förändringen innan du skapar bemanningsbalans.";
+
+export const VC_FORBJUDNA_ORD = [
+  "Optimeringsmotorn",
+  "optimizer",
+  "OPTIMIZER_URL",
+  "reservläge",
+  "Adress saknas",
+  "INFEASIBLE",
+  "CP-SAT",
+  "regelbibliotek",
+] as const;
+
+export function vcTextArRen(text: string) {
+  const t = text.toLowerCase();
+  return !VC_FORBJUDNA_ORD.some((ord) => t.includes(ord.toLowerCase()));
+}
 
 export const TRE_OMRADEN_RUBRIKER = ["Kundnytta", "Hållbar bemanning", "Rätt resurser i rätt tid"] as const;
 
@@ -83,56 +109,243 @@ export function lasMotorSummary(raw: unknown): MotorUiSummary | null {
   return null;
 }
 
+export type DelStatus = "ej" | "kompletteras" | "klar" | "forandrad";
+
+export type ReadinessMedarbetare = {
+  namn: string;
+  vakant?: boolean;
+  workTimeModelId?: string;
+  nattbehorig?: boolean | null;
+  jour?: boolean | null;
+};
+
+export type BemanningsbalansReadinessIndata = {
+  harKundrader: boolean;
+  harSchema: boolean;
+  kundGodkand: boolean;
+  kundAndradSedanGodkannande?: boolean;
+  schemaGodkand: boolean;
+  medarbetareAndradSedanGodkannande?: boolean;
+  medarbetare: ReadinessMedarbetare[];
+};
+
+export type BemanningsbalansReadiness = {
+  ready: boolean;
+  blockingReasons: string[];
+  warnings: string[];
+  delar: { kund: DelStatus; medarbetare: DelStatus; schema: DelStatus };
+  harKunddata: boolean;
+  harMedarbetare: boolean;
+};
+
+function treVarde(v: boolean | null | undefined): "ja" | "nej" | "okand" {
+  if (v === true) return "ja";
+  if (v === false) return "nej";
+  return "okand";
+}
+
+export function getBemanningsbalansReadiness(d: BemanningsbalansReadinessIndata): BemanningsbalansReadiness {
+  const blockingReasons: string[] = [];
+  const warnings: string[] = [];
+  const aktiva = (d.medarbetare || []).filter((m) => !m.vakant);
+  const harMedarbetare = aktiva.length > 0;
+  const harKunddata = !!d.harKundrader;
+  const saknarModell = aktiva.filter((m) => !String(m.workTimeModelId || "").trim());
+
+  let kund: DelStatus = "ej";
+  if (!harKunddata) kund = "ej";
+  else if (!d.kundGodkand) kund = "kompletteras";
+  else if (d.kundAndradSedanGodkannande) kund = "forandrad";
+  else kund = "klar";
+
+  let schema: DelStatus = "ej";
+  if (!d.harSchema) schema = "ej";
+  else if (!d.schemaGodkand) schema = "kompletteras";
+  else if (d.medarbetareAndradSedanGodkannande) schema = "forandrad";
+  else schema = "klar";
+
+  let medarbetare: DelStatus = "ej";
+  if (!harMedarbetare) medarbetare = "ej";
+  else if (saknarModell.length || !d.schemaGodkand) medarbetare = "kompletteras";
+  else if (d.medarbetareAndradSedanGodkannande) medarbetare = "forandrad";
+  else medarbetare = "klar";
+
+  if (!harKunddata) blockingReasons.push("Kundbehovet är inte inläst");
+  else if (!d.kundGodkand) blockingReasons.push("Kundbehovet är inte godkänt");
+  else if (d.kundAndradSedanGodkannande) blockingReasons.push("Kundbehovet är förändrat sedan senaste godkännande");
+
+  if (!d.harSchema) blockingReasons.push("Personalschemat är inte inläst");
+  else if (!d.schemaGodkand) blockingReasons.push("Personalschemat är inte godkänt");
+  else if (d.medarbetareAndradSedanGodkannande) blockingReasons.push(MEDARBETARE_ANDRAD_TEXT);
+
+  if (!harMedarbetare) blockingReasons.push("Medarbetare är inte inlästa");
+  if (harMedarbetare && saknarModell.length) {
+    blockingReasons.push(`${saknarModell.length} medarbetare saknar arbetstidsmodell`);
+  }
+
+  const natt = aktiva.map((m) => treVarde(m.nattbehorig));
+  if (aktiva.length && natt.every((x) => x === "nej")) warnings.push("Ingen medarbetare är angiven som nattbehörig");
+  if (aktiva.length && natt.some((x) => x === "okand")) warnings.push("Nattbehörighet är inte angiven för alla medarbetare");
+
+  const unique = [...new Set(blockingReasons)];
+  return {
+    ready: unique.length === 0,
+    blockingReasons: unique,
+    warnings,
+    delar: { kund, medarbetare, schema },
+    harKunddata,
+    harMedarbetare,
+  };
+}
+
 export function skapaBalansHinder(d: {
   kundGodkand: boolean;
   schemaGodkand?: boolean;
-  medarbetare: { namn: string; workTimeModelId?: string; nattbehorig?: boolean; vakant?: boolean }[];
+  medarbetare: ReadinessMedarbetare[];
   harUnderlag: boolean;
   blockerande?: string[];
+  kundAndradSedanGodkannande?: boolean;
+  medarbetareAndradSedanGodkannande?: boolean;
+  harKundrader?: boolean;
+  harSchema?: boolean;
 }) {
-  const skal: string[] = [];
-  if (!d.harUnderlag) skal.push("Underlaget är inte inläst");
-  if (!d.kundGodkand) skal.push("Kundbehovet är inte godkänt");
-  const aktiva = (d.medarbetare || []).filter((m) => !m.vakant);
-  const saknarModell = aktiva.filter((m) => !String(m.workTimeModelId || "").trim());
-  if (saknarModell.length) skal.push(`${saknarModell.length} medarbetare saknar arbetstidsmodell`);
-  if (aktiva.length && aktiva.every((m) => !m.nattbehorig)) skal.push("Nattbehörighet saknas");
-  for (const b of d.blockerande || []) if (b) skal.push(b);
-  return { aktiv: skal.length === 0 && d.harUnderlag && d.kundGodkand, skal };
+  const r = getBemanningsbalansReadiness({
+    harKundrader: d.harKundrader ?? d.harUnderlag,
+    harSchema: d.harSchema ?? d.harUnderlag,
+    kundGodkand: d.kundGodkand,
+    kundAndradSedanGodkannande: d.kundAndradSedanGodkannande,
+    schemaGodkand: !!d.schemaGodkand,
+    medarbetareAndradSedanGodkannande: d.medarbetareAndradSedanGodkannande,
+    medarbetare: d.medarbetare,
+  });
+  const skal = [...r.blockingReasons, ...(d.blockerande || []).filter(Boolean)];
+  return { aktiv: skal.length === 0, skal, warnings: r.warnings, delar: r.delar };
 }
 
 export function processStegLagen(d: {
   aktivTab: string;
-  kundGodkand: boolean;
-  medarbetareOk: boolean;
+  readiness: BemanningsbalansReadiness;
   harResultat: boolean;
   harVarning: boolean;
-  blockeradSkapa: boolean;
-  godkandSchema?: boolean;
+  schemaForslagGodkant?: boolean;
 }): { id: string; label: string; lage: ProcessStegLage }[] {
+  const tabAlias = d.aktivTab === "motor" ? "skapa" : d.aktivTab;
   return PROCESS_STEG.map((steg) => {
     let lage: ProcessStegLage = "ej";
-    if (steg.id === "kundbehov") lage = d.kundGodkand ? "klar" : d.aktivTab === "kundbehov" ? "pa" : "ej";
-    else if (steg.id === "medarbetare") lage = d.medarbetareOk ? "klar" : d.aktivTab === "medarbetare" ? "pa" : "ej";
-    else if (steg.id === "motor") {
-      if (d.blockeradSkapa && !d.harResultat) lage = "blockerad";
+    if (steg.id === "kundbehov") {
+      if (d.readiness.delar.kund === "klar") lage = "klar";
+      else if (d.readiness.delar.kund === "forandrad") lage = "varning";
+      else if (d.readiness.delar.kund === "kompletteras" || tabAlias === "kundbehov") lage = "pa";
+      else lage = "ej";
+    } else if (steg.id === "medarbetare") {
+      if (!d.readiness.harMedarbetare) lage = "ej";
+      else if (d.readiness.delar.medarbetare === "klar") lage = "klar";
+      else if (d.readiness.delar.medarbetare === "forandrad") lage = "varning";
+      else if (d.readiness.delar.medarbetare === "kompletteras") lage = tabAlias === "medarbetare" ? "pa" : "ej";
+      else lage = tabAlias === "medarbetare" ? "pa" : "ej";
+    } else if (steg.id === "skapa") {
+      if (!d.readiness.ready && !d.harResultat) lage = "blockerad";
       else if (d.harResultat) lage = "klar";
-      else if (d.aktivTab === "motor") lage = "pa";
+      else if (tabAlias === "skapa") lage = "pa";
       else lage = "ej";
     } else if (steg.id === "resultat") {
       if (!d.harResultat) lage = "ej";
       else if (d.harVarning) lage = "varning";
-      else lage = d.aktivTab === "resultat" ? "pa" : "klar";
+      else lage = tabAlias === "resultat" ? "pa" : "klar";
+    } else if (steg.id === "foreefter") {
+      if (!d.harResultat) lage = "ej";
+      else lage = tabAlias === "foreefter" ? "pa" : "klar";
     } else if (steg.id === "schemaforslag") {
       if (!d.harResultat) lage = "ej";
-      else if (d.godkandSchema) lage = "klar";
-      else lage = d.aktivTab === "schemaforslag" ? "pa" : "ej";
+      else if (d.schemaForslagGodkant) lage = "klar";
+      else lage = tabAlias === "schemaforslag" ? "pa" : "ej";
     } else if (steg.id === "nyckeltal") {
-      lage = d.aktivTab === "nyckeltal" ? "pa" : d.harResultat ? "ej" : "ej";
+      lage = tabAlias === "nyckeltal" ? "pa" : "ej";
     }
-    if (d.aktivTab === steg.id && lage === "ej") lage = "pa";
-    if (d.aktivTab === steg.id && lage === "klar") lage = "pa";
+    if (tabAlias === steg.id && lage === "ej") lage = "pa";
+    if (tabAlias === steg.id && lage === "klar") lage = "pa";
     return { id: steg.id, label: steg.label, lage };
+  });
+}
+
+export function behorighetEtikett(v: boolean | null | undefined) {
+  if (v === true) return "Ja";
+  if (v === false) return "Nej";
+  return "Ej angivet";
+}
+
+export function behorighetLage(v: boolean | null | undefined): "ja" | "nej" | "okand" {
+  return treVarde(v);
+}
+
+export const VERKSAMHET_UTAN_NAMN = "Verksamhet ej namngiven";
+
+export function visningsNamnVerksamhet(org: string | null | undefined) {
+  const n = String(org || "").trim();
+  if (!n || n === "Ny verksamhet") return VERKSAMHET_UTAN_NAMN;
+  return n;
+}
+
+export function genomsnittligSsgPct(medarbetare: { vakant?: boolean; grad?: number }[]) {
+  const a = (medarbetare || []).filter((m) => !m.vakant);
+  if (!a.length) return null;
+  return a.reduce((s, m) => s + Number(m.grad || 0), 0) / a.length;
+}
+
+/** Faktisk använd kapacitet / tillgänglig SSG. Utan båda nämnarna finns inget utnyttjande. */
+export function ssgUtnyttjandePct(anvandH: number | null | undefined, tillgangligSsgH: number | null | undefined) {
+  if (anvandH == null || tillgangligSsgH == null || !(tillgangligSsgH > 0) || !Number.isFinite(anvandH)) return null;
+  return (anvandH / tillgangligSsgH) * 100;
+}
+
+export function timmarEllerTomt(timmar: number | null | undefined) {
+  if (timmar == null || !Number.isFinite(timmar)) return { text: "–", saknas: true as const };
+  return { text: `${timmar.toLocaleString("sv-SE", { maximumFractionDigits: 1 })}\u00a0h`, saknas: false as const };
+}
+
+export function berakningsKallaText(kalla: "motor" | "lokal" | null | undefined) {
+  if (kalla === "motor") return "Bemanningsbalans skapad med motor";
+  if (kalla === "lokal") return "Förhandsberäkning i appen";
+  return "Ingen beräkning är gjord ännu";
+}
+
+export function readinessFranApi(api: {
+  underlag: () => {
+    godkand: { kund: boolean; schema: boolean };
+    sekoia: unknown;
+    schema: unknown;
+  };
+  medarbetare: () => ReadinessMedarbetare[];
+  underlagAndringar?: () => { kund?: boolean; medarbetare?: boolean };
+}) {
+  const u = api.underlag();
+  const a = api.underlagAndringar?.() || {};
+  return getBemanningsbalansReadiness({
+    harKundrader: !!u.sekoia,
+    harSchema: !!u.schema,
+    kundGodkand: u.godkand.kund,
+    kundAndradSedanGodkannande: !!a.kund,
+    schemaGodkand: u.godkand.schema,
+    medarbetareAndradSedanGodkannande: !!a.medarbetare,
+    medarbetare: api.medarbetare(),
+  });
+}
+
+export function processStegFranApi(
+  api: Parameters<typeof readinessFranApi>[0] & {
+    harBalans: () => boolean;
+    regelbrott?: () => number;
+  },
+  aktivTab: string,
+  extra?: { schemaForslagGodkant?: boolean },
+) {
+  const readiness = readinessFranApi(api);
+  return processStegLagen({
+    aktivTab,
+    readiness,
+    harResultat: api.harBalans(),
+    harVarning: (api.regelbrott?.() || 0) > 0,
+    schemaForslagGodkant: extra?.schemaForslagGodkant,
   });
 }
 

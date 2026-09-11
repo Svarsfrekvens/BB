@@ -43,9 +43,9 @@ export type Medarbetare = {
   vikarie: boolean;
   grad: number;
   samordnare: boolean;
-  delegering: boolean;
-  jour: boolean;
-  nattbehorig: boolean;
+  delegering: boolean | null;
+  jour: boolean | null;
+  nattbehorig: boolean | null;
   passprofil: string;
   helg: string;
   tidigastStart: string;
@@ -131,6 +131,7 @@ export type VyApi = {
   schemaPassOriginal: () => DatumPass[];
   schemaPassHorisont: () => DatumPass[];
 
+  underlagAndringar?: () => { kund?: boolean; medarbetare?: boolean };
   medarbetareSet: (namn: string, falt: string, varde: unknown) => void;
   medarbetareLaggTill: (namn: string) => void;
   planAktiviteter: () => import("./aktiviteter").PlanAktivitet[];

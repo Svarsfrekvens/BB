@@ -48,7 +48,7 @@ let skal: SkalState = {
   avanceratOppen: false,
   eyebrow: "Översikt",
   titel: "Bemanningsbalans",
-  org: "Ny verksamhet",
+  org: "Verksamhet ej namngiven",
   periodFoot: "",
   optimerat: false,
   steg: [],

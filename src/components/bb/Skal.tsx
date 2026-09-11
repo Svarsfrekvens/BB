@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useState, useEffect, type ReactNode } from "react";
-import { Menu, Plus, RotateCcw, Download, Loader2 } from "lucide-react";
+import { Menu, RotateCcw, Download, Loader2 } from "lucide-react";
 import { bbSkal } from "@/lib/bb/skal";
 import { bbVy, APP_VERSION } from "@/lib/bb/vy";
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,8 @@ import { Notiser } from "./Notiser";
 import { BekraftaDialog } from "./Bekrafta";
 import { Progress } from "@/components/ui/progress";
 import { ProcessFlode } from "./ProcessFlode";
+import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
+import { bbVy } from "@/lib/bb/vy";
 import type { ProcessStegLage } from "@/lib/bb/vcFlode";
 
 /** Kort förklarande undertext per sida – gör menyn självinstruerande. */
@@ -169,7 +171,14 @@ function Stegrad() {
           label: st.label,
           lage: (st.lage || "ej") as ProcessStegLage,
         }))}
-        onValj={(id) => bbSkal.actions.setTab(id)}
+        onValj={(id) => {
+          if (id === "skapa") {
+            const v = bbVy.get();
+            if (v.api && s.skapaAktiv !== false) void korBemanningsbalans({ api: v.api, state: v.state });
+            return;
+          }
+          bbSkal.actions.setTab(id);
+        }}
       />
     </div>
   );
@@ -209,12 +218,6 @@ export function Skal({ children }: { children: ReactNode }) {
     window.addEventListener("beforeunload", varna);
     return () => window.removeEventListener("beforeunload", varna);
   }, [s.osparat]);
-
-
-  const skapa = () => {
-    if (s.skapaAktiv === false) return;
-    bbSkal.actions.setTab("motor");
-  };
 
   return (
     <TooltipProvider delayDuration={200}>
@@ -273,16 +276,7 @@ export function Skal({ children }: { children: ReactNode }) {
               <Button variant="outline" onClick={() => setFragaOm(true)}>
                 <RotateCcw /> Börja om
               </Button>
-            ) : (
-              <Button
-                onClick={skapa}
-                disabled={s.skapaAktiv === false}
-                aria-disabled={s.skapaAktiv === false}
-                title={(s.skapaSkol || []).join(". ") || undefined}
-              >
-                <Plus /> Skapa bemanningsbalans
-              </Button>
-            )}
+            ) : null}
           </div>
         </header>
 

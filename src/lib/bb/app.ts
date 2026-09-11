@@ -14,7 +14,7 @@ import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKont
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
-import { processStegLagen, skapaBalansHinder } from "./vcFlode";
+import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet } from "./vcFlode";
 
 declare global {
   interface Window {
@@ -45,14 +45,14 @@ const $ = (sel) => document.querySelector(sel);
  * låsta tills förutsättningen finns. */
 const TABS = [
   { id: "hem", label: "Hem", sub: "Välj verksamhet och sätt igång", ic: "⌂", grupp: "Start" },
-  { id: "uppladdning", label: "Underlag", sub: "Kundgrupp och schema", ic: "⇪", grupp: "Start" },
-  { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravUnderlag: true },
-  { id: "motor", label: "Skapa bemanningsbalans", sub: "Optimeringsmotorn räknar fram förslaget", ic: "⚡", grupp: "Start", kravUnderlag: true },
+  { id: "kundbehov", label: "Kundbehov", sub: "Insatser och tider per kund", ic: "♥", grupp: "Start", kravKund: true },
+  { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravSchema: true },
+  { id: "uppladdning", label: "Underlag", sub: "Import av datakällor", ic: "⇪", grupp: "Start" },
   { id: "resultat", label: "Granska", sub: "Resultatet av balansen", ic: "☑", grupp: "Start", kravResultat: true },
-  { id: "foreefter", label: "Före och efter", sub: "Nuläge mot förslag", ic: "⇄", grupp: "Följ upp", kravResultat: true },
+  { id: "foreefter", label: "Före och efter", sub: "Nuläge mot förslag", ic: "⇄", grupp: "Start", kravResultat: true },
+  { id: "schemaforslag", label: "Godkänn", sub: "Pass och justeringar", ic: "▦", grupp: "Start", kravResultat: true },
+  { id: "motor", label: "Beräkningslogg", sub: "Felsökning", ic: "⚡", grupp: "Mer", kravUnderlag: true },
   { id: "omplanering", label: "Omplanering", sub: "Förändring under perioden", ic: "↻", grupp: "Följ upp", kravResultat: true },
-  { id: "schemaforslag", label: "Schemaförslag", sub: "Justera pass", ic: "▦", grupp: "Planera", kravUnderlag: true },
-  { id: "kundbehov", label: "Kundbehov", sub: "Ändra insatser", ic: "♥", grupp: "Planera", kravUnderlag: true },
   { id: "resurskurva", label: "Resursbehov", sub: "Behov över dygnet", ic: "∿", grupp: "Planera", kravUnderlag: true },
   { id: "oversikt", label: "Bemanning", sub: "Verksamheten i siffror", ic: "◫", grupp: "Planera", kravUnderlag: true },
   { id: "nyckeltal", label: "Uppföljning", sub: "Planerat mot utfall", ic: "◔", grupp: "Följ upp" },
@@ -81,6 +81,8 @@ function harResultat() { return !!(state && state.balans); }
 /** Låst tills förutsättningen finns. */
 function tabTillganglig(t) {
   if (t && t.kravResultat) return harResultat();
+  if (t && t.kravKund) return !!(state && state.rows && state.rows.length);
+  if (t && t.kravSchema) return !!(state && state.schemaOriginal);
   if (t && t.kravUnderlag) return harUnderlag();
   return true;
 }
@@ -132,7 +134,7 @@ const DEFAULT_VERKS = () => ({
   analysisDays: 28, hourlyCost: 270, dygnKr: 2500, plannedHours: 1972, budget: 460000,
   continuitySek: 50, spreadSekPerPermille: 2.5,
   reservePct: 6, absencePct: 4,
-  kundGodkand: false, schemaGodkand: false,
+  kundGodkand: false, schemaGodkand: false, kundAndrad: false, medarbetareAndrad: false,
   planAktiviteter: standardKatalog(),
   kontaktpersoner: {},
 });
@@ -691,12 +693,13 @@ function harleddModell(rows, period, individschema, antag) {
 function approveImport() {
   if (!pending || pending.blockera) return;
   state.rows = pending.godkanda;
-  state.kundGodkand = true;
+  state.kundGodkand = false;
+  state.kundAndrad = false;
   state.period = { from: pending.from, to: pending.to };
   state.importDays = pending.days;
   state.planDays = Math.min(28, pending.days);
   state.analysisDays = state.planDays;
-  state.optimerat = true;   // ← X2 inläst: optimerat schema och gröna siffror
+  state.optimerat = false;
   state.resurs = pendingMeta.resurs || null;
   // Saknar filen modellbladen (bara rå Sekoia-Rapport) härleds Beräkningar,
   // Kontroller, Personal och Intäkter från Rapporten + Individschema + startvärden,
@@ -927,7 +930,7 @@ function underlagInfo() {
     godkand: {
       kund: !!state.kundGodkand,
       schema: !!state.schemaGodkand,
-      allt: !!state.kundGodkand && !!state.schemaGodkand,
+      allt: !!state.kundGodkand && !!state.schemaGodkand && !state.kundAndrad && !state.medarbetareAndrad,
     },
     schema: sk
       ? { filnamn: sk.filnamn, blad: sk.blad, medarbetare: sk.medarbetare.filter((m) => !m.vikarie).length,
@@ -997,6 +1000,7 @@ function sparadInfo() {
 function rensaVerksamhet() {
   state.rows = []; state.period = null; state.importDays = 0;
   state.schemaOriginal = null; state.kundGodkand = false; state.schemaGodkand = false;
+  state.kundAndrad = false; state.medarbetareAndrad = false;
   state.balans = null; state.optimerat = false;
   state.kundEdit = null; state.kundLek = null; state.schemaLek = null;
   state.berakningar = null; state.kontroller = null; state.personal = null; state.intakter = null;
@@ -1040,9 +1044,9 @@ function medarbetarLista() {
       vakant: m.vikarie,
       grad: i.grad != null ? Number(i.grad) : m.grad,
       samordnare: i.samordnare != null ? !!i.samordnare : /topas/i.test(m.namn),
-      delegering: i.delegering != null ? !!i.delegering : true,
-      jour: i.jour != null ? !!i.jour : true,
-      nattbehorig: i.nattbehorig != null ? !!i.nattbehorig : true,
+      delegering: i.delegering != null ? !!i.delegering : null,
+      jour: i.jour != null ? !!i.jour : null,
+      nattbehorig: i.nattbehorig != null ? !!i.nattbehorig : null,
       passprofil: v("passprofil", MEDARB_STANDARD.passprofil),
       helg: v("helg", MEDARB_STANDARD.helg),
       tidigastStart: v("tidigastStart", MEDARB_STANDARD.tidigastStart),
@@ -1060,18 +1064,24 @@ function medarbetareSet(namn, falt, varde) {
   const info = medarbetarInfoKarta();
   const nuvarande = medarbetarLista().find((m) => m.namn === namn) || {};
   info[namn] = { ...nuvarande, ...(info[namn] || {}), [falt]: varde };
-  state.schemaGodkand = false;
-  // Sovande jour är nattarbete: jour kräver nattbehörighet, och tas behörigheten
-  // bort kan personen inte längre gå jour.
-  if (falt === "jour" && varde) info[namn].nattbehorig = true;
-  if (falt === "nattbehorig" && !varde) info[namn].jour = false;
+  const planeringsfalt = [
+    "workTimeModelId", "nattbehorig", "jour", "delegering", "villkor", "franvaro",
+    "tidigastStart", "senastSlut", "maxDagarIFoljd", "helg", "passprofil", "grad", "samordnare",
+  ];
+  if (state.schemaGodkand && planeringsfalt.includes(falt)) {
+    state.medarbetareAndrad = true;
+    notera("Medarbetarvillkoren har ändrats. Granska förändringen innan du skapar bemanningsbalans.", "info", {
+      detalj: `${namn}: ${falt} påverkar planeringsunderlaget.`,
+    });
+  }
+  if (falt === "jour" && varde === true) info[namn].nattbehorig = true;
+  if (falt === "nattbehorig" && varde === false) info[namn].jour = false;
   if (falt === "passprofil" && String(varde) === "natt") info[namn].nattbehorig = true;
 
-  // Ändrade villkor gör resultatet ogiltigt – balansen måste skapas om.
   if (state.balans) {
     state.balans = null; state.optimerat = false;
     notera("Uppgiften är sparad – skapa bemanningsbalans igen", "info",
-      { detalj: "Villkoren styr optimeringen, så resultatet nollställdes." });
+      { detalj: "Villkoren styr beräkningen, så resultatet nollställdes." });
   }
   persist(); render();
 }
@@ -1079,7 +1089,7 @@ function medarbetareLaggTill(namn) {
   const rent = String(namn || "").trim();
   if (!rent) return;
   const info = medarbetarInfoKarta();
-  info[rent] = { extra: true, grad: 100, samordnare: false, delegering: true, jour: true, ...MEDARB_STANDARD };
+  info[rent] = { extra: true, grad: 100, samordnare: false, delegering: null, jour: null, nattbehorig: null, ...MEDARB_STANDARD };
   if (state.balans) { state.balans = null; state.optimerat = false; }
   persist();
   notera(`${rent} tillagd`, "ok", { detalj: "Kompletterande uppgifter sparas i verksamheten." });
@@ -1087,18 +1097,25 @@ function medarbetareLaggTill(namn) {
 }
 
 
+function readinessNu() {
+  return getBemanningsbalansReadiness({
+    harKundrader: !!(state.rows && state.rows.length),
+    harSchema: !!state.schemaOriginal,
+    kundGodkand: !!state.kundGodkand,
+    kundAndradSedanGodkannande: !!state.kundAndrad,
+    schemaGodkand: !!state.schemaGodkand,
+    medarbetareAndradSedanGodkannande: !!state.medarbetareAndrad,
+    medarbetare: medarbetarLista(),
+  });
+}
+
 function skapaBalans() {
-  if (!state.rows.length || !state.period) {
-    notera("Kundbehovet saknas", "fel", { detalj: "Läs in Sekoia-rapporten först." });
-    tab = "kundgrupp"; render(); return;
-  }
-  if (!state.schemaOriginal) {
-    notera("Personalschemat saknas", "fel", { detalj: "Ladda upp Medvind-exporten under Underlag först." });
-    tab = "kundgrupp"; render(); return;
-  }
-  if (!state.kundGodkand || !state.schemaGodkand) {
-    notera("Godkänn underlagen först", "info", { detalj: "Granska kunder och medarbetare innan optimeringen startar." });
-    tab = "uppladdning"; render(); return;
+  const r = readinessNu();
+  if (!r.ready) {
+    notera(r.blockingReasons[0] || "Underlaget räcker inte", "info", { detalj: r.blockingReasons.join(". ") });
+    if (!state.rows.length) { tab = "kundbehov"; render(); return; }
+    if (!state.schemaOriginal || !state.schemaGodkand || state.medarbetareAndrad) { tab = "medarbetare"; render(); return; }
+    tab = "kundbehov"; render(); return;
   }
   const { from, to } = analysPeriod();
   const dagLista = [];
@@ -1133,8 +1150,8 @@ function skapaBalans() {
   state.optimerat = true;
   tab = "resultat";
   persist();
-  notera(`Bemanningsbalans skapad – ${schemaRes.forandringar.length} pass och ${res.flyttade.length} insatser ändrades`, "ok",
-    { detalj: `${vik.antalBehalls} vikariepass behöver tillsättas, ${vik.antalBorttagna} kunde tas bort.` });
+  notera("Förhandsberäkning i appen", "ok",
+    { detalj: `${schemaRes.forandringar.length} pass och ${res.flyttade.length} insatser ändrades. ${vik.antalBehalls} vikariepass behöver tillsättas.` });
   render();
 }
 
@@ -1188,7 +1205,7 @@ function anvandMotorResultat(res) {
   state.optimerat = true;
   tab = "resultat";
   persist();
-  notera(`Bemanningsbalans skapad med optimeringsmotorn – ${res.pass.length} pass i förslaget`, "ok", {
+  notera("Bemanningsbalans skapad med motor", "ok", {
     detalj: res.explanation || "Granska resultatet innan du öppnar schemat.",
   });
   render();
@@ -1723,6 +1740,7 @@ function kundEditSet(id, falt, varde) {
   } else if (falt === "dubbel") {
     r.tvaPersoner = !!varde;
   }
+  if (state.kundGodkand) state.kundAndrad = true;
   persist(); render();
 }
 function kundEditTaBort(id) {
@@ -2207,7 +2225,7 @@ function renderNav() {
     avanceratOppen: !!window.__avanceratOppen,
     eyebrow: cur.grupp || cur.label,
     titel: state.org || "Bemanningsbalans",
-    org: state.org || "Ny verksamhet",
+    org: visningsNamnVerksamhet(state.org),
     periodFoot: state.period
       ? `${state.period.from} – ${addDays(state.period.from, state.importDays - 1)} · ${filled} av ${root.verks.length} importerade`
       : `${filled} av ${root.verks.length} verksamheter importerade`,
@@ -2814,7 +2832,7 @@ function viewInstallningar(d) {
 /* ---------- Render ---------- */
 function verksBar() {
   const tabs = root.verks.map((v) => {
-    const label = v.org || "Ny verksamhet";
+    const label = visningsNamnVerksamhet(v.org);
     const filled = v.rows.length > 0;
     return `<button class="vtab ${v.id === state.id ? "on" : ""}" data-v="${v.id}">
       <span class="vdot ${filled ? "filled" : ""}"></span>${esc(label)}
@@ -2844,7 +2862,7 @@ function render() {
   // lagret – inga beräkningar dupliceras.
   publiceraVy({
     tab,
-    verks: root.verks.map((v) => ({ id: v.id, org: v.org || "Ny verksamhet", filled: v.rows.length > 0 })),
+    verks: root.verks.map((v) => ({ id: v.id, org: visningsNamnVerksamhet(v.org), filled: v.rows.length > 0 })),
     aktivVerks: state.id,
     maxVerks: MAX_VERKS,
     pending,
@@ -2860,6 +2878,7 @@ function render() {
       underlag: () => underlagInfo(),
       valjSchemaFil: () => { const el = $("#nyttFileInput"); if (el) el.click(); },
       hanteraSchemaFil: (f) => handleSchemaFil(f),
+      underlagAndringar: () => ({ kund: !!state.kundAndrad, medarbetare: !!state.medarbetareAndrad }),
       medarbetare: () => medarbetarLista(),
       medarbetareSet: (namn, falt, varde) => medarbetareSet(namn, falt, varde),
       planAktiviteter: () => state.planAktiviteter || standardKatalog(),
@@ -2898,6 +2917,7 @@ function render() {
       godkannSchema: () => {
         if (!state.schemaOriginal) return;
         state.schemaGodkand = true;
+        state.medarbetareAndrad = false;
         persist();
         notera("Personalschemat är godkänt", "ok", { detalj: "Underlaget är klart för bemanningsbalans." });
         render();
@@ -2917,7 +2937,7 @@ function render() {
       foreLage: () => foreLage(),
       schemaPass: () => state.balans ? efterPass() : schemaPass(),
       schematidKalla: () => schematidKalla(),
-      // Optimeringsmotorn: regler, mottagning av förslaget och vilken källa som gäller
+      // Bemanningsberäkning: regler, mottagning av förslaget och vilken källa som gäller
       motorRegler: () => motorRegler(),
       motorResultat: () => state.motorResultat || null,
       berakningsKalla: () => (state.balans ? state.balans.kalla || "lokal" : null),
@@ -3048,6 +3068,7 @@ function render() {
       godkannKund: () => {
         if (!state.rows.length) return;
         state.kundGodkand = true;
+        state.kundAndrad = false;
         persist();
         notera("Kundunderlaget är godkänt", "ok", { detalj: "Alla kunder och insatser är klara för beräkningen." });
         render();
@@ -3075,27 +3096,20 @@ function render() {
 // Röd stegrad överst (som referensen): 1 Kundbehov → 2 Resursbehov → 3 Bemanning
 // → 4 Schema → 5 Uppföljning. Visas på planeringssidorna, aktivt steg i rött.
 function renderStegrad() {
-  const med = typeof medarbetarLista === "function" ? medarbetarLista() : [];
-  const hinder = skapaBalansHinder({
-    kundGodkand: !!state.kundGodkand,
-    medarbetare: med,
-    harUnderlag: harUnderlag() || !!state.kundGodkand,
-  });
+  const r = readinessNu();
   const steg = processStegLagen({
     aktivTab: tab,
-    kundGodkand: !!state.kundGodkand,
-    medarbetareOk: !hinder.skal.some((s) => s.includes("arbetstidsmodell")),
+    readiness: r,
     harResultat: harResultat(),
     harVarning: !!(state.balans && state.balans.schemaVarningar && state.balans.schemaVarningar.length),
-    blockeradSkapa: !hinder.aktiv,
-    godkandSchema: !!state.schemaGodkand,
+    schemaForslagGodkant: !!state.schemaGodkand && !!state.balans,
   });
-  const idx = steg.findIndex((s) => s.id === tab);
+  const idx = steg.findIndex((s) => s.id === tab || (tab === "motor" && s.id === "skapa"));
   publiceraSkal({
     steg,
     stegIdx: idx < 0 ? 0 : idx,
-    skapaAktiv: hinder.aktiv,
-    skapaSkol: hinder.skal,
+    skapaAktiv: r.ready,
+    skapaSkol: r.blockingReasons,
   });
 }
 
@@ -3307,6 +3321,7 @@ bootstrapGrundlage();
 function borjaOm() {
   state.rows = []; state.period = null; state.importDays = 0;
   state.schemaOriginal = null; state.kundGodkand = false; state.schemaGodkand = false;
+  state.kundAndrad = false; state.medarbetareAndrad = false;
   state.balans = null; state.optimerat = false; state.motorResultat = null;
   state.org = "";
   state.resurs = null; state.berakningar = null; state.berakningarDerived = false;

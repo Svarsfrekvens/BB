@@ -2,27 +2,17 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VyProps } from "@/lib/bb/vy";
-import { lasMotorSummary, processStegLagen, skapaBalansHinder, vcStatusText } from "@/lib/bb/vcFlode";
+import { berakningsKallaText, lasMotorSummary, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
+import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { TreOmraden } from "./TreOmraden";
-import { ProcessFlode } from "./ProcessFlode";
+import { ForeEfter } from "./ForeEfter";
 
-export function Resultat({ api }: VyProps) {
+export function Resultat(props: VyProps) {
+  const { api, state } = props;
   const summary = lasMotorSummary(api.motorResultat());
   const fe = api.foreEfter();
   const efter = fe?.efter;
-  const hinder = skapaBalansHinder({
-    kundGodkand: api.underlag().godkand.kund,
-    medarbetare: api.medarbetare(),
-    harUnderlag: api.harUnderlag(),
-  });
-  const steg = processStegLagen({
-    aktivTab: "resultat",
-    kundGodkand: api.underlag().godkand.kund,
-    medarbetareOk: hinder.skal.every((s) => !s.includes("arbetstidsmodell") && !s.includes("Nattbehörighet")),
-    harResultat: api.harBalans(),
-    harVarning: (summary?.warnings.length || 0) > 0 || api.regelbrott() > 0,
-    blockeradSkapa: !hinder.aktiv,
-  });
+  const readiness = readinessFranApi(api);
 
   if (!api.harBalans()) {
     return (
@@ -31,7 +21,12 @@ export function Resultat({ api }: VyProps) {
         <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
           Skapa bemanningsbalans först. Du möter resultatet här, inte schemat.
         </p>
-        <Button className="mt-6" onClick={() => api.setTab("motor")}>
+        <Button
+          className="mt-6"
+          data-cta="skapa-bemanningsbalans"
+          disabled={!readiness.ready}
+          onClick={() => void korBemanningsbalans({ api, state })}
+        >
           <Sparkles /> Skapa bemanningsbalans
         </Button>
       </Card>
@@ -49,11 +44,11 @@ export function Resultat({ api }: VyProps) {
 
   return (
     <div className="space-y-6">
-      <ProcessFlode steg={steg} onValj={(id) => api.setTab(id)} />
       <div>
         <div className="text-[11px] font-bold tracking-widest text-primary uppercase">Granska</div>
         <h2 className="mt-1 text-3xl font-extrabold text-deep">Resultat av bemanningsbalansen</h2>
         <p className="mt-2 max-w-2xl text-base text-muted-foreground">{vcStatusText(summary?.status)}</p>
+        <p className="mt-1 text-sm font-semibold text-deep">{berakningsKallaText(api.berakningsKalla())}</p>
       </div>
       <TreOmraden
         summary={
@@ -90,12 +85,12 @@ export function Resultat({ api }: VyProps) {
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{summary.explanationSummary}</p>
         ) : null}
         <div className="mt-5 flex flex-wrap gap-2">
-          <Button onClick={() => api.setTab("foreefter")}>Före och efter</Button>
           <Button variant="outline" onClick={() => api.setTab("schemaforslag")}>
             Godkänn och öppna schema <ArrowRight />
           </Button>
         </div>
       </Card>
+      <ForeEfter {...props} />
     </div>
   );
 }

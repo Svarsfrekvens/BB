@@ -13,6 +13,7 @@ import {
 import { delaPeriod, payloadForFonster, svansPass, type Fonster } from "@/lib/bb/motorPeriod";
 import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "@/lib/bb/motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "@/lib/bb/motor.functions";
+import { byggMotorPayload, type PayloadResultat } from "@/lib/bb/motorPayload";
 import { vcStatusText } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
@@ -156,7 +157,7 @@ export function Motor({ state, api }: VyProps) {
       }
     }
     if (!tillganglig) {
-      setSteg("Optimeringsmotorn är inte nåbar – räknar i appen.");
+      setSteg("Beräkningen är inte tillgänglig – räknar i appen.");
       setTimeout(() => {
         try {
           lokalBerakning();
@@ -295,18 +296,21 @@ export function Motor({ state, api }: VyProps) {
           <div className="max-w-2xl">
             <Eyebrow>Skapa bemanningsbalans</Eyebrow>
             <h2 className="mt-1 flex items-center gap-2 text-2xl font-extrabold tracking-tight text-deep">
-              <Cpu className="size-6 text-primary" /> Skapa bemanningsbalans
+              <Cpu className="size-6 text-primary" /> Beräkningslogg
             </h2>
+            <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+              Felsökningsvy. I huvudflödet startas beräkningen från Hem med ett klick.
+            </p>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
               Bemanningsbalansen räknas fram utifrån kundernas behov och verksamhetens regler. Ditt befintliga schema
               ändras aldrig – du får ett förslag att titta på.
             </p>
             <p className="mt-2 text-xs font-semibold text-muted-foreground">
               {motorKlar === null
-                ? "Kontrollerar vilken beräkning som är tillgänglig…"
+                ? "Kontrollerar om bemanningsberäkningen är tillgänglig…"
                 : motorKlar
-                  ? "Den bevisat optimerande beräkningen är tillgänglig och används."
-                   : `Den bevisat optimerande beräkningen är inte tillgänglig – appen räknar själv (reservläge).${motorMeddelande ? ` ${motorMeddelande}` : ""}`}
+                  ? "Bemanningsberäkning med motor är tillgänglig."
+                  : "Beräkningen är inte tillgänglig. En förhandsberäkning i appen kan göras."}
             </p>
           </div>
           {klar ? (
@@ -365,7 +369,7 @@ export function Motor({ state, api }: VyProps) {
           ) : null}
           {!jobbar && senaste && !klar ? (
             <Button variant="outline" onClick={lokalBerakning}>
-              Räkna i appen i stället (reservläge)
+              Förhandsberäkning i appen
             </Button>
           ) : null}
         </div>

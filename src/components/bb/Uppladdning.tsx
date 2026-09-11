@@ -7,7 +7,6 @@ import {
   HeartHandshake,
   Info,
   LayoutDashboard,
-  Sparkles,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -15,8 +14,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { bbVy, fmtH } from "@/lib/bb/vy";
 import type { VyProps } from "@/lib/bb/vy";
-import { Medarbetare } from "./Medarbetare";
-import { Planering } from "./Planering";
 
 /** Ett steg i underlagslistan: ikon, rubrik, status och en filknapp med släppyta. */
 function Steg({
@@ -92,18 +89,12 @@ export function Uppladdning(props: VyProps) {
   const schema = u.schema;
   const filerKlara = !!sekoia && !!schema;
   const klart = filerKlara && u.godkand.allt;
-  const harBalans = api.harBalans();
   const sparat = api.sparadInfo();
   const rawOrg = v.verks.find((x) => x.id === v.aktivVerks)?.org || "";
   const orgNamn = rawOrg === "Ny verksamhet" ? "" : rawOrg;
   const org = orgNamn || "din verksamhet";
   const kundFil = useRef<HTMLInputElement>(null);
   const schemaFil = useRef<HTMLInputElement>(null);
-  const kundRader = api.arbetsRader();
-  const kunder = api.gfpKunder().map((namn) => {
-    const rader = kundRader.filter((r) => String(r.kund) === namn);
-    return { namn, insatser: rader.length, timmar: rader.reduce((s, r) => s + (Number(r.minuter) || 0), 0) / 60 };
-  });
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -155,7 +146,7 @@ export function Uppladdning(props: VyProps) {
             <Steg
               ikon={HeartHandshake}
               klar={!!sekoia}
-              titel="1. Ladda upp kundernas behov"
+              titel="Kundfil"
               kalla="Sekoia-export, bladet Rapport"
               status={
                 sekoia
@@ -172,7 +163,7 @@ export function Uppladdning(props: VyProps) {
                 <Steg
                   ikon={CalendarClock}
                   klar={!!schema}
-                  titel="2. Läs in nuvarande schema"
+                  titel="Schemafil"
                   kalla="Medvind-export – blir läget före"
                   status={
                     schema
@@ -188,24 +179,25 @@ export function Uppladdning(props: VyProps) {
               <Steg
                 ikon={CalendarClock}
                 klar={false}
-                titel="2. Läs in nuvarande schema"
+                titel="Schemafil"
                 kalla="Dyker upp så fort kundernas behov är inläst."
                 last
               />
             )}
 
             {filerKlara ? (
-              <div className="bb-steg-in animated fadeInUp border-b border-border">
-                <Planering api={api} />
-              </div>
-            ) : null}
-
-            {filerKlara ? (
-              <div className="bb-steg-in animated fadeInUp space-y-4 px-6 py-7">
-                <Button size="lg" className="w-full" disabled={!u.godkand.allt} onClick={() => api.setTab("motor")}>
-                  <Sparkles /> {harBalans ? "Skapa om bemanningsbalans" : "Skapa bemanningsbalans"}
-                </Button>
-
+              <div className="bb-steg-in animated fadeInUp space-y-3 px-6 py-7">
+                <p className="text-sm text-muted-foreground">
+                  Granska och godkänn underlagen på sidorna Kundbehov och Medarbetare. Därefter skapas bemanningsbalansen från Hem.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button variant="outline" onClick={() => api.setTab("kundbehov")}>
+                    Öppna kundbehov
+                  </Button>
+                  <Button variant="outline" onClick={() => api.setTab("medarbetare")}>
+                    Öppna medarbetare
+                  </Button>
+                </div>
               </div>
             ) : null}
           </Card>
@@ -305,45 +297,15 @@ export function Uppladdning(props: VyProps) {
       </div>
 
       {sekoia && !u.godkand.kund ? (
-        <section className="space-y-4" aria-labelledby="granska-kunder">
-          <div className="text-center">
-            <div className="text-xs font-bold tracking-widest text-primary uppercase">Steg 2</div>
-            <h3 id="granska-kunder" className="mt-1 text-2xl font-extrabold text-deep">Granska kundunderlaget</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Kontrollera att alla kunder och deras insatser har kommit med.</p>
-          </div>
-          <Card className="gap-0 overflow-hidden rounded-2xl p-0 shadow-lift">
-            <div className="max-h-96 overflow-y-auto divide-y divide-border">
-              {kunder.map((kund, i) => (
-                <div key={kund.namn} className="grid grid-cols-[3rem_1fr_auto] items-center gap-3 px-5 py-4">
-                  <span className="grid size-8 place-items-center rounded-full bg-primary-soft text-xs font-extrabold text-primary">{i + 1}</span>
-                  <div><strong className="block text-sm text-deep">{kund.namn}</strong><span className="text-xs text-muted-foreground">{kund.insatser} insatser</span></div>
-                  <strong className="text-sm tabular-nums text-deep">{fmtH(kund.timmar)}</strong>
-                </div>
-              ))}
-            </div>
-          </Card>
-          <Card className="flex flex-wrap items-center justify-between gap-4 rounded-2xl p-6 shadow-lift">
-            <div><strong className="block text-base font-extrabold text-deep">Finns alla kunder med?</strong><span className="text-sm text-muted-foreground">Godkänn när du har granskat listan.</span></div>
-            <Button size="lg" onClick={() => api.godkannKund()}><CheckCircle2 /> Godkänn kundunderlaget</Button>
-          </Card>
-        </section>
+        <p className="text-center text-sm text-muted-foreground">
+          Kundfilen är inläst men inte godkänd. Öppna Kundbehov för att granska och godkänna.
+        </p>
       ) : null}
 
       {schema && !u.godkand.schema ? (
-        <section className="space-y-4" aria-labelledby="granska-schema">
-          <div className="text-center">
-            <div className="text-xs font-bold tracking-widest text-primary uppercase">Steg 3</div>
-            <h3 id="granska-schema" className="mt-1 text-2xl font-extrabold text-deep">Granska personalschemat</h3>
-            <p className="mt-1 text-sm text-muted-foreground">Kontrollera sysselsättningsgrad, nattbehörighet, jour och passprofil.</p>
-          </div>
-          <div className="max-h-[38rem] overflow-y-auto rounded-2xl border border-border bg-background p-1 shadow-lift">
-            <Medarbetare {...props} />
-          </div>
-          <Card className="flex flex-wrap items-center justify-between gap-4 rounded-2xl p-6 shadow-lift">
-            <div><strong className="block text-base font-extrabold text-deep">Stämmer uppgifterna?</strong><span className="text-sm text-muted-foreground">Godkänn när du har granskat hela listan.</span></div>
-            <Button size="lg" onClick={() => api.godkannSchema()}><CheckCircle2 /> Godkänn personalschemat</Button>
-          </Card>
-        </section>
+        <p className="text-center text-sm text-muted-foreground">
+          Schemat är inläst. Öppna Medarbetare för att komplettera villkor och godkänna.
+        </p>
       ) : null}
     </div>
   );

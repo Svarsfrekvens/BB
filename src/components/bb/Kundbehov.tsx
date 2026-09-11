@@ -157,6 +157,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
   const [nyKund, setNyKund] = useState<null | "kund" | "plan">(null);
   const [taBort, setTaBort] = useState<null | { id: string; namn: string }>(null);
   const [sida, setSida] = useState(0);
+  const [visaDetaljer, setVisaDetaljer] = useState(false);
 
   if (!d) {
     return (
@@ -199,7 +200,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
   const ofull = d.rows.some((r) => !r.start || !(r.minuter > 0));
   const status = kundUnderlagStatus({
     godkand: api.underlag().godkand.kund,
-    redigerad: d.redigerad,
+    redigerad: !!api.underlagAndringar?.().kund || d.redigerad,
     ofullstandig: ofull,
   });
 
@@ -226,9 +227,19 @@ export function Kundbehov({ d, state, api }: VyProps) {
           Se kunder, behov per dygn, fasta och flyttbara insatser, dubbelbemanning och kompetenskrav. Godkänn när
           underlaget stämmer.
         </p>
-        <Button className="mt-4" onClick={() => api.godkannKund()} disabled={!d.rows.length || ofull}>
-          <CheckCircle2 /> Godkänn kundunderlaget
+        <Button
+          className="mt-4"
+          onClick={() => api.godkannKund()}
+          disabled={!d.rows.length || ofull || status.kod === "klar"}
+        >
+          <CheckCircle2 />{" "}
+          {status.kod === "klar" ? "Godkänt ✓" : status.kod === "forandrad" ? "Granska ändringar" : "Godkänn kundunderlaget"}
         </Button>
+        {status.kod === "forandrad" ? (
+          <Button className="mt-4 ml-2" variant="outline" onClick={() => api.godkannKund()}>
+            Godkänn igen
+          </Button>
+        ) : null}
       </Card>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -275,19 +286,17 @@ export function Kundbehov({ d, state, api }: VyProps) {
       </div>
 
       <Card className="gap-0 overflow-hidden rounded-2xl p-0 shadow-lift">
-        <div className="flex flex-wrap items-start justify-between gap-4 p-6 sm:p-8">
-          <div className="min-w-0">
-            <Eyebrow>
-              Kundens behov{" "}
-              {d.redigerad ? <span className="text-success">· ändrat av dig</span> : null}
-            </Eyebrow>
-            <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Kundens behov i tid</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-              Fasta insatser ligger kvar på sin tid. Flyttbara och gemensamma kan flyttas inom sitt fönster
-              (start–senast klar). Ändra direkt i tabellen – alla tal och kurvor räknas om med en gång.{" "}
-              <strong className="font-bold text-deep">{d.n.antalInsatser} insatser</strong> i perioden.
-            </p>
+        <div className="flex flex-wrap items-center justify-between gap-3 p-6">
+          <div>
+            <Eyebrow>Detaljer</Eyebrow>
+            <h2 className="mt-1 text-xl font-extrabold text-deep">Insatstabell</h2>
+            <p className="mt-1 text-sm text-muted-foreground">{d.n.antalInsatser} insatser i perioden.</p>
           </div>
+          <Button variant="outline" onClick={() => setVisaDetaljer((v) => !v)}>
+            {visaDetaljer ? "Dölj detaljer" : "Visa detaljer"}
+          </Button>
+        </div>
+      {visaDetaljer ? (
 
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-2 rounded-xl bg-muted p-2">
@@ -527,6 +536,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
             ) : null}
           </span>
         </div>
+      ) : null}
       </Card>
 
       <NyKundDialog
