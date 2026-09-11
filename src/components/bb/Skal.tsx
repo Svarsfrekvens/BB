@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useState, useEffect, type ReactNode } from "react";
-import { Menu, Plus, RotateCcw, Check, Download, Loader2 } from "lucide-react";
+import { Menu, Plus, RotateCcw, Download, Loader2 } from "lucide-react";
 import { bbSkal } from "@/lib/bb/skal";
 import { bbVy, APP_VERSION } from "@/lib/bb/vy";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,8 @@ import { FragaAppen } from "./FragaAppen";
 import { Notiser } from "./Notiser";
 import { BekraftaDialog } from "./Bekrafta";
 import { Progress } from "@/components/ui/progress";
+import { ProcessFlode } from "./ProcessFlode";
+import type { ProcessStegLage } from "@/lib/bb/vcFlode";
 
 /** Kort förklarande undertext per sida – gör menyn självinstruerande. */
 const UNDERTEXT: Record<string, string> = {
@@ -27,7 +29,10 @@ const UNDERTEXT: Record<string, string> = {
   personal: "Medarbetare och kapacitet",
   schema: "Pass per medarbetare",
   nyckeltal: "Kundnära tid och mål",
-  ekonomi: "Intäkter mot kostnader",
+  ekonomi: "Rätt resurser i rätt tid",
+  resultat: "Resultat av bemanningsbalansen",
+  omplanering: "Förändring under perioden",
+  motor: "Skapa bemanningsbalans",
   kunder: "Timmar per kund",
   sprid: "Flytta rörliga insatser",
   intakter: "Ersättning och underlag",
@@ -155,52 +160,17 @@ function Sidfot() {
 
 function Stegrad() {
   const s = useSkal();
-  if (s.stegIdx === -1) return null;
+  if (!s.steg.length) return null;
   return (
     <div className="px-5 pb-4 sm:px-8">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="rounded-full bg-primary-soft px-3 py-1 text-xs font-bold text-primary">
-          Steg {s.stegIdx + 1} av {s.steg.length}
-        </span>
-        <div className="flex flex-wrap items-center gap-1.5">
-          {s.steg.map((st, i: number) => {
-            const aktiv = i === s.stegIdx;
-            const klar = i < s.stegIdx;
-            return (
-              <Tooltip key={st.id}>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={`Gå till steg ${i + 1}: ${st.label}`}
-                    onClick={() => bbSkal.actions.setTab(st.id)}
-                    className={cn(
-                      "flex items-center gap-2 rounded-full border px-2 py-1.5 text-xs font-semibold transition-all duration-200 md:px-3",
-                      aktiv
-                        ? "border-primary bg-primary text-primary-foreground shadow-lift"
-                        : klar
-                          ? "border-transparent bg-primary-soft text-primary"
-                          : "border-border bg-card text-muted-foreground hover:text-deep",
-                    )}
-                  >
-                    <span
-                      className={cn(
-                        "grid size-5 place-items-center rounded-full text-[10px] font-bold",
-                        aktiv ? "bg-primary-foreground/20" : "bg-muted",
-                      )}
-                    >
-                      {klar ? <Check className="size-3" /> : i + 1}
-                    </span>
-                    <span className="hidden md:inline">{st.label}</span>
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent>Klicka för att gå till steget</TooltipContent>
-              </Tooltip>
-            );
-          })}
-        </div>
-      </div>
-      {/* På smal skärm visar cirklarna bara siffror – namnet står här. */}
-      <div className="mt-1.5 text-xs font-semibold text-deep md:hidden">{s.steg[s.stegIdx]?.label}</div>
+      <ProcessFlode
+        steg={s.steg.map((st) => ({
+          id: st.id,
+          label: st.label,
+          lage: (st.lage || "ej") as ProcessStegLage,
+        }))}
+        onValj={(id) => bbSkal.actions.setTab(id)}
+      />
     </div>
   );
 }
@@ -227,7 +197,6 @@ export function Skal({ children }: { children: ReactNode }) {
   const s = useSkal();
   const [mobilOppen, setMobilOppen] = useState(false);
   const [fragaOm, setFragaOm] = useState(false);
-  const [optimerar, setOptimerar] = useState(false);
 
   // Varna innan fliken stängs om arbetet inte är exporterat.
   useEffect(() => {
@@ -243,15 +212,8 @@ export function Skal({ children }: { children: ReactNode }) {
 
 
   const skapa = () => {
-    setOptimerar(true);
-    // Kort laddningsläge så knappen visar att något händer.
-    setTimeout(() => {
-      try {
-        bbSkal.actions.skapa();
-      } finally {
-        setOptimerar(false);
-      }
-    }, 60);
+    if (s.skapaAktiv === false) return;
+    bbSkal.actions.setTab("motor");
   };
 
   return (
@@ -312,9 +274,13 @@ export function Skal({ children }: { children: ReactNode }) {
                 <RotateCcw /> Börja om
               </Button>
             ) : (
-              <Button onClick={skapa} disabled={optimerar}>
-                {optimerar ? <Loader2 className="animate-spin" /> : <Plus />}
-                {optimerar ? "Optimerar…" : "Skapa bemanningsbalans"}
+              <Button
+                onClick={skapa}
+                disabled={s.skapaAktiv === false}
+                aria-disabled={s.skapaAktiv === false}
+                title={(s.skapaSkol || []).join(". ") || undefined}
+              >
+                <Plus /> Skapa bemanningsbalans
               </Button>
             )}
           </div>

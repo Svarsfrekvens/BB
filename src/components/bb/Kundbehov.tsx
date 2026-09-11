@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Plus, RotateCcw, X, ArrowLeftRight, Lock, Users, FileText, Upload, ClipboardList, ChevronLeft, ChevronRight } from "lucide-react";
+import { Plus, RotateCcw, X, ArrowLeftRight, Lock, Users, FileText, Upload, ClipboardList, ChevronLeft, ChevronRight, CheckCircle2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +22,7 @@ import { TomtLage } from "./Tomt";
 import { BekraftaDialog } from "./Bekrafta";
 import { Hjalp } from "./Hjalp";
 import { notera } from "@/lib/bb/notis";
+import { kundUnderlagStatus } from "@/lib/bb/vcFlode";
 
 const DAGAR = ["M", "T", "O", "T", "F", "L", "S"];
 const DAGNAMN = ["måndagar", "tisdagar", "onsdagar", "torsdagar", "fredagar", "lördagar", "söndagar"];
@@ -195,9 +196,68 @@ export function Kundbehov({ d, state, api }: VyProps) {
   const rader = alla.slice(forsta, forsta + PER_SIDA);
 
   const idAv = (r: Insats, i: number) => (r._id != null ? r._id : r.kallrad != null ? String(r.kallrad) : "r" + i);
+  const ofull = d.rows.some((r) => !r.start || !(r.minuter > 0));
+  const status = kundUnderlagStatus({
+    godkand: api.underlag().godkand.kund,
+    redigerad: d.redigerad,
+    ofullstandig: ofull,
+  });
 
   return (
     <div className="flex flex-col gap-6">
+      <Card className="rounded-2xl p-6 shadow-lift">
+        <Eyebrow>Kundbehov</Eyebrow>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-3">
+          <h2 className="text-2xl font-extrabold tracking-tight text-deep">Kundernas behov</h2>
+          <Badge
+            className={cn(
+              "shadow-none",
+              status.kod === "klar"
+                ? "bg-success-soft text-success"
+                : status.kod === "forandrad"
+                  ? "bg-warning-soft text-warning"
+                  : "bg-danger-soft text-destructive",
+            )}
+          >
+            {status.text}
+          </Badge>
+        </div>
+        <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+          Se kunder, behov per dygn, fasta och flyttbara insatser, dubbelbemanning och kompetenskrav. Godkänn när
+          underlaget stämmer.
+        </p>
+        <Button className="mt-4" onClick={() => api.godkannKund()} disabled={!d.rows.length || ofull}>
+          <CheckCircle2 /> Godkänn kundunderlaget
+        </Button>
+      </Card>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {d.kunder.map((k) => {
+          const rader = d.rows.filter((r) => r.kund === k.kund);
+          const kompletteras = rader.some((r) => !r.start || !(r.minuter > 0) || r.status === "utkast");
+          const krav = [...new Set(rader.flatMap((r) => {
+            const s = r["skills"] || r["kompetens"];
+            return Array.isArray(s) ? s.map(String) : s ? [String(s)] : [];
+          }))];
+          return (
+            <Card key={k.kund} className="rounded-2xl p-4 shadow-lift">
+              <div className="flex items-start justify-between gap-2">
+                <h3 className="font-extrabold text-deep">{k.kund}</h3>
+                <span className="text-xs font-semibold text-muted-foreground">
+                  {kompletteras ? "Behöver kompletteras" : "Klar"}
+                </span>
+              </div>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {k.insatser} insatser · {api.h1(k.kundbehovH)} h per period
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {rader.filter((r) => r.flyttbar).length} flyttbara · {rader.filter((r) => r.tvaPersoner).length} dubbelbemanning
+              </p>
+              {krav.length ? <p className="mt-1 text-xs text-deep">Kompetens: {krav.join(", ")}</p> : null}
+            </Card>
+          );
+        })}
+      </div>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
         <Kpi etikett="Kundbehov" tal={`${api.h1(d.n.kundbehovH)} h`} not={`${d.n.antalInsatser} insatser`} i={0} />
         <Kpi

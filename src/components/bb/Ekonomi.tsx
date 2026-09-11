@@ -34,7 +34,7 @@ export function Ekonomi({ d, api }: VyProps) {
         <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-secondary text-xs font-extrabold text-deep">
           XLS
         </div>
-        <h2 className="mt-4 text-xl font-extrabold text-deep">Ekonomin kan inte visas ännu</h2>
+        <h2 className="mt-4 text-xl font-extrabold text-deep">Rätt resurser i rätt tid kan inte visas ännu</h2>
         <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
           Bladet Beräkningar saknas i den inlästa filen. Läs in en fil som innehåller modellbladen, så visas
           verksamhetens egna ekonomital här.
@@ -123,9 +123,9 @@ export function Ekonomi({ d, api }: VyProps) {
       <Card className="gap-0 rounded-2xl p-6 shadow-lift md:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
-            <Eyebrow>Ekonomi · hela perioden</Eyebrow>
+            <Eyebrow>Rätt resurser i rätt tid · hela perioden</Eyebrow>
             <h1 className="mt-1 text-2xl font-extrabold tracking-tight text-deep md:text-3xl">
-              Intäkter mot kostnader
+              Rätt resurser i rätt tid
             </h1>
             <p className="mt-2 max-w-xl text-sm leading-relaxed text-muted-foreground">
               Talen är verksamhetens egna, hämtade direkt ur modellens Beräkningar-blad för hela perioden
@@ -160,7 +160,7 @@ export function Ekonomi({ d, api }: VyProps) {
       <div className="grid gap-4 xl:grid-cols-2">
         <Tabell
           ikon={<Wallet className="size-4" />}
-          etikett="Ekonomi i detalj"
+          etikett="Rätt resurser i rätt tid"
           rubrik="Budget och reserver"
           rader={DETALJ}
           format={krRad}

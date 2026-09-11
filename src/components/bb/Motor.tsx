@@ -13,6 +13,7 @@ import {
 import { delaPeriod, payloadForFonster, svansPass, type Fonster } from "@/lib/bb/motorPeriod";
 import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "@/lib/bb/motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "@/lib/bb/motor.functions";
+import { vcStatusText } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -175,6 +176,7 @@ export function Motor({ state, api }: VyProps) {
     const delar: MotorSchema[] = [];
     const loggar: Korning[] = [];
     let lasta: Record<string, unknown>[] = [];
+    let senasteSummary: Record<string, unknown> | null = null;
 
     try {
       for (let i = 0; i < fonster.length; i++) {
@@ -210,6 +212,7 @@ export function Motor({ state, api }: VyProps) {
           fel: svar.fel ?? [],
         });
         setKorningar([...loggar]);
+        if (svar.summary) senasteSummary = svar.summary;
         if (!schema || !schema.pass.length || svar.status === "INFEASIBLE" || svar.status === "UNKNOWN" || svar.status === "MODEL_INVALID") {
           setDiagnos(byggDiagnos(underlagMotor));
           lokalBerakning();
@@ -246,6 +249,7 @@ export function Motor({ state, api }: VyProps) {
         tilldelningar: samlat.tilldelningar,
         fonster: fonster.length,
         objectiveBreakdown: samlat.objectiveBreakdown,
+        summary: senasteSummary,
       });
       if (infordes) {
         setKlar(true);
@@ -281,30 +285,15 @@ export function Motor({ state, api }: VyProps) {
   const motorTimmar = pass.reduce((s, p) => s + betaldTid(p.start, p.slut), 0);
 
   const statusFarg = (s: string) =>
-    s === "OPTIMAL" ? "var(--ok)" : s === "FEASIBLE" ? "var(--varn)" : "var(--fara)";
-  const statusText = (s: string) =>
-    s === "OPTIMAL"
-      ? "Bevisat optimal"
-      : s === "FEASIBLE"
-        ? "Giltig lösning (ej bevisat bästa)"
-        : s === "INFEASIBLE"
-          ? "Inga hårda villkor kan uppfyllas samtidigt"
-          : s === "UNKNOWN"
-            ? "Tiden räckte inte"
-            : s === "MODEL_INVALID"
-              ? "Förslaget stoppades av kontrollen"
-              : s === "422"
-                ? "Underlaget avvisades"
-                : s === "503"
-                  ? "Motorn saknar sin beräkningsdel"
-                  : "Motorn är inte nåbar";
+    s === "OPTIMAL" || s === "FEASIBLE" ? "var(--ok)" : "var(--fara)";
+  const statusText = (s: string) => vcStatusText(s);
 
   return (
     <div className="space-y-4">
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Optimeringsmotor</Eyebrow>
+            <Eyebrow>Skapa bemanningsbalans</Eyebrow>
             <h2 className="mt-1 flex items-center gap-2 text-2xl font-extrabold tracking-tight text-deep">
               <Cpu className="size-6 text-primary" /> Skapa bemanningsbalans
             </h2>

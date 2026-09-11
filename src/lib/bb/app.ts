@@ -14,6 +14,7 @@ import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKont
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
+import { processStegLagen, skapaBalansHinder } from "./vcFlode";
 
 declare global {
   interface Window {
@@ -47,13 +48,15 @@ const TABS = [
   { id: "uppladdning", label: "Underlag", sub: "Kundgrupp och schema", ic: "⇪", grupp: "Start" },
   { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravUnderlag: true },
   { id: "motor", label: "Skapa bemanningsbalans", sub: "Optimeringsmotorn räknar fram förslaget", ic: "⚡", grupp: "Start", kravUnderlag: true },
-  { id: "foreefter", label: "Före & efter", sub: "Resultatet av balansen", ic: "⇄", grupp: "Följ upp", kravResultat: true },
+  { id: "resultat", label: "Granska", sub: "Resultatet av balansen", ic: "☑", grupp: "Start", kravResultat: true },
+  { id: "foreefter", label: "Före och efter", sub: "Nuläge mot förslag", ic: "⇄", grupp: "Följ upp", kravResultat: true },
+  { id: "omplanering", label: "Omplanering", sub: "Förändring under perioden", ic: "↻", grupp: "Följ upp", kravResultat: true },
   { id: "schemaforslag", label: "Schemaförslag", sub: "Justera pass", ic: "▦", grupp: "Planera", kravUnderlag: true },
   { id: "kundbehov", label: "Kundbehov", sub: "Ändra insatser", ic: "♥", grupp: "Planera", kravUnderlag: true },
   { id: "resurskurva", label: "Resursbehov", sub: "Behov över dygnet", ic: "∿", grupp: "Planera", kravUnderlag: true },
   { id: "oversikt", label: "Bemanning", sub: "Verksamheten i siffror", ic: "◫", grupp: "Planera", kravUnderlag: true },
   { id: "nyckeltal", label: "Uppföljning", sub: "Planerat mot utfall", ic: "◔", grupp: "Följ upp" },
-  { id: "ekonomi", label: "Ekonomi", sub: "Kostnad & intäkt", ic: "kr", grupp: "Följ upp", kravUnderlag: true },
+  { id: "ekonomi", label: "Rätt resurser i rätt tid", sub: "Intäkt, kostnad och kapacitet", ic: "kr", grupp: "Följ upp", kravUnderlag: true },
   { id: "kunder", label: "Per kund", sub: "Timmar per kund", ic: "⁝", grupp: "Följ upp", kravUnderlag: true },
   { id: "sprid", label: "Sprid behov", sub: "Flytta rörliga insatser", ic: "⇕", grupp: "Mer", kravUnderlag: true },
   { id: "intakter", label: "Intäkter", sub: "Ersättning och underlag", ic: "▲", grupp: "Mer", kravUnderlag: true },
@@ -1128,7 +1131,7 @@ function skapaBalans() {
   state.balans.vikarieBeslut = vik.beslut;
   state.balans.vikarie = { antalBorttagna: vik.antalBorttagna, antalBehalls: vik.antalBehalls };
   state.optimerat = true;
-  tab = "foreefter";
+  tab = "resultat";
   persist();
   notera(`Bemanningsbalans skapad – ${schemaRes.forandringar.length} pass och ${res.flyttade.length} insatser ändrades`, "ok",
     { detalj: `${vik.antalBehalls} vikariepass behöver tillsättas, ${vik.antalBorttagna} kunde tas bort.` });
@@ -1181,12 +1184,12 @@ function anvandMotorResultat(res) {
     skapad,
     kalla: "motor",
   };
-  state.motorResultat = { ...res, kalla: "motor", skapad };
+  state.motorResultat = { ...res, summary: res.summary || null, kalla: "motor", skapad };
   state.optimerat = true;
-  tab = "foreefter";
+  tab = "resultat";
   persist();
   notera(`Bemanningsbalans skapad med optimeringsmotorn – ${res.pass.length} pass i förslaget`, "ok", {
-    detalj: res.explanation || "Förslaget visas i Jämför före och efter.",
+    detalj: res.explanation || "Granska resultatet innan du öppnar schemat.",
   });
   render();
   return true;
@@ -3072,12 +3075,28 @@ function render() {
 // Röd stegrad överst (som referensen): 1 Kundbehov → 2 Resursbehov → 3 Bemanning
 // → 4 Schema → 5 Uppföljning. Visas på planeringssidorna, aktivt steg i rött.
 function renderStegrad() {
-  const steg = [
-    { id: "uppladdning", label: "Underlag" },
-    { id: "foreefter", label: "Resultat" },
-  ];
+  const med = typeof medarbetarLista === "function" ? medarbetarLista() : [];
+  const hinder = skapaBalansHinder({
+    kundGodkand: !!state.kundGodkand,
+    medarbetare: med,
+    harUnderlag: harUnderlag() || !!state.kundGodkand,
+  });
+  const steg = processStegLagen({
+    aktivTab: tab,
+    kundGodkand: !!state.kundGodkand,
+    medarbetareOk: !hinder.skal.some((s) => s.includes("arbetstidsmodell")),
+    harResultat: harResultat(),
+    harVarning: !!(state.balans && state.balans.schemaVarningar && state.balans.schemaVarningar.length),
+    blockeradSkapa: !hinder.aktiv,
+    godkandSchema: !!state.schemaGodkand,
+  });
   const idx = steg.findIndex((s) => s.id === tab);
-  publiceraSkal({ steg, stegIdx: idx });
+  publiceraSkal({
+    steg,
+    stegIdx: idx < 0 ? 0 : idx,
+    skapaAktiv: hinder.aktiv,
+    skapaSkol: hinder.skal,
+  });
 }
 
 

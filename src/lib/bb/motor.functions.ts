@@ -16,6 +16,7 @@ export type MotorSvar = {
   fel?: { rule?: string; message?: string }[];
   varningar?: { rule?: string; message?: string }[];
   schemaJson?: string | null;
+  summary?: Record<string, unknown> | null;
   meddelande?: string;
 };
 
@@ -67,6 +68,7 @@ async function anropa(vag: string, kropp: unknown): Promise<MotorSvar> {
     fel: validering?.errors ?? [],
     varningar: validering?.warnings ?? [],
     schemaJson: schema ? JSON.stringify(schema) : null,
+    summary: data?.summary && typeof data.summary === "object" ? data.summary : null,
   };
 }
 

@@ -109,50 +109,49 @@
 :root {
   --radius: 1.15rem;
 
-  /* Bemanningsbalans – ljus salvia/teal-palett med lila accent */
-  --background: #f7f9f8;
-  --foreground: #1f3a34;
+  /* Frösunda – befintlig palett */
+  --background: #ffffff;
+  --foreground: #004691;
   --card: #ffffff;
-  --card-foreground: #1f3a34;
+  --card-foreground: #004691;
   --popover: #ffffff;
-  --popover-foreground: #1f3a34;
-  --primary: #7c5cd6;
+  --popover-foreground: #004691;
+  --primary: #004691;
   --primary-foreground: #ffffff;
-  --secondary: #f2f5f4;
-  --secondary-foreground: #1f3a34;
-  --muted: #f2f5f4;
-  --muted-foreground: #5c7268;
-  --accent: #2e9e8f;
+  --secondary: #d3d7ee;
+  --secondary-foreground: #004691;
+  --muted: #d3d7ee;
+  --muted-foreground: #004691;
+  --accent: #ef8304;
   --accent-foreground: #ffffff;
-  --destructive: #d4483b;
+  --destructive: #004691;
   --destructive-foreground: #ffffff;
-  --border: #e6ecea;
-  --input: #e6ecea;
-  --ring: #7c5cd6;
+  --border: #ccd6ea;
+  --input: #ccd6ea;
+  --ring: #004691;
 
-  --deep: #1f4a40;
-  --deep-soft: #5c7268;
-  --success: #2e7d46;
+  --deep: #004691;
+  --deep-soft: #004691;
+  --success: #004691;
   --success-foreground: #ffffff;
-  --success-soft: #e6f2ea;
-  --warning: #b0790f;
+  --success-soft: #e6efd8;
+  --warning: #ef8304;
   --warning-foreground: #ffffff;
-  --warning-soft: #fdf3e0;
-  --danger-soft: #fbe9e7;
-  --primary-hover: #6b4bc7;
-  --primary-soft: #efeafb;
+  --warning-soft: #fee8d2;
+  --danger-soft: #fbdbdf;
+  --primary-hover: #004691;
+  --primary-soft: #d3d7ee;
 
-  /* Mockupens extrafärger */
-  --teal: #2e9e8f;
-  --teal-soft: #e4f3f0;
-  --blue: #3b82c4;
-  --blue-soft: #e7f0f8;
+  --teal: #004691;
+  --teal-soft: #ccd6ea;
+  --blue: #004691;
+  --blue-soft: #ccd6ea;
 
-  --chart-1: #7c5cd6;
-  --chart-2: #1f4a40;
-  --chart-3: #2e9e8f;
-  --chart-4: #b0790f;
-  --chart-5: #3b82c4;
+  --chart-1: #004691;
+  --chart-2: #ef8304;
+  --chart-3: #ccd6ea;
+  --chart-4: #fee8d2;
+  --chart-5: #e6efd8;
 
   --sidebar: #ffffff;
   --sidebar-foreground: #1f3a34;

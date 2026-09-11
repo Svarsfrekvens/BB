@@ -5,6 +5,7 @@ import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
+import { filtreraJamforRader, jamforTon, lasMotorSummary } from "@/lib/bb/vcFlode";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -58,44 +59,57 @@ export function ForeEfter({ api }: VyProps) {
   }
 
   const { fore, efter, tabell, punkter, flyttade, vikarie, varningar, obemannade } = m;
+  const summary = lasMotorSummary(api.motorResultat());
+  const tackningSank = !!(efter && efter.tackningPct + 0.05 < fore.tackningPct);
+  const visade = efter ? filtreraJamforRader(tabell) : [];
+  const extra = efter
+    ? [
+        vikarie
+          ? {
+              namn: "Vikariebehov",
+              fore: "–",
+              efter: `${vikarie.antalBehalls} pass`,
+              forandring: `${vikarie.antalBehalls}`,
+              riktning: "lika" as const,
+            }
+          : null,
+        {
+          namn: "Hårda regelbrott",
+          fore: "–",
+          efter: String(summary?.hardViolations.length ?? api.regelbrott()),
+          forandring: String(summary?.hardViolations.length ?? api.regelbrott()),
+          riktning: (summary?.hardViolations.length || api.regelbrott() ? "ner" : "lika") as "ner" | "lika",
+        },
+        {
+          namn: "Arbetsmiljövarningar",
+          fore: "–",
+          efter: String(summary?.warnings.length ?? varningar.length),
+          forandring: String(summary?.warnings.length ?? varningar.length),
+          riktning: ((summary?.warnings.length || varningar.length) ? "ner" : "lika") as "ner" | "lika",
+        },
+      ].filter(Boolean)
+    : [];
 
   return (
     <div className="space-y-4">
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Steg 2 · Före &amp; efter</Eyebrow>
+            <Eyebrow>Före och efter</Eyebrow>
             <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">
-              Dagens schema jämfört med kundernas behov
+              Nuläge jämfört med förslaget
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Före är ert riktiga inlästa schema mot det ursprungliga kundbehovet. Efter är samma schema mot behovet när
-              de flyttbara insatserna har fått nya tider inom sina tillåtna fönster. Fasta insatser ligger kvar.
+              Före är ert inlästa schema. Efter är bemanningsbalansens förslag. Lägre bemanning markeras inte som
+              förbättring om täckt behov har sjunkit.
             </p>
             {efter ? (
               <p className="mt-2 text-xs font-semibold text-muted-foreground">
                 {api.berakningsKalla() === "motor"
-                  ? "Efter-läget kommer från den bevisat optimerande beräkningen."
-                  : "Reservläge: efter-läget är beräknat i appen, utan den bevisat optimerande beräkningen."}
+                  ? "Efter-läget kommer från den senaste beräkningen."
+                  : "Reservläge: efter-läget är beräknat i appen."}
               </p>
             ) : null}
-            {(() => {
-              const res = api.motorResultat() as {
-                objectiveBreakdown?: { costOre: number; continuityOre: number; spreadOre: number; uncoveredMinutes?: number };
-                lexicographic?: { uncoveredMinutes: number; costOre: number; qualityOre: number; coverageProven: boolean };
-              } | null;
-              const br = res?.objectiveBreakdown;
-              const lex = res?.lexicographic;
-              if ((!br && !lex) || api.berakningsKalla() !== "motor") return null;
-              const kr = (ore: number) => (ore / 100).toLocaleString("sv-SE", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-              return (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {lex
-                    ? `Lexikografisk körning: obemannade insatsminuter ${lex.uncoveredMinutes}${lex.coverageProven ? " (bevisat steg 1)" : ""}, därefter kostnad ${kr(lex.costOre)} kr, därefter kvalitet.`
-                    : `Målfördelning: kostnad ${kr(br!.costOre)} kr, kontinuitet ${kr(br!.continuityOre)} kr, spridning ${kr(br!.spreadOre)} kr.`}
-                </p>
-              );
-            })()}
           </div>
           {efter ? (
             <Button variant="outline" onClick={() => api.aterstallBalans()}>
@@ -122,7 +136,9 @@ export function ForeEfter({ api }: VyProps) {
                 </tr>
               </thead>
               <tbody>
-                {tabell.map((r) => (
+                {visade.concat(extra as typeof visade).map((r) => {
+                  const ton = jamforTon({ namn: r.namn, riktning: r.riktning, tackningSank });
+                  return (
                   <tr key={r.namn} className="border-t border-border">
                     <th className="border-t border-border px-6 py-3 text-left text-sm font-bold text-deep">{r.namn}</th>
                     <td className="border-t border-border px-6 py-3 text-right tabular-nums text-muted-foreground">{r.fore}</td>
@@ -131,9 +147,9 @@ export function ForeEfter({ api }: VyProps) {
                       <span
                         className={cn(
                           "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold tabular-nums",
-                          r.riktning === "upp"
+                          ton === "bra"
                             ? "bg-success-soft text-success"
-                            : r.riktning === "ner"
+                            : ton === "varn"
                               ? "bg-warning-soft text-warning"
                               : "bg-muted text-muted-foreground",
                         )}
@@ -143,7 +159,8 @@ export function ForeEfter({ api }: VyProps) {
                       </span>
                     </td>
                   </tr>
-                ))}
+                );
+                })}
               </tbody>
             </table>
           </div>

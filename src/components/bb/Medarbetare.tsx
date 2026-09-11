@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import type { VyProps } from "@/lib/bb/vy";
 import { TomtLage } from "./Tomt";
+import { STANDARD_WORK_TIME_MODELS } from "@/lib/bb/arbetstid";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -87,11 +88,10 @@ export function Medarbetare({ api }: VyProps) {
     <div className="space-y-4">
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <Eyebrow>Medarbetare</Eyebrow>
-        <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Uppgifter och villkor</h2>
+        <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">Medarbetare</h2>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-muted-foreground">
-          Raderna kommer från det inlästa schemat. De obemannade raderna blir vikarier och räknas med i alla siffror.
-          Fäll ut en rad med pilen för att sätta passprofil, helger, arbetstidsfönster, frånvaro och timkostnad – de
-          uppgifterna styr hur appen föreslår schemat.
+          Namn, SSG, arbetstidsmodell, dag/kväll/natt/jour, kompetenser, delegeringar, helgmönster och frånvaro.
+          Öppna en rad för individuella villkor. Regelbiblioteket ligger under Styrande villkor.
         </p>
         {antalVikarier ? (
           <p className="mt-3 inline-block rounded-lg bg-warning-soft px-3 py-1.5 text-[13px] font-semibold text-warning">
@@ -105,7 +105,7 @@ export function Medarbetare({ api }: VyProps) {
           <table className="w-full border-separate border-spacing-0 text-sm">
             <thead>
               <tr>
-                {["", "Namn", "SSG", "Samordnare", "Delegering", "Sovande jour", "Nattbehörig", "Passprofil"].map(
+                {["", "Namn", "SSG", "Arbetstidsmodell", "Samordnare", "Delegering", "Sovande jour", "Nattbehörig", "Passprofil"].map(
                   (h, i) => (
                     <th
                       key={h || i}
@@ -140,7 +140,11 @@ export function Medarbetare({ api }: VyProps) {
                       ) : null}
                       <div className="mt-1 text-[12px] font-medium text-muted-foreground">
                         {m.grad} % · {PASSPROFIL.find((p) => p.v === m.passprofil)?.t || m.passprofil}
-                        {m.jour ? " · Kan arbeta jour" : ""}
+                        {m.jour ? " · Jour" : ""}
+                        {m.nattbehorig ? " · Natt" : ""}
+                        {m.delegering ? " · Delegering" : ""}
+                        {m.helg ? ` · ${HELG.find((h) => h.v === m.helg)?.t || m.helg}` : ""}
+                        {m.franvaro && m.franvaro !== "ingen" ? ` · ${FRANVARO.find((f) => f.v === m.franvaro)?.t}` : ""}
                         {(m.villkor || []).filter((v) => v.aktiv).length
                           ? ` · ${(m.villkor || []).filter((v) => v.aktiv).length} individuella villkor`
                           : ""}
@@ -153,6 +157,21 @@ export function Medarbetare({ api }: VyProps) {
                         inputMode="numeric"
                         onChange={(e) => api.medarbetareSet(m.namn, "grad", Number(e.target.value) || 0)}
                       />
+                    </td>
+                    <td className="border-t border-border px-3 py-2">
+                      <select
+                        aria-label={`Arbetstidsmodell för ${m.namn}`}
+                        value={m.workTimeModelId || ""}
+                        onChange={(e) => api.medarbetareSet(m.namn, "workTimeModelId", e.target.value)}
+                        className="h-9 w-full min-w-40 rounded-lg border border-input bg-background px-2 text-sm text-deep"
+                      >
+                        <option value="">Välj modell</option>
+                        {STANDARD_WORK_TIME_MODELS.map((mod) => (
+                          <option key={mod.id} value={mod.id}>
+                            {mod.name}
+                          </option>
+                        ))}
+                      </select>
                     </td>
                     <td className="border-t border-border px-3 py-3 text-center">
                       {kryss(m.namn, "samordnare", m.samordnare)}
@@ -174,7 +193,7 @@ export function Medarbetare({ api }: VyProps) {
                   </tr>
                   {oppen === m.namn ? (
                     <tr className="border-t border-border bg-muted/50">
-                      <td colSpan={8} className="px-6 py-5">
+                      <td colSpan={9} className="px-6 py-5">
                         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                           <label className="space-y-1 text-sm">
                             <span className="block font-semibold text-deep">Helgtjänstgöring</span>
@@ -244,8 +263,7 @@ export function Medarbetare({ api }: VyProps) {
                         <div className="mt-5 space-y-2">
                           <span className="block text-sm font-semibold text-deep">Individuella villkor</span>
                           <p className="text-[12px] text-muted-foreground">
-                            Datumfönster per person. Hårda villkor styr motorn; önskemål sparas men vägs inte in i
-                            CP-SAT i den här versionen.
+                            Datumfönster per person. Hårda villkor styr beräkningen; önskemål sparas för uppföljning.
                           </p>
                           {(m.villkor || []).map((v, ix) => (
                             <div key={v.id || ix} className="flex flex-wrap items-end gap-2 rounded-lg bg-background p-2">

@@ -16,7 +16,7 @@ export type SkalTab = {
   /** Sant när steget är genomfört (visar bock). */
   klar?: boolean;
 };
-export type SkalSteg = { id: string; label: string };
+export type SkalSteg = { id: string; label: string; lage?: "ej" | "pa" | "klar" | "varning" | "blockerad" };
 
 export type SkalDemo = { rubrik: string; text: string; nr: number; av: number };
 
@@ -32,6 +32,8 @@ export type SkalState = {
   optimerat: boolean;
   steg: SkalSteg[];
   stegIdx: number;
+  skapaAktiv?: boolean;
+  skapaSkol?: string[];
   demo: SkalDemo | null;
   /** Sant när det finns ändringar som inte exporterats. */
   osparat: boolean;
@@ -51,6 +53,8 @@ let skal: SkalState = {
   optimerat: false,
   steg: [],
   stegIdx: -1,
+  skapaAktiv: false,
+  skapaSkol: [],
   demo: null,
   osparat: false,
   version: "",

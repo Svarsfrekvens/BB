@@ -26,6 +26,8 @@ import { Villkor } from "./Villkor";
 import { Installningar } from "./Installningar";
 import { SpridBehov } from "./SpridBehov";
 import { Motor } from "./Motor";
+import { Resultat } from "./Resultat";
+import { Omplanering } from "./Omplanering";
 
 /** Registret över vyer som ritas av React. Övriga flikar ritas ännu av det
  * gamla presentationslagret i #view. */
@@ -55,6 +57,8 @@ const VYER: Record<string, (p: VyProps) => React.ReactNode> = {
   installningar: Installningar,
   sprid: SpridBehov,
   motor: Motor,
+  resultat: Resultat,
+  omplanering: Omplanering,
 };
 
 export function Vy() {

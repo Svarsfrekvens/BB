@@ -8,7 +8,7 @@
 export const APP_VERSION = "3.0";
 
 /** Flikar som ritas av React. Övriga ritas ännu av det gamla lagret. */
-export const REAKT_TABS = new Set<string>(["hem", "uppladdning", "verksamhet", "kundgrupp", "schemafil", "medarbetare", "underlag", "foreefter", "schemaforslag", "oversikt", "kundbehov", "resurskurva", "personal", "schema", "nyckeltal", "ekonomi", "kunder", "atgarder", "kontroller", "intakter", "simulering", "villkor", "installningar", "sprid", "motor"]);
+export const REAKT_TABS = new Set<string>(["hem", "uppladdning", "verksamhet", "kundgrupp", "schemafil", "medarbetare", "underlag", "foreefter", "schemaforslag", "oversikt", "kundbehov", "resurskurva", "personal", "schema", "nyckeltal", "ekonomi", "kunder", "atgarder", "kontroller", "intakter", "simulering", "villkor", "installningar", "sprid", "motor", "resultat", "omplanering"]);
 
 import type { DatumPass } from "./medvind";
 import type { Lage, JamforRad, Flytt, SchemaForandring, SchemaVarning } from "./modell";
