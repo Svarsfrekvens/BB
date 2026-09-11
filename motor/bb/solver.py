@@ -15,6 +15,7 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      rest_days_target, f01_known_span, f01_window_known,
                      candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
                      shift_profiles, required_rest_after_minutes)
+from .assign import index_candidates_by_employee, support_options_for_occurrence
 from .generate import generated_template_stats, planning_mode, shift_templates_for_solve
 from .precheck import (
     enumerate_person_shift_slots, explain_with_precheck, feasibility_precheck,
@@ -108,7 +109,7 @@ def solve(data, seconds=30):
     enum=enumerate_person_shift_slots(data, template_list)
     generated_n=tpl_stats.get('total') or sum(1 for t in templates.values() if t.get('generated'))
 
-    def diagnostics(status, solve_ms=0, nvars=0, ncons=0, validate_ms=0, kpis=None, phases=None):
+    def diagnostics(status, solve_ms=0, nvars=0, ncons=0, validate_ms=0, kpis=None, phases=None, extra_perf=None):
         extra=dict(
             generatedShiftTemplates=generated_n,
             templateStats=tpl_stats,
@@ -125,11 +126,16 @@ def solve(data, seconds=30):
             solverStatus=status,
             lockedShifts=len(locked_shifts),
         )
+        if extra_perf:
+            extra.update(extra_perf)
         if phases:
-            by={p['name']:int(round(float(p.get('seconds') or 0)*1000)) for p in phases}
+            by={p['name']:int(round(float(p.get('actualMs') if p.get('actualMs') is not None else (p.get('seconds') or 0)*1000))) for p in phases}
             extra['coveragePhaseMs']=by.get('coverage',0)
             extra['costPhaseMs']=by.get('cost',0)
             extra['qualityPhaseMs']=by.get('quality',0)
+            extra['actualCoverageSolveMs']=by.get('coverage',0)
+            extra['actualCostSolveMs']=by.get('cost',0)
+            extra['actualQualitySolveMs']=by.get('quality',0)
         if kpis:
             extra.update(kpis)
         return planning_diagnostics(data, extra)
@@ -142,17 +148,6 @@ def solve(data, seconds=30):
 
     if has_critical_precheck(diagnoses):
         return empty_infeasible('Ingen lösning uppfyller alla hårda villkor.')
-
-    def shrink_work(intervals, take):
-        if take<=0: return list(intervals)
-        left,out=take,[]
-        for a,b in intervals:
-            if left<=0:
-                out.append((a,b)); continue
-            cut=min(left,b-a)
-            if a+cut<b: out.append((a+cut,b))
-            left-=cut
-        return out
 
     weekend_notes=[]
     from datetime import date as _date
@@ -401,57 +396,50 @@ def solve(data, seconds=30):
                 model.add(sum(x for u,v,x in coverage if u<=edge<v)>=jour_floor)
 
     task_vars=[]
-    # Ge CP-SAT en omedelbart giltig startpunkt: inga valda pass och allt
-    # kundbehov öppet redovisat som obemannat. Utan denna startpunkt kunde den
-    # stora Galaxen-modellen använda hela tidsgränsen i presolve/sökning och
-    # svara UNKNOWN trots att den mjuka täckningsmodellen alltid har en lösning.
-    # Motorn förbättrar därefter startpunkten genom att välja pass och bemanna.
-    shift_hints=[]
-    support_hints=[]
+    # Ge CP-SAT en omedelbart giltig startpunkt via gap-hints. All-zero-pass
+    # hintas inte när nightFloor/jourFloor gör den punkten ogiltig – det gav
+    # tidigare UNKNOWN utan att tidsbudgeten användes.
     per_employee={e['id']:[] for e in employees}
     customer_links={}
     supports_count=0
+    support_before=support_after=0
+    assign_vars=0
+    t_support=perf_counter()
+    by_emp=index_candidates_by_employee(candidates+duty_anchor)
     gaps=[]
     for o in occ:
-        # Start times are real integer minutes. Duration is never rounded.
         starts=list(range(o['earliest']-lo,o['latest']-lo+1,rules['flexibilityStep']))
         start=model.new_int_var_from_domain(cp_model.Domain.from_values(starts),'start:'+o['id'])
         duration=o['task']['minutes']
         end=model.new_int_var(starts[0]+duration,starts[-1]+duration,'end:'+o['id'])
         model.add(end==start+duration)
+        packed=support_options_for_occurrence(o, employees, by_emp, data, reserve)
+        support_before+=packed['before']
+        support_after+=packed['after']
         assigns=[]
-        for e in employees:
-            if not set(o['task']['skills'])<=skills_on_day(e, o['date']): continue
-            krav = o['task'].get('requiredEmployeeId')
-            if krav and e['id'] != krav: continue
-            if o['task']['customerId'] in set(hard_constraints(e).get('forbiddenCustomerIds') or []): continue
-            candidates_for_e=[c for c in candidates+duty_anchor if c['shift']['employeeId']==e['id']]
+        for e, pairs in packed['per_emp']:
             options=[]
-            for c in candidates_for_e:
-                for a,b in shrink_work(c['work'], reserve):
-                    if b-a<duration or b<o['earliest']+duration or a>o['latest']: continue
-                    z=model.new_bool_var('support:'+str(supports_count));supports_count+=1
-                    support_hints.append(z)
-                    if supports_count>120000:
-                        raise ValueError('För många möjliga insatstilldelningar. Förkorta perioden.')
-                    model.add(z<=c['x'])
-                    model.add(start>=a-lo).only_enforce_if(z)
-                    model.add(end<=b-lo).only_enforce_if(z)
-                    options.append(z)
+            for c,a,b in pairs:
+                z=model.new_bool_var('support:'+str(supports_count));supports_count+=1
+                if supports_count>120000:
+                    raise ValueError('För många möjliga insatstilldelningar. Förkorta perioden.')
+                model.add(z<=c['x'])
+                model.add(start>=a-lo).only_enforce_if(z)
+                model.add(end<=b-lo).only_enforce_if(z)
+                options.append(z)
             if not options: continue
             selected=model.new_bool_var('assign:'+o['id']+':'+e['id'])
-            support_hints.append(selected)
+            assign_vars+=1
             model.add(sum(options)==selected)
             interval=model.new_optional_interval_var(start,duration,end,selected,'task:'+o['id']+':'+e['id'])
             per_employee[e['id']].append(interval)
             assigns.append((e['id'],selected))
             customer_links.setdefault((o['task']['customerId'],e['id']),[]).append(selected)
-        # Coverage is a strongly weighted goal, never a silent relaxation of the
-        # hard rules: an unstaffed intervention is reported back explicitly.
         gap=model.new_int_var(0,o['count'],'uncovered:'+o['id'])
         model.add(sum(x for _,x in assigns)+gap==o['count'])
         gaps.append((o,gap))
         task_vars.append((o,start,end,assigns))
+    support_build_ms=int(round((perf_counter()-t_support)*1000))
     for intervals in per_employee.values():
         model.add_no_overlap(intervals)
 
@@ -590,10 +578,10 @@ def solve(data, seconds=30):
     model.add(cost_var==cost)
     qual_var=model.new_int_var(0,10**12,'quality_ore')
     model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread+prefer_ore*prefer_miss+quality_extra)
-    for c in candidates:
-        model.add_hint(c['x'],0)
-    for x in support_hints:
-        model.add_hint(x,0)
+    hard_floor=bool(int(rules.get('nightFloor') or 0) or int(rules.get('jourFloor') or 0))
+    if not hard_floor:
+        for c in candidates:
+            model.add_hint(c['x'],0)
     for o,start,end,_ in task_vars:
         first=o['earliest']-lo
         model.add_hint(start,first)
@@ -603,14 +591,14 @@ def solve(data, seconds=30):
     proto=model.Proto()
     nvars=len(proto.variables)
     ncons=len(proto.constraints)
-    t_cov=max(1.0,seconds*0.45)
-    t_cost=max(1.0,seconds*0.35)
-    t_qual=max(1.0,max(seconds,t_cov+t_cost+1)-t_cov-t_cost)
-    solver=cp_model.CpSolver()
-    solver.parameters.num_search_workers=8
-    solver.parameters.random_seed=41
+    requested_ms=int(round(seconds*1000))
+    share=dict(coverage=0.60, cost=0.25, quality=0.15)
+    remaining_before=[]
+    timeout_reason=None
+    solver_deadline=perf_counter()+seconds
     phases=[]
     last=None
+    last_solver=None
 
     def snapshot(sv,code,phase):
         cost_val=int(sv.value(cost_var))
@@ -633,34 +621,56 @@ def solve(data, seconds=30):
             proven=code=='OPTIMAL',
         )
 
-    def run_phase(name,objective,limit,lock=None):
-        nonlocal last
+    def run_phase(name,objective,lock=None):
+        nonlocal last, last_solver, timeout_reason
+        left=solver_deadline-perf_counter()
+        remaining_before.append(dict(phase=name, remainingBudgetBeforePhaseMs=max(0,int(round(left*1000)))))
+        if left<0.5:
+            timeout_reason='budget_exhausted_before_phase'
+            phases.append(dict(name=name,status='SKIPPED',seconds=0,actualMs=0,limitMs=0,remainingBeforeMs=max(0,int(round(left*1000)))))
+            return None
+        planned=max(1.0, seconds*share[name])
+        limit=max(1.0, min(planned, left))
         if lock is not None:
             lock()
         model.minimize(objective)
-        solver.parameters.max_time_in_seconds=limit
-        st=solver.solve(model)
-        code=solver.status_name(st)
-        phases.append(dict(name=name,status=code,seconds=solver.wall_time))
+        sv=cp_model.CpSolver()
+        sv.parameters.num_search_workers=8
+        sv.parameters.random_seed=41
+        sv.parameters.max_time_in_seconds=limit
+        t_ph=perf_counter()
+        st=sv.solve(model)
+        actual_ms=int(round((perf_counter()-t_ph)*1000))
+        code=sv.status_name(st)
+        phases.append(dict(name=name,status=code,seconds=sv.wall_time,actualMs=actual_ms,limitMs=int(round(limit*1000)),remainingBeforeMs=max(0,int(round(left*1000)))))
+        last_solver=sv
         if st in (cp_model.OPTIMAL,cp_model.FEASIBLE):
-            last=snapshot(solver,code,name)
+            last=snapshot(sv,code,name)
             return last
+        if last is None:
+            if actual_ms+50<limit*1000*0.4:
+                timeout_reason=timeout_reason or 'early_unknown'
+            else:
+                timeout_reason=timeout_reason or 'time_limit'
         return None
 
     t_solve=perf_counter()
-    run_phase('coverage',unc_var,t_cov)
+    run_phase('coverage', unc_var)
     if last:
         best_unc=last['uncoveredMinutes']
-        run_phase('cost',cost_var,t_cost,lambda: model.add(unc_var<=best_unc))
+        run_phase('cost', cost_var, lambda: model.add(unc_var<=best_unc))
     if last:
         best_cost=last['costOre']
-        run_phase('quality',qual_var,t_qual,lambda: model.add(cost_var<=best_cost))
+        run_phase('quality', qual_var, lambda: model.add(cost_var<=best_cost))
     solve_ms=int(round((perf_counter()-t_solve)*1000))
-    code=(last or {}).get('code') or solver.status_name(cp_model.UNKNOWN)
-    if last and all(p['status']=='OPTIMAL' for p in phases):
+    fallback_status=phases[-1]['status'] if phases else 'UNKNOWN'
+    code=(last or {}).get('code') or fallback_status
+    if last and all(p['status']=='OPTIMAL' for p in phases if p['status']!='SKIPPED'):
         code='OPTIMAL'
     elif last:
         code='FEASIBLE'
+    if timeout_reason=='budget_exhausted_before_phase' and not last:
+        timeout_reason='budget_exhausted_before_phase'
     explanations={
         'OPTIMAL':'Bevisat lexikografiskt optimal: maximal kundtäckning, därefter lägsta kostnad, därefter kvalitet, inom valda passmallar och tidssteg. Granska förslaget innan du godkänner.',
         'FEASIBLE':'En giltig lösning hittades med lexikografisk prioritering (täckning före kostnad före kvalitet). Bästa möjliga lösning är inte bevisad inom tidsgränsen.',
@@ -668,9 +678,34 @@ def solve(data, seconds=30):
         'UNKNOWN':'Sökningen avbröts vid tidsgränsen utan en hittad lösning. Detta bevisar inte att problemet är olösbart.',
         'MODEL_INVALID':'Optimeringsmodellen är ogiltig. Inget schemaförslag kan användas.'}
     explanation=explain_with_precheck(code, diagnoses, explanations.get(code,'Okänd beräkningsstatus.'), locked=bool(locked_shifts))
+    if timeout_reason=='budget_exhausted_before_phase':
+        explanation='Global tidsbudget var redan förbrukad när en solverfas skulle starta. '+explanation
+    elif timeout_reason=='early_unknown':
+        explanation=explanation+' CP-SAT återvände UNKNOWN långt före den avsedda fasbudgeten.'
     if weekend_notes:
         explanation=explanation+' Helgförvarning: '+'; '.join(weekend_notes)
-    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,preCheck=diagnoses,seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
+    pruned_pct=round(100.0*(support_before-support_after)/support_before, 2) if support_before else 0.0
+    extra_perf=dict(
+        requestedSolveBudgetMs=requested_ms,
+        remainingBudgetBeforeEachPhaseMs=remaining_before,
+        totalSolverMs=solve_ms,
+        timeoutReason=timeout_reason,
+        deadlineReason=timeout_reason,
+        solverBudgetStartsAfterModelBuild=True,
+        supportCombinationsBeforePruning=support_before,
+        supportCombinationsAfterPruning=support_after,
+        supportPrunedPercent=pruned_pct,
+        assignmentVariables=assign_vars,
+        totalVariables=nvars,
+        totalConstraints=ncons,
+        generationMs=generate_ms,
+        precheckMs=pre_ms,
+        supportBuildMs=support_build_ms,
+        solverMs=solve_ms,
+        validationMs=0,
+        totalMs=0,
+    )
+    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,preCheck=diagnoses,seconds=sum((p.get('actualMs') or 0)/1000 for p in phases),objective=None,bound=None)
     result=None
     validate_ms=0
     kpis=None
@@ -698,6 +733,8 @@ def solve(data, seconds=30):
             schedule.update(solverStatus='MODEL_INVALID',shifts=[],assignments=[],explanation='Förslaget stoppades av den fristående kontrollen: '+blocking[0]['message'])
         else:
             kpis=schedule_kpis(data, schedule)
-    diag=diagnostics(schedule['solverStatus'], solve_ms, nvars, ncons, validate_ms, kpis, phases)
+    extra_perf['validationMs']=validate_ms
+    extra_perf['totalMs']=int(round((perf_counter()-t0)*1000))
+    diag=diagnostics(schedule['solverStatus'], solve_ms, nvars, ncons, validate_ms, kpis, phases, extra_perf)
     scope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep'],**diag)
     return dict(schedule=schedule,validation=result,modelScope=scope,diagnostics=dict(performance=diag))

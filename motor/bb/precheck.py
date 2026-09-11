@@ -8,7 +8,7 @@ from .domain import (
 )
 from .generate import (
     customer_need_interval_count, demand_blocks_for_day, need_intervals,
-    need_intervals, occurrence_window, planning_day_bounds, planning_mode,
+    occurrence_window, planning_day_bounds, planning_mode,
     shift_templates_for_solve, templates_for_employee,
 )
 from .replan import collect_locked_shifts
@@ -342,5 +342,25 @@ def planning_diagnostics(data, extra=None):
         customerNearPct=extra.get('customerNearPct'),
         scheduleCostOre=extra.get('scheduleCostOre'),
         lockedShifts=extra.get('lockedShifts', 0),
+        supportCombinationsBeforePruning=extra.get('supportCombinationsBeforePruning', 0),
+        supportCombinationsAfterPruning=extra.get('supportCombinationsAfterPruning', 0),
+        supportPrunedPercent=extra.get('supportPrunedPercent', 0),
+        assignmentVariables=extra.get('assignmentVariables', 0),
+        totalVariables=extra.get('totalVariables', extra.get('solverVariables', 0)),
+        totalConstraints=extra.get('totalConstraints', extra.get('solverConstraints', 0)),
+        generationMs=extra.get('generationMs', extra.get('generateTimeMs', 0)),
+        precheckMs=extra.get('precheckMs', extra.get('preCheckTimeMs', 0)),
+        supportBuildMs=extra.get('supportBuildMs', 0),
+        solverMs=extra.get('solverMs', extra.get('solveTimeMs', 0)),
+        validationMs=extra.get('validationMs', extra.get('validateTimeMs', 0)),
+        totalMs=extra.get('totalMs', extra.get('totalTimeMs', 0)),
+        requestedSolveBudgetMs=extra.get('requestedSolveBudgetMs', 0),
+        actualCoverageSolveMs=extra.get('actualCoverageSolveMs', extra.get('coveragePhaseMs', 0)),
+        actualCostSolveMs=extra.get('actualCostSolveMs', extra.get('costPhaseMs', 0)),
+        actualQualitySolveMs=extra.get('actualQualitySolveMs', extra.get('qualityPhaseMs', 0)),
+        remainingBudgetBeforeEachPhaseMs=extra.get('remainingBudgetBeforeEachPhaseMs') or [],
+        totalSolverMs=extra.get('totalSolverMs', extra.get('solveTimeMs', 0)),
+        timeoutReason=extra.get('timeoutReason'),
+        deadlineReason=extra.get('deadlineReason'),
         targets=dict(typical28dMs=30000, pilotMs=60000, stressMs=180000),
     )
