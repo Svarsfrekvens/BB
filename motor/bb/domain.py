@@ -277,6 +277,18 @@ def candidate_as_shift(row):
     return shift
 
 
+EXTENDED_PROFILE_IDS = {'extendedCombinedWorkJour', 'EXTENDED_COMBINED_WORK_JOUR', 'longException'}
+COMBINED_PROFILE_IDS = {'combinedWorkJour', 'COMBINED_WORK_JOUR'}
+
+
+def _seg_type(s):
+    return s.get('type') or (s.get('shift') or {}).get('type')
+
+
+def _seg_profile(s):
+    return s.get('dutyProfile') or (s.get('shift') or {}).get('dutyProfile')
+
+
 def default_shift_profiles():
     """Passprofiler. maxShiftHours gäller per segment, inte som globalt 24 h-tak."""
     combined = dict(
@@ -284,15 +296,22 @@ def default_shift_profiles():
         minJourMinutesInNightWindow=5 * 60,
         nightWindowStart='22:00',
         nightWindowEnd='08:00',
+        requiredRestMode='at_least_duty_length',
         compensatoryRestEqualToSpan=True,
         compensatoryMustFollowImmediately=True,
+        requiresException=False,
     )
-    exception = dict(combined)
-    exception['maxSpanHours'] = 24
+    extended = dict(combined)
+    extended.update(maxSpanHours=24, requiresException=True)
+    normal = dict(maxSpanHours=None, requiredRestMode=None, compensatoryRestEqualToSpan=False, requiresException=False)
     return dict(
-        normal=dict(maxSpanHours=None, compensatoryRestEqualToSpan=False),
-        combinedWorkJour=combined,
-        longException=exception,
+        normal=normal,
+        NORMAL=dict(normal),
+        combinedWorkJour=dict(combined),
+        COMBINED_WORK_JOUR=dict(combined),
+        extendedCombinedWorkJour=dict(extended),
+        EXTENDED_COMBINED_WORK_JOUR=dict(extended),
+        longException=dict(extended),
     )
 
 
@@ -310,13 +329,72 @@ def shift_profiles(rules=None):
 
 
 def occasion_profile_id(group, rules=None):
-    if any((s.get('dutyProfile') or (s.get('shift') or {}).get('dutyProfile')) == 'longException' for s in group):
-        return 'longException'
-    types = {s.get('type') or (s.get('shift') or {}).get('type') for s in group}
+    tags = {_seg_profile(s) for s in group}
+    if tags & EXTENDED_PROFILE_IDS:
+        return 'extendedCombinedWorkJour'
+    if tags & COMBINED_PROFILE_IDS:
+        return 'combinedWorkJour'
+    types = {_seg_type(s) for s in group}
     paid_types = types - {'jour', None}
     if 'jour' in types and paid_types:
         return 'combinedWorkJour'
     return 'normal'
+
+
+def segment_minutes(s):
+    a, b = _shift_span(s)
+    if s.get('work') is not None:
+        paid_m = sum(y - x for x, y in s['work'])
+    else:
+        raw = s.get('shift') or s
+        paid_m = 0 if _seg_type(s) == 'jour' else sum(y - x for x, y in paid({**raw, 'breaks': raw.get('breaks') or []}))
+    jour_m = (b - a) if _seg_type(s) == 'jour' else 0
+    return dict(
+        type=_seg_type(s),
+        start=a,
+        end=b,
+        paidMinutes=paid_m,
+        jourMinutes=jour_m,
+        ssgMinutes=paid_m,
+        coverageMinutes=paid_m,
+        costMinutes=paid_m,
+    )
+
+
+def build_duty_occasion(group, rules=None):
+    """Ett tjänstgöringstillfälle: ett eller flera segment med särhållna minuter."""
+    segs = [segment_minutes(s) for s in group]
+    a, b = occasion_span(group)
+    return dict(
+        segments=segs,
+        start=a,
+        end=b,
+        spanMinutes=b - a,
+        paidMinutes=sum(s['paidMinutes'] for s in segs),
+        jourMinutes=sum(s['jourMinutes'] for s in segs),
+        ssgMinutes=sum(s['ssgMinutes'] for s in segs),
+        coverageMinutes=sum(s['coverageMinutes'] for s in segs),
+        costMinutes=sum(s['costMinutes'] for s in segs),
+        workDayDate=occasion_work_day_date(group),
+        shiftIds=[s.get('id') for s in group if s.get('id')],
+        profile=occasion_profile_id(group, rules),
+    )
+
+
+def required_rest_after_minutes(group, rules):
+    spec = shift_profiles(rules).get(occasion_profile_id(group, rules)) or {}
+    if spec.get('requiredRestAfterMinutes') is not None:
+        return max(0, int(spec['requiredRestAfterMinutes']))
+    mode = spec.get('requiredRestMode')
+    if not mode and spec.get('compensatoryRestEqualToSpan'):
+        mode = 'at_least_duty_length'
+    if mode != 'at_least_duty_length':
+        return 0
+    a, b = occasion_span(group)
+    cap = float((rules or {}).get('maxShiftHours') or 12) * 60
+    if (b - a) <= cap + 1e-9:
+        return 0
+    return int(b - a)
 
 
 def jour_eligible(e):
@@ -327,8 +405,29 @@ def night_eligible(e):
     return bool(e.get('night'))
 
 
+def consecutive_pass_run(shifts, typ):
+    """Längsta följd av unika pass av en typ. Datum avgör bara om de ligger i följd.
+
+    Två separata pass med samma startdatum räknas som två, inte som en bool per dag.
+    """
+    units = sorted(
+        (s for s in shifts if s.get('type') == typ),
+        key=lambda s: (_shift_span(s)[0], str(s.get('id') or '')),
+    )
+    if not units:
+        return 0
+    best = run = 1
+    prev = units[0]['date']
+    for s in units[1:]:
+        delta = (date.fromisoformat(s['date']) - date.fromisoformat(prev)).days
+        run = run + 1 if 0 <= delta <= 1 else 1
+        best = max(best, run)
+        prev = s['date']
+    return best
+
+
 def type_start_date_flags(shifts, typ, start, end):
-    """Ett pass = ett startdatum. Inte kalenderöverlapp över midnatt."""
+    """Har minst ett pass av typen detta startdatum. Kvalitet 2/3/4 använder följd av datum."""
     marked = {s['date'] for s in shifts if s.get('type') == typ}
     return [day in marked for day in days(start, end)]
 
@@ -389,23 +488,21 @@ def max_jour_in_night_windows(group, rules=None, profile=None):
 
 
 def compensatory_from_occasion(group, employee_id, rules):
-    """Intjäning bara för sammanvägt långt pass där profilen kräver vila = spannet."""
-    pid = occasion_profile_id(group, rules)
-    spec = shift_profiles(rules).get(pid) or {}
-    if not spec.get('compensatoryRestEqualToSpan'):
+    """Efterföljande vila för definierad composite-profil. Inte ett intjäningskonto."""
+    minutes = required_rest_after_minutes(group, rules)
+    if minutes <= 0:
         return None
     a, b = occasion_span(group)
-    cap = float((rules or {}).get('maxShiftHours') or 12) * 60
-    if (b - a) <= cap + 1e-9:
-        return None
+    spec = shift_profiles(rules).get(occasion_profile_id(group, rules)) or {}
     return dict(
         employeeId=employee_id,
         sourceDutyOccasionIds=[s.get('id') for s in group if s.get('id')],
         earnedFrom=parts(b)[0],
-        minutesOwed=int(b - a),
+        minutesOwed=minutes,
         mustFollowImmediately=bool(spec.get('compensatoryMustFollowImmediately', True)),
         consumeBy=None,
         status='owed',
+        requiredRestMode=spec.get('requiredRestMode') or 'at_least_duty_length',
     )
 
 

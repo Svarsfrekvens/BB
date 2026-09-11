@@ -13,7 +13,7 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      work_day_date, shifts_mergeable, occasion_work_day_date,
                      rest_days_target, f01_known_span, f01_window_known,
                      candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
-                     shift_profiles)
+                     shift_profiles, required_rest_after_minutes)
 from .validate import validate
 
 
@@ -187,7 +187,6 @@ def solve(data, seconds=30):
                     model.add(ax+bx<=1+sum(lit(c['x'], f'br:{e["id"]}:{i}:{j}:{t}') for t,c in enumerate(bridges)))
                 else:
                     model.add(ax+bx<=1)
-        cap_hours=float(rules.get('maxShiftHours') or 12)*60
         for i in range(n_items):
             chain=[items[i]]
             for k in range(i+1, n_items):
@@ -202,11 +201,9 @@ def solve(data, seconds=30):
                 types={c['shift'].get('type') for c in chain}
                 if 'jour' not in types or not (types-{'jour'}):
                     continue
-                span_m=chain[-1]['b']-chain[0]['a']
-                spec=shift_profiles(rules).get(occasion_profile_id([c['shift'] for c in chain], rules)) or {}
-                if not spec.get('compensatoryRestEqualToSpan') or span_m<=cap_hours+1e-9:
+                rest_after=required_rest_after_minutes([candidate_as_shift(c) for c in chain], rules)
+                if rest_after<=0:
                     continue
-                rest_after=int(span_m)
                 xs_chain=[lit(c['x'], f'compc:{e["id"]}:{i}:{len(chain)}:{t}') for t,c in enumerate(chain)]
                 for t in range(k+1, n_items):
                     later=items[t]
@@ -245,16 +242,24 @@ def solve(data, seconds=30):
         night_lim=hard_constraints(e).get('maxNightConsecutive')
         nflags=[]
         night_span_days=list(days(add_days(wp['start'],-7),add_days(wp['end'],7)))
+        ncounts=[]
         for day in night_span_days:
-            nf=model.new_bool_var('nightday:'+e['id']+day)
             covering=[c['x'] for c in rows+fixed if c['shift'].get('type')=='night' and c['shift'].get('date')==day]
-            if covering: model.add_max_equality(nf,covering)
-            else: model.add(nf==0)
+            nf=model.new_bool_var('nightday:'+e['id']+day)
+            if covering:
+                model.add_max_equality(nf,covering)
+                nc=model.new_int_var(0,len(covering),'nightcnt:'+e['id']+day)
+                model.add(nc==sum(covering))
+            else:
+                model.add(nf==0)
+                nc=0
             nflags.append(nf)
+            ncounts.append(nc)
         if night_lim:
-            nw=int(night_lim)+1
-            for i in range(len(nflags)-nw+1):
-                model.add(sum(nflags[i:i+nw])<=int(night_lim))
+            lim=int(night_lim)
+            for w in range(1, lim+2):
+                for i in range(len(ncounts)-w+1):
+                    model.add(sum(ncounts[i:i+w])<=lim)
         night_series_flags[e['id']]=(nflags, night_span_days)
         min_off=hard_constraints(e).get('minConsecutiveOffDays')
         if min_off:
@@ -301,16 +306,20 @@ def solve(data, seconds=30):
                     model.add(work==0)
         jour_rows=[c for c in rows+fixed if c['shift'].get('type')=='jour']
         if jour_lim:
-            jflags=[]
-            for day in days(add_days(wp['start'],-7),add_days(wp['end'],7)):
-                jf=model.new_bool_var('jourday:'+e['id']+day)
+            jcounts=[]
+            jour_days=list(days(add_days(wp['start'],-7),add_days(wp['end'],7)))
+            for day in jour_days:
                 covering=[c['x'] for c in jour_rows if c['shift'].get('date')==day]
-                if covering: model.add_max_equality(jf,covering)
-                else: model.add(jf==0)
-                jflags.append(jf)
-            jw=int(jour_lim)+1
-            for i in range(len(jflags)-jw+1):
-                model.add(sum(jflags[i:i+jw])<=int(jour_lim))
+                if covering:
+                    jc=model.new_int_var(0,len(covering),'jourcnt:'+e['id']+day)
+                    model.add(jc==sum(covering))
+                else:
+                    jc=0
+                jcounts.append(jc)
+            lim=int(jour_lim)
+            for w in range(1, lim+2):
+                for i in range(len(jcounts)-w+1):
+                    model.add(sum(jcounts[i:i+w])<=lim)
         for start_day in sorted({c['shift']['date'] for c in jour_rows}):
             limit=add_days(start_day,27)
             model.add(sum((c['b']-c['a'])*c['x'] for c in jour_rows if start_day<=c['shift']['date']<=limit)<=48*60)

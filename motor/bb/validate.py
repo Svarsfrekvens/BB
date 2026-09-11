@@ -6,8 +6,9 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect, i
                      calendar_work_days, consecutive_six_seven_counts, longest_work_run,
                      has_consecutive_off, rest_days_target, f01_known_span, f01_window_known,
                      duty_occasions, occasion_span, occasion_profile_id, shift_profiles,
-                     type_start_date_flags, longest_true_run, max_jour_in_night_windows,
-                     compensatory_from_occasion, jour_eligible, night_eligible)
+                     max_jour_in_night_windows,
+                     jour_eligible, night_eligible,
+                     consecutive_pass_run, required_rest_after_minutes)
 
 
 def validate(data, schedule):
@@ -105,12 +106,12 @@ def validate(data, schedule):
                     got = max_jour_in_night_windows(group, r, spec)
                     if got + 1e-9 < int(need_jour):
                         issue('COMPOSITE_JOUR_WINDOW', f"{e['code']}: sammanvägt pass saknar minst {int(need_jour)/60:g} timmar sammanhängande jour i nattfönstret.", employeeId=e['id'])
-                owed = compensatory_from_occasion(group, e['id'], r)
+                owed = required_rest_after_minutes(group, r)
                 if owed and i + 1 < len(groups):
                     nxt = groups[i + 1]
                     wait = occasion_span(nxt)[0] - span_b
-                    if wait + 1e-9 < owed['minutesOwed']:
-                        issue('COMP_REST', f"{e['code']}: kompensationsvila {owed['minutesOwed']/60:g} timmar krävs efter sammanvägt pass.", employeeId=e['id'])
+                    if wait + 1e-9 < owed:
+                        issue('COMP_REST', f"{e['code']}: {owed/60:g} timmars efterföljande vila krävs efter sammanvägt pass.", employeeId=e['id'])
             used = sum(intersect(a,b,lo,hi) for s in shifts for a,b in s['work'])
             cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
             if used > cap+0.01:
@@ -174,10 +175,8 @@ def validate(data, schedule):
                         issue('WEEK_REST', f"{e['code']}: mindre än {weekly:g} timmars sammanhängande veckovila i sju dagarsperioden från {day}.", employeeId=e['id'])
             night_run_lim = hard_constraints(e).get('maxNightConsecutive')
             jour_run_lim = hard_constraints(e).get('maxJourConsecutive')
-            night_flags = type_start_date_flags(shifts, 'night', add_days(wp['start'], -7), add_days(wp['end'], 7))
-            jour_flags = type_start_date_flags(shifts, 'jour', add_days(wp['start'], -7), add_days(wp['end'], 7))
-            nrun = longest_true_run(night_flags)
-            jrun = longest_true_run(jour_flags)
+            nrun = consecutive_pass_run(shifts, 'night')
+            jrun = consecutive_pass_run(shifts, 'jour')
             if night_run_lim and nrun > int(night_run_lim):
                 issue('NIGHT_SERIES', f"{e['code']}: för många nattpass i följd.", employeeId=e['id'])
             if jour_run_lim and jrun > int(jour_run_lim):
