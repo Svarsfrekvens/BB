@@ -5,8 +5,17 @@
 
 import type { Insats } from "./typer";
 import type { Medarbetare } from "./vy";
-import { ssgWindows, harHårt, forbudnaKunder, hårdaMotorvillkor, mjukaMotorvillkor, skillWindowsFromVillkor, type MedarbetarVillkor } from "./villkor";
+import { ssgWindows, harHårt, forbudnaKunder, hårdaMotorvillkor, mjukaMotorvillkor, skillWindowsFromVillkor, workTimeWindowsFromVillkor, type MedarbetarVillkor } from "./villkor";
 import { defaultTidstyp, expanderaAktiviteter, kunderUtanKontakt, type PlanAktivitet } from "./aktiviteter";
+import {
+  DEFAULT_WORK_TIME_MODEL_ID,
+  STANDARD_WORK_TIME_MODELS,
+  defaultWeeklyHours,
+  ensureMinutesModel,
+  listPeriodDays,
+  periodCapacityMinutes,
+  type WorkTimeModel,
+} from "./arbetstid";
 
 export type MotorPayload = Record<string, unknown>;
 
@@ -230,7 +239,10 @@ export function byggMotorPayload(opts: {
   from: string;
   dagar: number;
   timkostnad: number;
+  /** Bakåtkompatibel workplace-fallback. Används inte som allas mått. */
   heltidVecka?: number;
+  /** Redigerad visningskolumn per namn; blir override bara om den skiljer sig från default. */
+  heltidPerNamn?: Record<string, number>;
   regler?: Partial<MotorRegler>;
   /** Pass ur det inlästa schemat – används som låsta pass runt periodens gränser. */
   schemaPass?: { namn: string; datum: string; start: string; slut: string; jour?: boolean }[];
@@ -249,7 +261,7 @@ export function byggMotorPayload(opts: {
 
   const regler: MotorRegler = {
     minRestHours: 11,
-    fullTimeWeeklyHours: Math.max(1, Math.min(60, opts.heltidVecka || 36.33)),
+    fullTimeWeeklyHours: Math.max(1, Math.min(60, opts.heltidVecka || defaultWeeklyHours())),
     maxWeeklyHours: 48,
     maxShiftHours: 12,
     maxConsecutiveDays: 5,
@@ -427,6 +439,8 @@ export function byggMotorPayload(opts: {
   }
 
   const medarbetarKarta: PayloadResultat["medarbetarKarta"] = {};
+  let workTimeModels: WorkTimeModel[] = STANDARD_WORK_TIME_MODELS.map((m) => ({ ...m }));
+  const defaultWorkTimeModelId = DEFAULT_WORK_TIME_MODEL_ID;
   let ordinarie = 0;
   let vikarieNr = 0;
   const employees = opts.medarbetare.slice(0, 80).map((m, i) => {
@@ -448,12 +462,23 @@ export function byggMotorPayload(opts: {
     const hard = hårdaMotorvillkor(m, from, to, kundId, i);
     const soft = mjukaMotorvillkor(villkor, from, to, kundId);
     const datedSkills = skillWindowsFromVillkor(villkor, from, to);
+    const windows = workTimeWindowsFromVillkor(villkor, from, to);
+    let workTimeModelId = String(m.workTimeModelId || "").trim() || undefined;
+    const visadHeltid = opts.heltidPerNamn?.[m.namn];
+    if (!workTimeModelId && Number.isFinite(visadHeltid) && Number(visadHeltid) > 0) {
+      const minutes = Math.round(Number(visadHeltid) * 60);
+      const ensured = ensureMinutesModel(minutes, workTimeModels);
+      workTimeModels = ensured.models;
+      if (ensured.id !== defaultWorkTimeModelId) workTimeModelId = ensured.id;
+    }
     return {
       id,
       code,
       name: m.namn,
       ssg: Math.max(0, Math.min(100, Number(m.grad) || 100)),
       ssgWindows: ssgWindows(Number(m.grad) || 100, villkor, from, to),
+      ...(workTimeModelId ? { workTimeModelId } : {}),
+      ...(windows.length ? { workTimeWindows: windows } : {}),
       night,
       status: arVikarie && farTillsattas === false ? "inactive" : "active",
       profiles: profilerFor({ ...m, jour: jourOk, nattbehorig: night }, mallar),
@@ -513,19 +538,35 @@ export function byggMotorPayload(opts: {
   // räcker sällan till full täckning, så beräkningen får tillgång till några
   // extra vikariepass. De används bara om de behövs, eftersom kostnaden vägs in.
   if (employees.length && interventions.length) {
+    const periodDays = listPeriodDays(from, to);
+    const workplaceCap = { workTimeModels, defaultWorkTimeModelId };
     const behovTimmar = interventions.reduce((s, i) => s + Number(i["minutes"]), 0) / 60;
     const takTimmar = employees
       .filter((e) => e.status === "active")
-      .reduce((s, e) => s + (e.ssg / 100) * regler.fullTimeWeeklyHours * (dagar / 7), 0);
+      .reduce(
+        (s, e) =>
+          s +
+          periodCapacityMinutes(
+            e,
+            periodDays,
+            { fullTimeWeeklyHours: regler.fullTimeWeeklyHours },
+            workplaceCap,
+          ) /
+            60,
+        0,
+      );
     const onskat = behovTimmar * 3.5;
-    const perExtra = regler.fullTimeWeeklyHours * (dagar / 7);
+    const perExtra = defaultWeeklyHours(workTimeModels, defaultWorkTimeModelId) * (dagar / 7);
     const extra = Math.max(0, Math.min(8, Math.ceil((onskat - takTimmar) / Math.max(1, perExtra))));
     const forlaga = employees[0]!;
     for (let k = 0; k < extra; k++) {
       const id = `x${k + 1}`;
       medarbetarKarta[id] = { namn: `Extra vikarie ${k + 1}`, vikarie: true };
+      const bas = { ...forlaga } as Record<string, unknown>;
+      delete bas.workTimeModelId;
+      delete bas.workTimeWindows;
       employees.push({
-        ...forlaga,
+        ...bas,
         id,
         code: `V${++vikarieNr}`,
         name: `Extra vikarie ${k + 1}`,
@@ -651,7 +692,15 @@ export function byggMotorPayload(opts: {
   const payload: MotorPayload = {
     schemaVersion: 1,
     inputRevision: Math.max(1, Math.round(opts.revision || 1)),
-    workplace: { id: "vh1", name: "Verksamheten", timezone: "Europe/Stockholm", start: from, end: to },
+    workplace: {
+      id: "vh1",
+      name: "Verksamheten",
+      timezone: "Europe/Stockholm",
+      start: from,
+      end: to,
+      workTimeModels,
+      defaultWorkTimeModelId,
+    },
     customers,
     employees,
     interventions,

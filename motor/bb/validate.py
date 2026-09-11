@@ -83,7 +83,7 @@ def validate(data, schedule):
                     elif previous['work'] and s['work'] and gap < r['minRestHours']*60:
                         issue('REST',f"{e['code']}: {gap/60:g} timmars vila före {s['date']} {s['start']}.",employeeId=e['id'],shiftId=s['id'])
             used = sum(intersect(a,b,lo,hi) for s in shifts for a,b in s['work'])
-            cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r)
+            cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
             if used > cap+0.01:
                 issue('CONTRACT',f"{e['code']}: fler timmar än periodkapaciteten enligt SSG.",employeeId=e['id'])
             for week in {monday(day) for day in days(wp['start'],wp['end'])}:

@@ -94,7 +94,7 @@ def solve(data, seconds=30):
                 if a['work'] and b['work']:
                     if b['a']-a['b']>=rules['minRestHours']*60: break
                     model.add(a['x']+b['x']<=1)
-        cap=floor(ssg_cap_minutes(e,period_days,rules)+1e-7)
+        cap=floor(ssg_cap_minutes(e,period_days,rules,wp)+1e-7)
         used=sum(min_period(c)*c['x'] for c in rows)+sum(min_period(c) for c in fixed)
         model.add(used<=cap)
         if cap>0:

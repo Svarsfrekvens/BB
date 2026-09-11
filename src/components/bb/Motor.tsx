@@ -4,7 +4,12 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { VyProps } from "@/lib/bb/vy";
-import { byggMotorPayload, type PayloadResultat } from "@/lib/bb/motorPayload";
+import {
+  DEFAULT_WORK_TIME_MODEL_ID,
+  STANDARD_WORK_TIME_MODELS,
+  listPeriodDays,
+  periodCapacityMinutes,
+} from "@/lib/bb/arbetstid";
 import { delaPeriod, payloadForFonster, svansPass, type Fonster } from "@/lib/bb/motorPeriod";
 import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "@/lib/bb/motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "@/lib/bb/motor.functions";
@@ -61,14 +66,19 @@ export function Motor({ state, api }: VyProps) {
     const period = (state?.period ?? null) as { from?: string } | null;
     const rader = api.arbetsRader();
     const personal = api.harPersonal() ? api.personalRader() : [];
-    const heltid = Number(personal[0]?.["Heltid h/vecka"]) || 36.33;
+    const heltidPerNamn: Record<string, number> = {};
+    for (const r of personal) {
+      const namn = String(r["Medarbetare"] ?? "").trim();
+      const h = Number(r["Heltid h/vecka"]);
+      if (namn && Number.isFinite(h) && h > 0) heltidPerNamn[namn] = h;
+    }
     return byggMotorPayload({
       rader,
       medarbetare: api.medarbetare(),
       from: String(period?.from || rader[0]?.datum || "").slice(0, 10),
       dagar: api.planDays(),
       timkostnad: Number(state?.hourlyCost) || 270,
-      heltidVecka: heltid,
+      heltidPerNamn,
       regler: api.motorRegler(),
       schemaPass: api.schemaPassOriginal(),
       planAktiviteter: api.planAktiviteter(),
@@ -94,8 +104,19 @@ export function Motor({ state, api }: VyProps) {
     if (nattgolv > nattpersonal) ut.push(`Vaken natt kräver ${nattgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
     const jourgolv = p.info.regler.jourFloor;
     if (jourgolv > nattpersonal) ut.push(`Sovande jour kräver ${jourgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
-    const heltid = Number((p.payload["rules"] as { fullTimeWeeklyHours: number }).fullTimeWeeklyHours) || 36.33;
-    const tak = aktiva.reduce((s, e) => s + (e.ssg / 100) * heltid * (p.info.dagar / 7), 0);
+    const wp = p.payload["workplace"] as { workTimeModels?: { id: string; weeklyMinutes: number }[]; defaultWorkTimeModelId?: string };
+    const rules = p.payload["rules"] as { fullTimeWeeklyHours: number };
+    const days = listPeriodDays(String(p.info.from), String(p.info.to));
+    const tak = aktiva.reduce(
+      (s, e) =>
+        s +
+        periodCapacityMinutes(e as { ssg: number }, days, rules, {
+          workTimeModels: wp?.workTimeModels?.length ? wp.workTimeModels : STANDARD_WORK_TIME_MODELS,
+          defaultWorkTimeModelId: wp?.defaultWorkTimeModelId || DEFAULT_WORK_TIME_MODEL_ID,
+        }) /
+          60,
+      0,
+    );
     const behov = insatser.reduce((s, i) => s + i.minutes, 0) / 60;
     if (tak < behov) ut.push(`Personalens sysselsättningsgrader ger högst ${tak.toFixed(0)} timmar i perioden, men insatserna kräver minst ${behov.toFixed(0)} timmar.`);
     if (!ut.length) ut.push("Underlaget ser rimligt ut på ytan – titta på tidsfönster, frånvaro och passmallar.");

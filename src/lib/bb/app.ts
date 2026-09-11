@@ -12,6 +12,8 @@ import { parseSekoiaRapport } from "./sekoia";
 export { parseSekoiaRapport } from "./sekoia";
 import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt, STANDARD_AKTIVITETER } from "./aktiviteter";
 import { beraknaKpi } from "./kpi";
+import { defaultWeeklyHours } from "./arbetstid";
+import { workTimeWindowsFromVillkor } from "./villkor";
 
 declare global {
   interface Window {
@@ -650,7 +652,7 @@ function harleddModell(rows, period, individschema, antag) {
       const vikarie = mv ? mv.vikarie : false;
       const profil = m.natt ? "Natt" : m.startMin >= 14 * 60 ? "Kväll" : "Dag";
       const bh = Math.round(m.betald * 100) / 100;
-      return { "Medarbetare": m.namn, "Status": vikarie ? "Vikarie" : "Anställd", "Grund-SSG": grad / 100, "Passprofil": profil, "Heltid h/vecka": 36.33, "Budget h/mån": bh, "Tillgängligt h/mån": bh, "Timkostnad": timkostnad, "Budgetkostnad/mån": Math.round(bh * timkostnad), "Helgmodell": "Varannan helg", "Rapportindikation": "Från Medvind-schemat", "Nattbehörig": m.natt ? "Ja" : "Nej", "Planerade h": bh, "SSG-avvikelse h": 0 };
+      return { "Medarbetare": m.namn, "Status": vikarie ? "Vikarie" : "Anställd", "Grund-SSG": grad / 100, "Passprofil": profil, "Heltid h/vecka": defaultWeeklyHours(), "Budget h/mån": bh, "Tillgängligt h/mån": bh, "Timkostnad": timkostnad, "Budgetkostnad/mån": Math.round(bh * timkostnad), "Helgmodell": "Varannan helg", "Rapportindikation": "Från Medvind-schemat", "Nattbehörig": m.natt ? "Ja" : "Nej", "Planerade h": bh, "SSG-avvikelse h": 0 };
     });
     personal = { columns, rows: prows };
   } else if (individschema && individschema.rows && individschema.rows.length) {
@@ -667,7 +669,7 @@ function harleddModell(rows, period, individschema, antag) {
       const dom = Object.entries(m.slots).sort((a, b) => b[1] - a[1])[0];
       const profil = dom ? dom[0] : "Dag/kväll";
       const bh = Math.round(m.betald * 100) / 100;
-      return { "Medarbetare": m.namn, "Status": "Anställd", "Grund-SSG": 1, "Passprofil": profil, "Heltid h/vecka": 36.33, "Budget h/mån": bh, "Tillgängligt h/mån": bh, "Timkostnad": timkostnad, "Budgetkostnad/mån": Math.round(bh * timkostnad), "Helgmodell": "Varannan helg", "Rapportindikation": "Uppskattad ur Sekoia – läs in schemat", "Nattbehörig": profil === "Natt" ? "Ja" : "Nej", "Planerade h": bh, "SSG-avvikelse h": 0 };
+      return { "Medarbetare": m.namn, "Status": "Anställd", "Grund-SSG": 1, "Passprofil": profil, "Heltid h/vecka": defaultWeeklyHours(), "Budget h/mån": bh, "Tillgängligt h/mån": bh, "Timkostnad": timkostnad, "Budgetkostnad/mån": Math.round(bh * timkostnad), "Helgmodell": "Varannan helg", "Rapportindikation": "Uppskattad ur Sekoia – läs in schemat", "Nattbehörig": profil === "Natt" ? "Ja" : "Nej", "Planerade h": bh, "SSG-avvikelse h": 0 };
     });
     personal = { columns, rows: prows };
   }
@@ -811,6 +813,7 @@ function ekonomiBas() {
 }
 /** Villkoren i medarbetarvyn i den form schemaoptimeringen använder. */
 function optimeringsVillkor() {
+  const { from, to } = analysPeriod();
   return medarbetarLista().map((m) => ({
     namn: m.namn,
     grad: m.grad,
@@ -826,6 +829,8 @@ function optimeringsVillkor() {
     maxdag: m.maxDagarIFoljd,
     franvaro: m.franvaro === "ingen" ? null : m.franvaro === "arbetar2v" ? "halvtid" : m.franvaro,
     timkostnad: m.timkostnad,
+    workTimeModelId: m.workTimeModelId,
+    workTimeWindows: workTimeWindowsFromVillkor(m.villkor || [], from, to),
   }));
 }
 /** Pass efter optimering, vikarieprövning och manuella omplaceringar. */
@@ -1033,6 +1038,7 @@ function medarbetarLista() {
       franvaro: v("franvaro", MEDARB_STANDARD.franvaro),
       timkostnad: Number(v("timkostnad", state.hourlyCost || MEDARB_STANDARD.timkostnad)),
       anstallning: v("anstallning", MEDARB_STANDARD.anstallning),
+      workTimeModelId: i.workTimeModelId || undefined,
       villkor: Array.isArray(i.villkor) ? i.villkor : [],
     };
   });
@@ -1822,6 +1828,7 @@ function personalSet(id, falt, varde) {
     const heltid = Math.max(0, Math.min(60, Number(varde) || 0));
     r["Heltid h/vecka"] = heltid;
     const ssg = Number(r["Grund-SSG"]) || 1;
+    // 4,345 är bara normaliserad månadsvisning. Motorns periodkapacitet är days/7.
     const budgetH = heltid * 4.345 * ssg;
     r["Budget h/mån"] = budgetH;
     r["Tillgängligt h/mån"] = budgetH;
@@ -3514,12 +3521,12 @@ function flyttaPass(passId, namn) {
   if (!passId || !namn) return;
   state.schemaLek = state.schemaLek || { moves: {} };
   const tidigare = state.schemaLek.moves[passId];
-  const { from } = analysPeriod();
+  const { from, to } = analysPeriod();
   const veckor = Math.max(1, Math.ceil(state.analysisDays / 7));
-  const foreVarningar = MODELL.kontrolleraPass(efterPass(), optimeringsVillkor(), veckor, from);
+  const foreVarningar = MODELL.kontrolleraPass(efterPass(), optimeringsVillkor(), veckor, from, to);
   state.schemaLek.moves[passId] = namn;
   schemaNotis = null;
-  const efterVarningar = MODELL.kontrolleraPass(efterPass(), optimeringsVillkor(), veckor, from);
+  const efterVarningar = MODELL.kontrolleraPass(efterPass(), optimeringsVillkor(), veckor, from, to);
   const foreNycklar = new Set(foreVarningar.map((v) => `${v.namn}|${v.typ}|${v.text}`));
   const nya = efterVarningar.filter((v) => !foreNycklar.has(`${v.namn}|${v.typ}|${v.text}`));
   if (nya.length) {

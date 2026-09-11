@@ -113,8 +113,47 @@ def ssg_for_day(e, day):
     return ssg
 
 
-def ssg_cap_minutes(e, period_days, rules):
-    return sum(ssg_for_day(e, day) / 100 * rules['fullTimeWeeklyHours'] * 60 / 7 for day in period_days)
+def _model_by_id(workplace):
+    return {m['id']: m for m in (workplace or {}).get('workTimeModels') or [] if isinstance(m, dict) and m.get('id')}
+
+
+def _model_covers(model, day):
+    if not model:
+        return False
+    start = model.get('validFrom')
+    end = model.get('validTo')
+    if start and day < start:
+        return False
+    if end and day > end:
+        return False
+    return True
+
+
+def weekly_minutes_for_day(e, day, rules, workplace=None):
+    """Arbetstidsmått för en kalenderdag: fönster → person → verksamhet → rules."""
+    models = _model_by_id(workplace)
+    for w in e.get('workTimeWindows') or []:
+        if not (w.get('start') <= day <= w.get('end')):
+            continue
+        if w.get('weeklyMinutes') is not None:
+            return w['weeklyMinutes']
+        model = models.get(w.get('modelId'))
+        if _model_covers(model, day):
+            return model['weeklyMinutes']
+    person_model = models.get(e.get('workTimeModelId'))
+    if _model_covers(person_model, day):
+        return person_model['weeklyMinutes']
+    default_model = models.get((workplace or {}).get('defaultWorkTimeModelId'))
+    if _model_covers(default_model, day):
+        return default_model['weeklyMinutes']
+    return rules['fullTimeWeeklyHours'] * 60
+
+
+def ssg_cap_minutes(e, period_days, rules, workplace=None):
+    return sum(
+        ssg_for_day(e, day) / 100 * weekly_minutes_for_day(e, day, rules, workplace) / 7
+        for day in period_days
+    )
 
 
 def skills_on_day(e, day):
@@ -274,6 +313,30 @@ def check_input(d):
         require(wp['timezone'] == 'Europe/Stockholm', 'Använd svensk tidszon.')
         n = (date.fromisoformat(wp['end']) - date.fromisoformat(wp['start'])).days + 1
         require(1 <= n <= 42, 'Perioden ska vara 1–42 dagar.')
+        models = wp.get('workTimeModels')
+        if models is not None:
+            require(isinstance(models, list), 'Ogiltiga arbetstidsmodeller.')
+            ids = []
+            for m in models:
+                require(isinstance(m, dict), 'Ogiltig arbetstidsmodell.')
+                require(isinstance(m.get('id'), str) and m['id'], 'Arbetstidsmodell saknar id.')
+                require(isinstance(m.get('name'), str) and m['name'], 'Arbetstidsmodell saknar namn.')
+                require(numeric(m.get('weeklyMinutes'), 60, 3600), 'Ogiltigt veckomått i arbetstidsmodell.')
+                if m.get('validFrom'):
+                    date.fromisoformat(m['validFrom'])
+                if m.get('validTo'):
+                    date.fromisoformat(m['validTo'])
+                    if m.get('validFrom'):
+                        require(m['validFrom'] <= m['validTo'], 'Ogiltig giltighet för arbetstidsmodell.')
+                if m.get('reductionRuleId') is not None:
+                    require(isinstance(m['reductionRuleId'], str), 'Ogiltig reduceringsregel.')
+                ids.append(m['id'])
+            require(len(ids) == len(set(ids)), 'Dubbla id i arbetstidsmodeller.')
+        default_model = wp.get('defaultWorkTimeModelId')
+        if default_model is not None:
+            require(isinstance(default_model, str) and default_model, 'Ogiltig default-arbetstidsmodell.')
+            if models:
+                require(default_model in {m['id'] for m in models}, 'Okänd default-arbetstidsmodell.')
         require(numeric(d['inputRevision'], 0, 10**10, True), 'Ogiltig revision.')
         for key, limit in [('customers',100),('employees',80),('interventions',4000),('templates',12),('boundaryShifts',2000),('absences',2000)]:
             require(isinstance(d[key], list) and len(d[key]) <= limit, f'Ogiltig storlek: {key}.')
@@ -299,6 +362,18 @@ def check_input(d):
                     require(isinstance(w, dict) and w.get('start') <= w.get('end'), 'Ogiltigt SSG-fönster.')
                     date.fromisoformat(w['start']); date.fromisoformat(w['end'])
                     require(numeric(w['ssg'], 0, 100), 'Ogiltig SSG i fönster.')
+            if e.get('workTimeModelId') is not None:
+                require(isinstance(e['workTimeModelId'], str) and e['workTimeModelId'], 'Ogiltig arbetstidsmodell.')
+            if e.get('workTimeWindows') is not None:
+                require(isinstance(e['workTimeWindows'], list), 'Ogiltiga arbetstidsfönster.')
+                for w in e['workTimeWindows']:
+                    require(isinstance(w, dict) and w.get('start') <= w.get('end'), 'Ogiltigt arbetstidsfönster.')
+                    date.fromisoformat(w['start']); date.fromisoformat(w['end'])
+                    has_model = isinstance(w.get('modelId'), str) and w.get('modelId')
+                    has_minutes = w.get('weeklyMinutes') is not None
+                    require(has_model or has_minutes, 'Arbetstidsfönster saknar modell eller veckomått.')
+                    if has_minutes:
+                        require(numeric(w['weeklyMinutes'], 60, 3600), 'Ogiltigt veckomått i fönster.')
         for t in d['interventions']:
             require(t['customerId'] in customers and t['type'] in ['fixed','flexible'], 'Ogiltig insats/kund.')
             require(numeric(t['minutes'],1,480,True) and type(t['doubleStaff']) is bool, 'Ogiltig insatslängd eller dubbelbemanning.')

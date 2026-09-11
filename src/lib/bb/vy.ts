@@ -54,6 +54,7 @@ export type Medarbetare = {
   franvaro: string;
   timkostnad: number;
   anstallning: string;
+  workTimeModelId?: string;
   villkor?: { id: string; typ: string; styrka: string; from?: string; till?: string; aktiv: boolean; payload?: Record<string, unknown> }[];
 };
 

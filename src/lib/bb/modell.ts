@@ -19,6 +19,13 @@
 import * as C from "./core";
 import type { DatumPass } from "./medvind";
 import { beraknaKpi, rymIArbetspass } from "./kpi";
+import {
+  DEFAULT_WORK_TIME_MODEL_ID,
+  STANDARD_WORK_TIME_MODELS,
+  defaultWeeklyHours,
+  listPeriodDays,
+  periodCapacityMinutes,
+} from "./arbetstid";
 
 export type Slot = { datum: string; klockan: string; behov: number; dimensionerat: number; bemanning: number; jour: number };
 
@@ -482,13 +489,17 @@ export type MedarbetareVillkor = {
   maxdag?: number;              // max arbetsdagar i följd
   franvaro?: null | "ledig1v" | "halvtid" | "semester";
   timkostnad?: number;
+  workTimeModelId?: string;
+  workTimeWindows?: { start: string; end: string; modelId?: string; weeklyMinutes?: number }[];
 };
 
 export type SchemaVarning = { namn: string; typ: string; text: string };
 export type SchemaForandring = { typ: string; namn: string; datum: string; text: string };
 
 export const REGLER = {
-  dygnsvila: 11, maxRad: 5, jourStart: "23:00", jourSlut: "06:30", veckotimmar: 40,
+  dygnsvila: 11, maxRad: 5, jourStart: "23:00", jourSlut: "06:30",
+  /** Månadsvis visning använder 4,345 i Ekonomi. Periodkapacitet är days/7 via workTimeModel. */
+  veckotimmar: defaultWeeklyHours(),
   /** Hela jourarbetspasset: 15:00 → 10:00 dagen efter. Sovande jour ligger 23:00–06:30 inuti passet. */
   jourPassStart: "15:00", jourPassSlut: "10:00",
   /** Arbetstidslagen: högst 48 h jourtid per fyra veckor och 50 h per kalendermånad. */
@@ -500,9 +511,37 @@ const klockaR = (m: number) => { const x = ((Math.round(m) % 1440) + 1440) % 144
 const veckaNr = (datum: string, fran: string) => Math.floor((+new Date(datum + "T00:00:00Z") - +new Date(fran + "T00:00:00Z")) / 86400000 / 7);
 const arHelg = (datum: string) => { const wd = new Date(datum + "T12:00:00Z").getUTCDay(); return wd === 0 || wd === 6; };
 
+function ordinarieCapTimmar(
+  m: MedarbetareVillkor,
+  periodDays: string[],
+) {
+  return periodCapacityMinutes(
+    {
+      ssg: m.grad,
+      workTimeModelId: m.workTimeModelId,
+      workTimeWindows: m.workTimeWindows,
+    },
+    periodDays,
+    { fullTimeWeeklyHours: defaultWeeklyHours() },
+    { workTimeModels: STANDARD_WORK_TIME_MODELS, defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID },
+  ) / 60;
+}
+
+function periodDagarForKontroll(fran: string | undefined, till: string | undefined, veckor: number, passdagar: string[]) {
+  if (fran && till) return listPeriodDays(fran, till);
+  if (fran && veckor > 0) {
+    const slut = new Date(fran + "T12:00:00Z");
+    slut.setUTCDate(slut.getUTCDate() + Math.max(1, veckor) * 7 - 1);
+    return listPeriodDays(fran, slut.toISOString().slice(0, 10));
+  }
+  const uniq = [...new Set(passdagar)].sort();
+  if (uniq.length >= 2) return listPeriodDays(uniq[0]!, uniq[uniq.length - 1]!);
+  return uniq;
+}
+
 /* ---------- Regelkontroll: dygnsvila, max dagar i följd, SSG, helg, frånvaro ---------- */
 export function kontrolleraPass(
-  pass: DatumPass[], medarbetare: MedarbetareVillkor[], veckor: number, fran?: string
+  pass: DatumPass[], medarbetare: MedarbetareVillkor[], veckor: number, fran?: string, till?: string
 ): SchemaVarning[] {
   const varn: SchemaVarning[] = [];
   const per = new Map<string, DatumPass[]>();
@@ -517,8 +556,9 @@ export function kontrolleraPass(
     let rad = 1; const maxd = m?.maxdag ?? REGLER.maxRad;
     for (let i = 1; i < dagar.length; i++) { const nu = dagar[i], fore = dagar[i - 1]; if (!nu || !fore) continue; const diff = Math.round((+new Date(nu) - +new Date(fore)) / 86400000); rad = diff === 1 ? rad + 1 : 1; if (rad > maxd) { varn.push({ namn, typ: "maxRad", text: `${namn}: ${rad} arbetsdagar i följd (max ${maxd})` }); break; } }
     if (m) {
-      const tak = (m.grad / 100) * REGLER.veckotimmar * veckor; const tim = ps.reduce((s, p) => s + p.timmar, 0);
-      if (tim > tak * 1.05) varn.push({ namn, typ: "ssg", text: `${namn}: ${tim.toFixed(1)} h överstiger SSG-tak ${tak.toFixed(1)} h` });
+      const periodDays = periodDagarForKontroll(fran, till, veckor, ps.map((p) => p.datum));
+      const tak = ordinarieCapTimmar(m, periodDays); const tim = ps.reduce((s, p) => s + p.timmar, 0);
+      if (tim > tak + 0.01) varn.push({ namn, typ: "ssg", text: `${namn}: ${tim.toFixed(1)} h överstiger SSG-tak ${tak.toFixed(1)} h` });
       if (fran) {
         const hset = new Set<number>(); if (m.helggrad === "alla") { for (let v = 0; v < veckor; v++) hset.add(v); } else if (m.helggrad === "var3") { for (let v = 0; v < veckor; v += 3) hset.add(v); } else if (m.helggrad !== "inga") { for (let v = 0; v < veckor; v += 2) hset.add(v); }
         let helgFel = 0, franFel = 0;
@@ -573,7 +613,7 @@ export function optimeraSchema(opts: {
   const N = nD * 48; const jS = toMinR(REGLER.jourStart), jE = toMinR(REGLER.jourSlut);
   const P: DatumPass[] = pass.map((p) => ({ ...p }));
   const medMap = new Map(medarbetare.map((m) => [m.namn, m]));
-  const tak = new Map(medarbetare.map((m) => [m.namn, (m.grad / 100) * REGLER.veckotimmar * veckor]));
+  const tak = new Map(medarbetare.map((m) => [m.namn, ordinarieCapTimmar(m, lista)]));
   const bem = new Int16Array(N);
   const slots = (p: DatumPass): number[] => { const di = idx.get(p.datum); if (di == null) return []; const s = toMinR(p.start); let e = toMinR(p.slut); if (e <= s) e += 1440; const out: number[] = []; for (let sl = Math.floor(s / 30); sl < Math.ceil(e / 30); sl++) { const d2 = di + (sl >= 48 ? 1 : 0); if (d2 >= nD) break; out.push(d2 * 48 + (sl % 48)); } return out; };
   const app = (p: DatumPass, t: number) => { for (const c of slots(p)) bem[c] = (bem[c] ?? 0) + t; };
@@ -591,8 +631,8 @@ export function optimeraSchema(opts: {
   const kostSlot = (c: number) => { const b = bem[c] ?? 0; return Math.max(0, (dim[c] ?? 0) - b) * 3 + Math.max(0, b - (ra[c] ?? 0)) * 1.5; };
   const kostFor = (cells: number[]) => cells.reduce((k, c) => k + kostSlot(c), 0);
   const timPer = () => { const m = new Map<string, number>(); for (const p of P) if (!p.jour) m.set(p.namn, (m.get(p.namn) || 0) + p.timmar); return m; };
-  const bas = new Map(medarbetare.map((m) => [m.namn, kontrolleraPass(pass.filter((p) => p.namn === m.namn), medarbetare, veckor, fran).length]));
-  const regelOK = (namn: string) => kontrolleraPass(P.filter((p) => p.namn === namn), medarbetare, veckor, fran).length <= (bas.get(namn) || 0);
+  const bas = new Map(medarbetare.map((m) => [m.namn, kontrolleraPass(pass.filter((p) => p.namn === m.namn), medarbetare, veckor, fran, till).length]));
+  const regelOK = (namn: string) => kontrolleraPass(P.filter((p) => p.namn === namn), medarbetare, veckor, fran, till).length <= (bas.get(namn) || 0);
   const farJobba = (namn: string, datum: string) => { const m = medMap.get(namn); if (!m) return true; const v = veckaNr(datum, fran); if (m.franvaro === "ledig1v" && v % 4 === 3) return false; if (m.franvaro === "halvtid" && v % 2 === 1) return false; if (m.franvaro === "semester" && v >= veckor - 2) return false; if (arHelg(datum) && m.helggrad && !(new Set(m.helggrad === "alla" ? Array.from({ length: veckor }, (_, i) => i) : m.helggrad === "var3" ? Array.from({ length: veckor }, (_, i) => i).filter((i) => i % 3 === 0) : m.helggrad === "inga" ? [] : Array.from({ length: veckor }, (_, i) => i).filter((i) => i % 2 === 0))).has(v)) return false; return true; };
   const inomTid = (namn: string, s: number, e: number) => { const m = medMap.get(namn); let lo = jE, hi = jS; if (m) { if (m.tidigast) lo = Math.max(lo, toMinR(m.tidigast)); if (m.senast) hi = Math.min(hi, toMinR(m.senast)); if (m.passprofil === "dag") hi = Math.min(hi, 17 * 60); else if (m.passprofil === "kvall") lo = Math.max(lo, 14 * 60); else if (m.passprofil === "natt") return false; } return s >= lo && e <= hi && e - s >= 120 && e - s <= 600; };
   const forandringar: SchemaForandring[] = [];
@@ -624,7 +664,7 @@ export function optimeraSchema(opts: {
       if (bast && gor(i, bast.q, bast.typ, bast.text)) { forbattrat = true; tim = timPer(); }
     }
   }
-  return { pass: P, forandringar, varningar: kontrolleraPass(P, medarbetare, veckor, fran) };
+  return { pass: P, forandringar, varningar: kontrolleraPass(P, medarbetare, veckor, fran, till) };
 }
 
 /* ---------- Styrande villkor (ersätter FORINSTALLDA_VILLKOR) ---------- */

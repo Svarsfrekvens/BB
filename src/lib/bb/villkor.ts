@@ -41,6 +41,22 @@ export function ssgWindows(basSsg: number, villkor: MedarbetarVillkor[], fran: s
   }));
 }
 
+export function workTimeWindowsFromVillkor(villkor: MedarbetarVillkor[], fran: string, till: string) {
+  return villkor
+    .filter((v) => v.typ === "arbetstid" && gallerIPeriod(v, fran, till))
+    .map((v) => {
+      const modelId = String(v.payload?.["modelId"] || "").trim();
+      const weeklyMinutes = Number(v.payload?.["weeklyMinutes"]);
+      return {
+        start: v.from && v.from > fran ? v.from : fran,
+        end: v.till && v.till < till ? v.till : till,
+        ...(modelId ? { modelId } : {}),
+        ...(Number.isFinite(weeklyMinutes) && weeklyMinutes > 0 ? { weeklyMinutes } : {}),
+      };
+    })
+    .filter((w) => w.modelId || w.weeklyMinutes != null);
+}
+
 export function harHårt(villkor: MedarbetarVillkor[], typ: string, fran: string, till: string) {
   return villkor.some((v) => v.typ === typ && v.styrka === "maste" && gallerIPeriod(v, fran, till));
 }
