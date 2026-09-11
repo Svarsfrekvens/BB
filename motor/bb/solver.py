@@ -9,7 +9,7 @@ from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      instant, add_days, days, night_intervals, jour_intervals, is_night, monday,
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
-                     shift_allowed, rolling_week_windows)
+                     shift_allowed, rolling_week_windows, soft_constraints)
 from .validate import validate
 
 
@@ -83,6 +83,7 @@ def solve(data, seconds=30):
         return sum(intersect(a,b,lo,hi) for a,b in c['work'])
 
     utilisations=[]
+    workday_flags={}
     for e in employees:
         rows=sorted((c for c in candidates if c['shift']['employeeId']==e['id']),key=lambda c:c['a'])
         fixed=[b for b in boundaries if b['shift']['employeeId']==e['id']]
@@ -107,25 +108,29 @@ def solve(data, seconds=30):
             wa,wb=instant(week,'00:00'),instant(add_days(week,7),'00:00')
             model.add(sum(sum(intersect(a,b,wa,wb) for a,b in c['work'])*c['x'] for c in rows+fixed)<=floor(rules['maxWeeklyHours']*60))
         flags=[]
-        for day in days(add_days(wp['start'],-rules['maxConsecutiveDays']),add_days(wp['end'],rules['maxConsecutiveDays'])):
+        flag_days=list(days(add_days(wp['start'],-6),add_days(wp['end'],6)))
+        for day in flag_days:
             a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
             flag=model.new_bool_var('workday:'+e['id']+day)
             covering=[c['x'] for c in rows+fixed if any(overlap(x,y,a,b) for x,y in c['work'])]
             if covering: model.add_max_equality(flag,covering)
             else: model.add(flag==0)
             flags.append(flag)
-        window=rules['maxConsecutiveDays']+1
-        for i in range(len(flags)-window+1):
-            model.add(sum(flags[i:i+window])<=rules['maxConsecutiveDays'])
+        legal=rules.get('hardMaxConsecutiveDays')
+        if legal:
+            w=int(legal)+1
+            for i in range(len(flags)-w+1):
+                model.add(sum(flags[i:i+w])<=int(legal))
         person_cap=hard_constraints(e).get('maxConsecutiveDays')
         if person_cap:
             w=int(person_cap)+1
             for i in range(len(flags)-w+1):
                 model.add(sum(flags[i:i+w])<=int(person_cap))
+        workday_flags[e['id']]=(flags,flag_days)
         night_lim=hard_constraints(e).get('maxNightConsecutive')
         if night_lim:
             nflags=[]
-            span_days=list(days(add_days(wp['start'],-rules['maxConsecutiveDays']),add_days(wp['end'],rules['maxConsecutiveDays'])))
+            span_days=list(days(add_days(wp['start'],-7),add_days(wp['end'],7)))
             for day in span_days:
                 a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
                 nf=model.new_bool_var('nightday:'+e['id']+day)
@@ -139,8 +144,7 @@ def solve(data, seconds=30):
         min_off=hard_constraints(e).get('minConsecutiveOffDays')
         if min_off:
             need=int(min_off)
-            pad=rules['maxConsecutiveDays']
-            period_flags=flags[pad:pad+len(period_days)]
+            period_flags=flags[6:6+len(period_days)]
             if need<=len(period_flags):
                 windows=[]
                 for i in range(len(period_flags)-need+1):
@@ -293,6 +297,69 @@ def solve(data, seconds=30):
     continuity_ore=int(round(float(ow.get('continuitySek',50))*100))
     spread_ore=int(round(float(ow.get('spreadSekPerPermille',2.5))*100))
     prefer_ore=int(round(float(ow.get('preferredMissSek',1))*100))
+    c6_ore=int(round(float(ow.get('consecutive6Sek',20))*100))
+    c7_ore=int(round(float(ow.get('consecutive7Sek',80))*100))
+    rest_ore=int(round(float(ow.get('missingRestDaySek',15))*100))
+    pair_ore=int(round(float(ow.get('missingPairOffSek',25))*100))
+    minoff_ore=int(round(float(ow.get('missingMinOffSek',40))*100))
+    quality_extra=0
+    rest_target=int(rules.get('minRestDaysInFourWeeks', 9) or 0)
+    for e in employees:
+        packed=workday_flags.get(e['id'])
+        if not packed:
+            continue
+        flags, flag_days=packed
+        period_idx=[i for i,d in enumerate(flag_days) if wp['start']<=d<=wp['end']]
+        period_flags=[flags[i] for i in period_idx]
+        for i in range(len(flags)-5):
+            if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(6)):
+                continue
+            six=model.new_bool_var(f'c6:{e["id"]}:{i}')
+            s=sum(flags[i:i+6])
+            model.add(s>=6).only_enforce_if(six)
+            model.add(s<=5).only_enforce_if(six.Not())
+            quality_extra += c6_ore*six
+        for i in range(len(flags)-6):
+            if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(7)):
+                continue
+            sev=model.new_bool_var(f'c7:{e["id"]}:{i}')
+            s=sum(flags[i:i+7])
+            model.add(s>=7).only_enforce_if(sev)
+            model.add(s<=6).only_enforce_if(sev.Not())
+            quality_extra += c7_ore*sev
+        if rest_target>0 and len(period_flags)>=28:
+            zero=model.new_int_var(0,0,f'rest0:{e["id"]}')
+            model.add(zero==0)
+            for i in range(len(period_flags)-27):
+                rest=sum(1-f for f in period_flags[i:i+28])
+                short=model.new_int_var(-28, rest_target, f'restshort:{e["id"]}:{i}')
+                model.add(short==rest_target-rest)
+                miss=model.new_int_var(0, rest_target, f'restmiss:{e["id"]}:{i}')
+                model.add_max_equality(miss,[zero, short])
+                quality_extra += rest_ore*miss
+        if pair_ore and len(period_flags)>=2:
+            pairs=[]
+            for i in range(len(period_flags)-1):
+                p=model.new_bool_var(f'pair:{e["id"]}:{i}')
+                model.add(period_flags[i]==0).only_enforce_if(p)
+                model.add(period_flags[i+1]==0).only_enforce_if(p)
+                pairs.append(p)
+            if pairs:
+                has_pair=model.new_bool_var(f'haspair:{e["id"]}')
+                model.add_max_equality(has_pair, pairs)
+                quality_extra += pair_ore*(1-has_pair)
+        need=int(soft_constraints(e).get('minConsecutiveOffDays') or 0)
+        if need>=1 and len(period_flags)>=need:
+            wins=[]
+            for i in range(len(period_flags)-need+1):
+                w=model.new_bool_var(f'softminoff:{e["id"]}:{i}')
+                for j in range(need):
+                    model.add(period_flags[i+j]==0).only_enforce_if(w)
+                wins.append(w)
+            if wins:
+                ok=model.new_bool_var(f'softminoffok:{e["id"]}')
+                model.add_max_equality(ok, wins)
+                quality_extra += minoff_ore*(1-ok)
     prefer_miss=0
     for e in employees:
         prefs=((e.get('constraints') or {}).get('soft') or {}).get('preferredCustomerIds') or []
@@ -322,7 +389,7 @@ def solve(data, seconds=30):
     cost_var=model.new_int_var(0,10**12,'cost_ore')
     model.add(cost_var==cost)
     qual_var=model.new_int_var(0,10**12,'quality_ore')
-    model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread+prefer_ore*prefer_miss)
+    model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread+prefer_ore*prefer_miss+quality_extra)
     for c in candidates:
         model.add_hint(c['x'],0)
     for x in support_hints:

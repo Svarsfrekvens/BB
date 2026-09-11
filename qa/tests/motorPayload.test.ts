@@ -163,4 +163,24 @@ describe("motorPayload ur Galaxen", () => {
     expect(e?.constraints.hard.allowedTypes).toEqual(["day"]);
     expect(e?.profiles.some((id) => nattIds.includes(id))).toBe(false);
   });
+
+  it("standard maxDagarIFoljd blir inte hårt maxConsecutiveDays", () => {
+    const employees = (payload(7).payload.employees as { constraints?: { hard?: { maxConsecutiveDays?: number } } }[]) || [];
+    const ordinarie = employees.filter((e) => !String((e as { id?: string }).id || "").startsWith("x"));
+    expect(ordinarie.every((e) => e.constraints?.hard?.maxConsecutiveDays == null)).toBe(true);
+  });
+
+  it("minRestDaysInFourWeeks följer styrande villkor och kan stängas av", () => {
+    const on = payload(7).payload.rules as { minRestDaysInFourWeeks: number };
+    expect(on.minRestDaysInFourWeeks).toBe(9);
+    const av = byggMotorPayload({
+      rader: (sekoia.rows as Insats[]).slice(0, 5),
+      medarbetare: tillMedarbetare().slice(0, 2),
+      from: "2026-08-03",
+      dagar: 7,
+      timkostnad: 270,
+      regler: { ...reglerFranVillkor(), minRestDaysInFourWeeks: 0 },
+    });
+    expect((av.payload.rules as { minRestDaysInFourWeeks: number }).minRestDaysInFourWeeks).toBe(0);
+  });
 });

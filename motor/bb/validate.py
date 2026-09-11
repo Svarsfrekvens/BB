@@ -2,7 +2,9 @@
 from .domain import (check_input, occurrences, span, paid, overlap, intersect, instant,
                      add_days, days, parts, night_intervals, jour_intervals, is_night, monday,
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
-                     clock_minutes, longest_rest_minutes, duty_week_windows)
+                     clock_minutes, longest_rest_minutes, duty_week_windows, soft_constraints,
+                     calendar_work_days, consecutive_six_seven_counts, longest_work_run,
+                     rest_days_missing_in_windows, has_consecutive_off)
 
 
 def validate(data, schedule):
@@ -10,6 +12,9 @@ def validate(data, schedule):
 
     def issue(rule, message, **more):
         errors.append(dict(rule=rule, message=message, **more))
+
+    def warn(rule, message, **more):
+        warnings.append(dict(rule=rule, message=message, **more))
 
     try:
         check_input(data)
@@ -90,38 +95,35 @@ def validate(data, schedule):
                 wa,wb = instant(week,'00:00'),instant(add_days(week,7),'00:00')
                 if sum(intersect(a,b,wa,wb) for s in shifts for a,b in s['work']) > r['maxWeeklyHours']*60:
                     issue('WEEK_HOURS',f"{e['code']}: för många timmar kalenderveckan {week}.",employeeId=e['id'])
-            run = 0
-            for day in days(add_days(wp['start'],-r['maxConsecutiveDays']),add_days(wp['end'],r['maxConsecutiveDays'])):
-                a,b = instant(day,'00:00'),instant(add_days(day,1),'00:00')
-                run = run+1 if any(any(overlap(x,y,a,b) for x,y in s['work']) for s in shifts) else 0
-                if run==r['maxConsecutiveDays']+1:
-                    issue('CONSECUTIVE',f"{e['code']}: för många kalenderdagar med arbete i följd.",employeeId=e['id'])
+            worked = calendar_work_days(shifts, wp['start'], wp['end'])
+            run = longest_work_run(worked)
+            legal = r.get('hardMaxConsecutiveDays')
+            if legal and run > int(legal):
+                issue('CONSECUTIVE', f"{e['code']}: fler än {int(legal)} arbetsdagar i följd (hårt tak).", employeeId=e['id'])
             person_cap = hard_constraints(e).get('maxConsecutiveDays')
-            if person_cap:
-                run = 0
-                for day in days(add_days(wp['start'],-int(person_cap)),add_days(wp['end'],int(person_cap))):
-                    a,b = instant(day,'00:00'),instant(add_days(day,1),'00:00')
-                    run = run+1 if any(any(overlap(x,y,a,b) for x,y in s['work']) for s in shifts) else 0
-                    if run==int(person_cap)+1:
-                        issue('CONSECUTIVE',f"{e['code']}: fler arbetsdagar i följd än individens tak.",employeeId=e['id'])
+            if person_cap and run > int(person_cap):
+                issue('CONSECUTIVE', f"{e['code']}: fler arbetsdagar i följd än individens hårda tak.", employeeId=e['id'])
+            n6, n7 = consecutive_six_seven_counts(worked)
+            if n7:
+                warn('CONSECUTIVE_SOFT', f"{e['code']}: {run} arbetsdagar i följd (A-03, mål 5).", employeeId=e['id'])
+            elif n6:
+                warn('CONSECUTIVE_SOFT', f"{e['code']}: 6 arbetsdagar i följd (A-02, mål 5).", employeeId=e['id'])
+            rest_target = int(r.get('minRestDaysInFourWeeks', 9) or 0)
+            missing_rest = rest_days_missing_in_windows(worked, 28, rest_target)
+            if missing_rest:
+                warn('REST_DAYS_SOFT', f"{e['code']}: färre än {rest_target} fridagar på 4 veckor (F-01, mjuk lokal princip).", employeeId=e['id'])
+            if len(worked) >= 2 and not has_consecutive_off(worked, 2):
+                warn('PAIR_OFF_SOFT', f"{e['code']}: saknar två sammanhängande fridagar (F-02).", employeeId=e['id'])
             min_off = hard_constraints(e).get('minConsecutiveOffDays')
             if min_off:
-                off_run = 0
                 need = int(min_off)
-                saw_work = False
-                found = False
-                for day in days(wp['start'], wp['end']):
-                    a,b = instant(day,'00:00'),instant(add_days(day,1),'00:00')
-                    working = any(any(overlap(x,y,a,b) for x,y in s['work']) for s in shifts)
-                    if working:
-                        saw_work = True
-                        off_run = 0
-                    else:
-                        off_run += 1
-                        if off_run >= need:
-                            found = True
-                if saw_work and not found:
-                    issue('MIN_OFF',f"{e['code']}: saknar {need} sammanhängande lediga dagar.",employeeId=e['id'])
+                if any(worked) and not has_consecutive_off(worked, need):
+                    issue('MIN_OFF', f"{e['code']}: saknar {need} sammanhängande lediga dagar.", employeeId=e['id'])
+            soft_off = soft_constraints(e).get('minConsecutiveOffDays')
+            if soft_off:
+                need = int(soft_off)
+                if any(worked) and not has_consecutive_off(worked, need):
+                    warn('MIN_OFF_SOFT', f"{e['code']}: saknar önskade {need} sammanhängande lediga dagar.", employeeId=e['id'])
             weekly = float(r.get('minWeeklyRestHours') or 36)
             if weekly > 0:
                 duties = [(s['a'], s['b']) for s in shifts]

@@ -1138,6 +1138,7 @@ function motorRegler() {
     maxWeeklyHours: 48,
     maxShiftHours: tal("Långpass – röd varning", 12),
     maxConsecutiveDays: Math.round(tal("Max arbetsdagar i följd", 5)),
+    minRestDaysInFourWeeks: Math.round(tal("Minsta fridagar", 9)),
     nightFloor: Math.round(tal("Vaken natt – grundbemanning", 1)),
     flexibilityStep: 15,
     jour: {

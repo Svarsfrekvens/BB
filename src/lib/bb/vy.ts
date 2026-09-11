@@ -120,6 +120,7 @@ export type VyApi = {
     maxWeeklyHours: number;
     maxShiftHours: number;
     maxConsecutiveDays: number;
+    minRestDaysInFourWeeks?: number;
     nightFloor: number;
     flexibilityStep: number;
     jour: { start: string; end: string; weekdays: number[] };

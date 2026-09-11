@@ -177,6 +177,72 @@ def hard_constraints(e):
     return ((e.get('constraints') or {}).get('hard') or {})
 
 
+def soft_constraints(e):
+    return ((e.get('constraints') or {}).get('soft') or {})
+
+
+def calendar_work_days(shifts, start, end):
+    """Kalenderdagar i [start, end] med betald arbetstid (ej sovande jour)."""
+    out = []
+    for day in days(start, end):
+        a, b = instant(day, '00:00'), instant(add_days(day, 1), '00:00')
+        worked = False
+        for s in shifts:
+            work = s.get('work')
+            if work is None:
+                work = paid(s)
+            if any(overlap(x, y, a, b) for x, y in work):
+                worked = True
+                break
+        out.append(worked)
+    return out
+
+
+def consecutive_six_seven_counts(worked):
+    """Antal 6- respektive 7-dagarsfönster där alla dagar är arbete (A-02/A-03)."""
+    n6 = n7 = 0
+    for i in range(len(worked) - 5):
+        if all(worked[i:i + 6]):
+            n6 += 1
+    for i in range(len(worked) - 6):
+        if all(worked[i:i + 7]):
+            n7 += 1
+    return n6, n7
+
+
+def longest_work_run(worked):
+    run = best = 0
+    for w in worked:
+        run = run + 1 if w else 0
+        best = max(best, run)
+    return best
+
+
+def rest_days_missing_in_windows(worked, window=28, target=9):
+    """Summa underskott mot target fridagar i varje window-långt fönster (F-01)."""
+    if target <= 0 or len(worked) < window:
+        return 0
+    missing = 0
+    for i in range(len(worked) - window + 1):
+        rest = sum(1 for w in worked[i:i + window] if not w)
+        missing += max(0, target - rest)
+    return missing
+
+
+def has_consecutive_off(worked, need=2):
+    if need <= 0 or len(worked) < need:
+        return True
+    run = 0
+    for w in worked:
+        if w:
+            run = 0
+        else:
+            run += 1
+            if run >= need:
+                return True
+    return False
+
+
 def weekend_allowed(e, day):
     wd = date.fromisoformat(day).isoweekday()
     if wd < 6:
@@ -408,6 +474,10 @@ def check_input(d):
                 )
         if 'minWeeklyRestHours' in d['rules']:
             require(numeric(d['rules']['minWeeklyRestHours'], 0, 72, False), 'Ogiltig regel: minWeeklyRestHours.')
+        if 'minRestDaysInFourWeeks' in d['rules']:
+            require(numeric(d['rules']['minRestDaysInFourWeeks'], 0, 28, True), 'Ogiltig regel: minRestDaysInFourWeeks.')
+        if 'hardMaxConsecutiveDays' in d['rules']:
+            require(numeric(d['rules']['hardMaxConsecutiveDays'], 1, 14, True), 'Ogiltig regel: hardMaxConsecutiveDays.')
         if 'withinPassMinutesPerShift' in d['rules']:
             require(numeric(d['rules']['withinPassMinutesPerShift'], 0, 180, True), 'Ogiltig regel: withinPassMinutesPerShift.')
         for e in d['employees']:
@@ -440,6 +510,9 @@ def check_input(d):
                 require(isinstance(soft, dict), 'Ogiltiga mjuka individvillkor.')
                 if 'preferredTypes' in soft:
                     require(isinstance(soft['preferredTypes'], list) and set(soft['preferredTypes']) <= {'day', 'evening', 'night', 'jour'}, 'Ogiltiga önskade passtyper.')
+                for key, lo, hi in (('maxConsecutiveDays', 1, 14), ('minConsecutiveOffDays', 1, 14)):
+                    if key in soft:
+                        require(numeric(soft[key], lo, hi, True), f'Ogiltigt mjukt individvillkor: {key}.')
                 for key in ('forbiddenCustomerIds', 'requiredCustomerIds', 'preferredCustomerIds'):
                     if key in hard or key in soft:
                         src = hard if key in hard else soft
@@ -447,7 +520,8 @@ def check_input(d):
         require(numeric(d['economy']['hourlyCost'],0,100000), 'Ogiltig timkostnad.')
         ow = d.get('objectiveWeights') or {}
         require(isinstance(ow, dict), 'Ogiltiga målviktningar.')
-        for key in ('continuitySek', 'spreadSekPerPermille', 'uncoveredSekPerMinute', 'preferredMissSek'):
+        for key in ('continuitySek', 'spreadSekPerPermille', 'uncoveredSekPerMinute', 'preferredMissSek',
+                    'consecutive6Sek', 'consecutive7Sek', 'missingRestDaySek', 'missingPairOffSek', 'missingMinOffSek'):
             if key in ow:
                 require(numeric(ow[key], 0, 10000), f'Ogiltig målvikt: {key}.')
         require(type(d['boundaryAcknowledged']) is bool,'Periodgränser måste bekräftas explicit.')

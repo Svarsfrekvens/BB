@@ -213,6 +213,7 @@ export type MotorRegler = {
   flexibilityStep: number;
   minWeeklyRestHours?: number;
   withinPassMinutesPerShift?: number;
+  minRestDaysInFourWeeks?: number;
   jour?: { start: string; end: string; weekdays: number[] };
 };
 
@@ -275,6 +276,7 @@ export function byggMotorPayload(opts: {
     flexibilityStep: 15,
     minWeeklyRestHours: 36,
     withinPassMinutesPerShift: 0,
+    minRestDaysInFourWeeks: 9,
     jour: {
       start: opts.regler?.jour?.start || "23:00",
       end: opts.regler?.jour?.end || "06:30",

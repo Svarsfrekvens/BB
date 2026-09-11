@@ -130,8 +130,6 @@ export function hårdaMotorvillkor(
   const sen = String(m.senastSlut || "").trim();
   if (/^\d{1,2}:\d{2}$/.test(tidig)) hard.earliestStart = tidig.length === 4 ? `0${tidig}` : tidig;
   if (/^\d{1,2}:\d{2}$/.test(sen)) hard.latestEnd = sen.length === 4 ? `0${sen}` : sen;
-  const maxD = Number(m.maxDagarIFoljd);
-  if (maxD >= 1 && maxD <= 7) hard.maxConsecutiveDays = Math.round(maxD);
   for (const v of villkor) {
     if (v.styrka !== "maste" || !gallerIPeriod(v, fran, till)) continue;
     if (v.typ === "max_pass" && tal(v, "timmar") != null) hard.maxShiftHours = tal(v, "timmar");
@@ -139,6 +137,7 @@ export function hårdaMotorvillkor(
     if (v.typ === "max_natt_foljd" && tal(v, "dagar") != null) hard.maxNightConsecutive = Math.round(tal(v, "dagar")!);
     if (v.typ === "max_jour_foljd" && tal(v, "dagar") != null) hard.maxJourConsecutive = Math.round(tal(v, "dagar")!);
     if (v.typ === "min_ledighet" && tal(v, "dagar") != null) hard.minConsecutiveOffDays = Math.round(tal(v, "dagar")!);
+    if (v.typ === "max_dagar_foljd" && tal(v, "dagar") != null) hard.maxConsecutiveDays = Math.round(tal(v, "dagar")!);
   }
   const forbud = forbudnaKunder(villkor, fran, till).map(kundId);
   if (forbud.length) hard.forbiddenCustomerIds = forbud;
@@ -158,5 +157,9 @@ export function mjukaMotorvillkor(villkor: MedarbetarVillkor[], fran: string, ti
   const masteOnskemal = kunderMedStyrka(villkor, "kundmaste", "onskemal", fran, till).map(kundId);
   const pref = [...bor, ...masteOnskemal];
   if (pref.length) soft.preferredCustomerIds = pref;
+  const minLedig = villkor.find((v) => v.typ === "min_ledighet" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till));
+  if (minLedig && tal(minLedig, "dagar") != null) soft.minConsecutiveOffDays = Math.round(tal(minLedig, "dagar")!);
+  const maxFoljd = villkor.find((v) => v.typ === "max_dagar_foljd" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till));
+  if (maxFoljd && tal(maxFoljd, "dagar") != null) soft.maxConsecutiveDays = Math.round(tal(maxFoljd, "dagar")!);
   return soft;
 }
