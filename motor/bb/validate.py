@@ -44,7 +44,7 @@ def validate(data, schedule):
                 meta = dict(employeeId=e['id'],shiftId=s['id'])
                 if s['id'] not in boundaries and e['status'] != 'active':
                     issue('STATUS',f"{e['code']}: inte aktiv.",**meta)
-                if not night_eligible(e) and (s.get('type') == 'night' or is_night(a,b)):
+                if s.get('type') != 'jour' and not night_eligible(e) and (s.get('type') == 'night' or is_night(a,b)):
                     issue('NIGHT',f"{e['code']}: saknar nattbehörighet.",**meta)
                 if s.get('type') == 'jour' and not jour_eligible(e):
                     issue('JOUR',f"{e['code']}: saknar jourbehörighet.",**meta)

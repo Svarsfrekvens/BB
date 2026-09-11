@@ -87,6 +87,23 @@ class NightJourBlock(unittest.TestCase):
         self.assertEqual(sum(flags), 1)
         self.assertEqual(longest_true_run(flags), 1)
 
+    def test_two_jour_are_series_two(self):
+        self.d['employees'][0]['jour'] = True
+        self.s['shifts'] = [_jour('e1', f'j{i}', day) for i, day in enumerate(_days('2026-09-07', 2))]
+        flags = type_start_date_flags(self.s['shifts'], 'jour', '2026-09-07', '2026-09-13')
+        self.assertEqual(longest_true_run(flags), 2)
+        err, _ = self.codes()
+        self.assertNotIn('JOUR_SERIES', err)
+        self.assertTrue(self.res()['valid'])
+
+    def test_individual_hard_jour_cap(self):
+        self.d['employees'][0]['jour'] = True
+        self.d['employees'][0]['constraints'] = dict(hard=dict(maxJourConsecutive=1))
+        self.s['shifts'] = [_jour('e1', f'j{i}', day) for i, day in enumerate(_days('2026-09-07', 2))]
+        err, _ = self.codes()
+        self.assertIn('JOUR_SERIES', err)
+        self.assertFalse(self.res()['valid'])
+
     def test_night_without_jour_cannot_take_jour(self):
         self.d['employees'][0]['night'] = True
         self.d['employees'][0]['jour'] = False
@@ -94,6 +111,24 @@ class NightJourBlock(unittest.TestCase):
         err, _ = self.codes()
         self.assertIn('JOUR', err)
         self.assertNotIn('NIGHT', err)
+
+    def test_jour_eligible_can_take_jour(self):
+        self.d['employees'][0]['night'] = False
+        self.d['employees'][0]['jour'] = True
+        self.s['shifts'] = [_jour('e1', 'j1', '2026-09-07')]
+        err, _ = self.codes()
+        self.assertNotIn('JOUR', err)
+        self.assertNotIn('NIGHT', err)
+        self.assertTrue(self.res()['valid'])
+
+    def test_night_then_morning_is_not_chained(self):
+        self.s['shifts'] = [
+            _night('e1', 'n1', '2026-09-07'),
+            dict(id='d', employeeId='e1', date='2026-09-08', start='08:00', end='16:00', type='day', skills=['Omsorg'], breaks=[]),
+        ]
+        self.assertEqual(len(duty_occasions(self.s['shifts'])), 2)
+        err, _ = self.codes()
+        self.assertIn('REST', err)
 
     def test_composite_work_jour_work_no_internal_rest(self):
         self.d['employees'][0]['jour'] = True
