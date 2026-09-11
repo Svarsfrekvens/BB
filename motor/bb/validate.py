@@ -4,7 +4,10 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect, i
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      clock_minutes, longest_rest_minutes, duty_week_windows, soft_constraints,
                      calendar_work_days, consecutive_six_seven_counts, longest_work_run,
-                     has_consecutive_off, rest_days_target, f01_known_span, f01_window_known)
+                     has_consecutive_off, rest_days_target, f01_known_span, f01_window_known,
+                     duty_occasions, occasion_span, occasion_profile_id, shift_profiles,
+                     type_start_date_flags, longest_true_run, max_jour_in_night_windows,
+                     compensatory_from_occasion, jour_eligible, night_eligible)
 
 
 def validate(data, schedule):
@@ -41,8 +44,10 @@ def validate(data, schedule):
                 meta = dict(employeeId=e['id'],shiftId=s['id'])
                 if s['id'] not in boundaries and e['status'] != 'active':
                     issue('STATUS',f"{e['code']}: inte aktiv.",**meta)
-                if not e['night'] and (s.get('type') == 'jour' or is_night(a,b)):
+                if not night_eligible(e) and (s.get('type') == 'night' or is_night(a,b)):
                     issue('NIGHT',f"{e['code']}: saknar nattbehörighet.",**meta)
+                if s.get('type') == 'jour' and not jour_eligible(e):
+                    issue('JOUR',f"{e['code']}: saknar jourbehörighet.",**meta)
                 hard = hard_constraints(e)
                 types = hard.get('allowedTypes')
                 if types and s.get('type') not in types and s['id'] not in boundaries:
@@ -80,13 +85,32 @@ def validate(data, schedule):
                 issue('TIME',f'Ogiltigt arbetspass: {exc}')
         for e in employees.values():
             shifts = sorted((s for s in processed if s['employeeId']==e['id']),key=lambda x:x['a'])
-            for i,s in enumerate(shifts):
-                for previous in shifts[:i]:
-                    gap = s['a']-previous['b']
+            groups = duty_occasions(shifts)
+            for i, group in enumerate(groups):
+                if i:
+                    prev = groups[i - 1]
+                    gap = occasion_span(group)[0] - occasion_span(prev)[1]
                     if gap < 0:
-                        issue('SHIFT_OVERLAP',f"{e['code']}: {gap/60:g} timmars vila före {s['date']} {s['start']}.",employeeId=e['id'],shiftId=s['id'])
-                    elif previous['work'] and s['work'] and gap < r['minRestHours']*60:
-                        issue('REST',f"{e['code']}: {gap/60:g} timmars vila före {s['date']} {s['start']}.",employeeId=e['id'],shiftId=s['id'])
+                        issue('SHIFT_OVERLAP', f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}.", employeeId=e['id'], shiftId=group[0].get('id'))
+                    elif gap < r['minRestHours'] * 60:
+                        issue('REST', f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}.", employeeId=e['id'], shiftId=group[0].get('id'))
+                pid = occasion_profile_id(group, r)
+                spec = shift_profiles(r).get(pid) or {}
+                span_a, span_b = occasion_span(group)
+                max_span = spec.get('maxSpanHours')
+                if max_span is not None and (span_b - span_a) > float(max_span) * 60 + 1e-9:
+                    issue('COMPOSITE_LENGTH', f"{e['code']}: sammanvägt tjänstgöringstillfälle längre än profilen {pid} tillåter.", employeeId=e['id'])
+                need_jour = spec.get('minJourMinutesInNightWindow')
+                if need_jour:
+                    got = max_jour_in_night_windows(group, r, spec)
+                    if got + 1e-9 < int(need_jour):
+                        issue('COMPOSITE_JOUR_WINDOW', f"{e['code']}: sammanvägt pass saknar minst {int(need_jour)/60:g} timmar sammanhängande jour i nattfönstret.", employeeId=e['id'])
+                owed = compensatory_from_occasion(group, e['id'], r)
+                if owed and i + 1 < len(groups):
+                    nxt = groups[i + 1]
+                    wait = occasion_span(nxt)[0] - span_b
+                    if wait + 1e-9 < owed['minutesOwed']:
+                        issue('COMP_REST', f"{e['code']}: kompensationsvila {owed['minutesOwed']/60:g} timmar krävs efter sammanvägt pass.", employeeId=e['id'])
             used = sum(intersect(a,b,lo,hi) for s in shifts for a,b in s['work'])
             cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
             if used > cap+0.01:
@@ -150,18 +174,18 @@ def validate(data, schedule):
                         issue('WEEK_REST', f"{e['code']}: mindre än {weekly:g} timmars sammanhängande veckovila i sju dagarsperioden från {day}.", employeeId=e['id'])
             night_run_lim = hard_constraints(e).get('maxNightConsecutive')
             jour_run_lim = hard_constraints(e).get('maxJourConsecutive')
-            if night_run_lim or jour_run_lim:
-                nrun = jrun = 0
-                for day in days(add_days(wp['start'], -7), add_days(wp['end'], 7)):
-                    a,b = instant(day,'00:00'),instant(add_days(day,1),'00:00')
-                    n = any(s.get('type')=='night' and overlap(s['a'],s['b'],a,b) for s in shifts)
-                    j = any(s.get('type')=='jour' and overlap(s['a'],s['b'],a,b) for s in shifts)
-                    nrun = nrun+1 if n else 0
-                    jrun = jrun+1 if j else 0
-                    if night_run_lim and nrun == int(night_run_lim)+1:
-                        issue('NIGHT_SERIES', f"{e['code']}: för många nattpass i följd.", employeeId=e['id'])
-                    if jour_run_lim and jrun == int(jour_run_lim)+1:
-                        issue('JOUR_SERIES', f"{e['code']}: för många jourpass i följd.", employeeId=e['id'])
+            night_flags = type_start_date_flags(shifts, 'night', add_days(wp['start'], -7), add_days(wp['end'], 7))
+            jour_flags = type_start_date_flags(shifts, 'jour', add_days(wp['start'], -7), add_days(wp['end'], 7))
+            nrun = longest_true_run(night_flags)
+            jrun = longest_true_run(jour_flags)
+            if night_run_lim and nrun > int(night_run_lim):
+                issue('NIGHT_SERIES', f"{e['code']}: för många nattpass i följd.", employeeId=e['id'])
+            if jour_run_lim and jrun > int(jour_run_lim):
+                issue('JOUR_SERIES', f"{e['code']}: för många jourpass i följd.", employeeId=e['id'])
+            if nrun >= 4:
+                warn('NIGHT_SERIES_STRONG', f"{e['code']}: {nrun} nattpass i följd (röd kvalitetsavvikelse, mål 2).", employeeId=e['id'])
+            elif nrun >= 3:
+                warn('NIGHT_SERIES_SOFT', f"{e['code']}: 3 nattpass i följd (gul kvalitetsavvikelse, mål 2).", employeeId=e['id'])
             jour = [s for s in shifts if s.get('type') == 'jour']
             sorterade = sorted(jour, key=lambda s: s['date'])
             for i, start in enumerate(sorterade):
@@ -245,7 +269,7 @@ def validate(data, schedule):
             for a,b in jour_intervals(wp['start'],wp['end'],r):
                 a,b=max(a,lo),min(b,hi)
                 if a>=b: continue
-                covering=[(s['a'],s['b'],s['employeeId']) for s in processed if s.get('type')=='jour' and employees.get(s['employeeId'],{}).get('night') and employees[s['employeeId']]['status']=='active']
+                covering=[(s['a'],s['b'],s['employeeId']) for s in processed if s.get('type')=='jour' and jour_eligible(employees.get(s['employeeId'],{})) and employees.get(s['employeeId'],{}).get('status')=='active']
                 points=sorted({a,b}|{t for x,y,_ in covering for t in (x,y) if a<t<b})
                 for t in points[:-1]:
                     if len({e for x,y,e in covering if x<=t<y})<jour_floor:

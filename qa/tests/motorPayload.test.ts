@@ -127,12 +127,34 @@ describe("motorPayload ur Galaxen", () => {
       regler: reglerFranVillkor(),
     });
     const mallar = (r.payload.templates as { type: string; start: string; end: string }[]) || [];
-    expect(mallar.some((m) => m.type === "jour" && m.start === "23:00" && m.end === "06:30")).toBe(true);
-    expect(r.info.regler.nightFloor).toBe(0);
+    expect(mallar.some((m) => m.type === "jour" && m.start === "23:00" && m.end === "06:30")).toBe(false);
+    expect(r.info.regler.nightFloor).toBe(1);
+    expect(r.info.regler.jourFloor).toBe(0);
+  });
+
+  it("sänker inte nightFloor eller jourFloor när personalen inte räcker", () => {
+    const personer = tillMedarbetare().slice(0, 2).map((p) => ({ ...p, nattbehorig: false, jour: false }));
+    const r = byggMotorPayload({
+      rader: (sekoia.rows as Insats[]).slice(0, 5),
+      medarbetare: personer,
+      from: "2026-08-03",
+      dagar: 7,
+      timkostnad: 270,
+      regler: { ...reglerFranVillkor(), nightFloor: 2, jourFloor: 1 },
+    });
+    expect(r.info.regler.nightFloor).toBe(2);
     expect(r.info.regler.jourFloor).toBe(1);
-    const anstallda = (r.payload.employees as { night: boolean; profiles: string[] }[]) || [];
-    const jourId = mallar.find((m) => m.type === "jour")?.id;
-    expect(anstallda.some((e) => e.night && jourId && e.profiles.includes(jourId))).toBe(true);
+    expect(r.varningar.some((v) => /sänks inte|oförändrat/.test(v))).toBe(true);
+  });
+
+  it("nattbehörig utan jour får jour=false", () => {
+    const e = (payload(7).payload.employees as { night: boolean; jour: boolean; code: string; profiles: string[] }[])
+      .find((x) => x.code.startsWith("M"));
+    expect(e?.night).toBe(true);
+    expect(e?.jour).toBe(false);
+    const mallar = payload(7).payload.templates as { id: string; type: string }[];
+    const jourIds = mallar.filter((m) => m.type === "jour").map((m) => m.id);
+    expect(e?.profiles.some((id) => jourIds.includes(id))).toBe(false);
   });
 
   it("skickar datumstyrd helg och veckovila till motorn", () => {

@@ -103,7 +103,8 @@ export function Motor({ state, api }: VyProps) {
     const nattpersonal = aktiva.filter((e) => e.night).length;
     if (nattgolv > nattpersonal) ut.push(`Vaken natt kräver ${nattgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
     const jourgolv = p.info.regler.jourFloor;
-    if (jourgolv > nattpersonal) ut.push(`Sovande jour kräver ${jourgolv} medarbetare men bara ${nattpersonal} har nattbehörighet.`);
+    const jourpersonal = aktiva.filter((e) => Boolean((e as { jour?: boolean }).jour)).length;
+    if (jourgolv > jourpersonal) ut.push(`Sovande jour kräver ${jourgolv} medarbetare men bara ${jourpersonal} har jourbehörighet.`);
     const wp = p.payload["workplace"] as { workTimeModels?: { id: string; weeklyMinutes: number }[]; defaultWorkTimeModelId?: string };
     const rules = p.payload["rules"] as { fullTimeWeeklyHours: number };
     const days = listPeriodDays(String(p.info.from), String(p.info.to));

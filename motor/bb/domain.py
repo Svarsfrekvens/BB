@@ -234,12 +234,14 @@ def shifts_mergeable(prev, nxt):
     a1, b1 = _shift_span(prev)
     a2, b2 = _shift_span(nxt)
     gap = a2 - b1
-    if gap < 0 or gap > DUTY_MERGE_GAP_MINUTES:
+    if gap < 0:
         return False
     types = {prev.get('type'), nxt.get('type')}
-    if 'jour' in types or 'night' in types:
-        return True
-    return _crosses_midnight(a1, b1) or _crosses_midnight(a2, b2)
+    if 'jour' in types:
+        return gap <= DUTY_MERGE_GAP_MINUTES
+    if _crosses_midnight(a1, b1) or _crosses_midnight(a2, b2):
+        return gap == 0
+    return False
 
 
 def duty_occasions(shifts):
@@ -261,6 +263,150 @@ def occasion_work_day_date(group):
 
 def occasion_work_day_dates(shifts):
     return {occasion_work_day_date(g) for g in duty_occasions(shifts)}
+
+
+def occasion_span(group):
+    return min(_shift_span(s)[0] for s in group), max(_shift_span(s)[1] for s in group)
+
+
+def candidate_as_shift(row):
+    shift = dict(row.get('shift') or row)
+    if row.get('a') is not None:
+        shift['a'] = row['a']
+        shift['b'] = row['b']
+    return shift
+
+
+def default_shift_profiles():
+    """Passprofiler. maxShiftHours gäller per segment, inte som globalt 24 h-tak."""
+    combined = dict(
+        maxSpanHours=19,
+        minJourMinutesInNightWindow=5 * 60,
+        nightWindowStart='22:00',
+        nightWindowEnd='08:00',
+        compensatoryRestEqualToSpan=True,
+        compensatoryMustFollowImmediately=True,
+    )
+    exception = dict(combined)
+    exception['maxSpanHours'] = 24
+    return dict(
+        normal=dict(maxSpanHours=None, compensatoryRestEqualToSpan=False),
+        combinedWorkJour=combined,
+        longException=exception,
+    )
+
+
+def shift_profiles(rules=None):
+    out = default_shift_profiles()
+    extra = ((rules or {}).get('shiftProfiles') or {})
+    if isinstance(extra, dict):
+        for key, spec in extra.items():
+            if not isinstance(spec, dict):
+                continue
+            base = dict(out.get(key) or {})
+            base.update(spec)
+            out[key] = base
+    return out
+
+
+def occasion_profile_id(group, rules=None):
+    if any((s.get('dutyProfile') or (s.get('shift') or {}).get('dutyProfile')) == 'longException' for s in group):
+        return 'longException'
+    types = {s.get('type') or (s.get('shift') or {}).get('type') for s in group}
+    paid_types = types - {'jour', None}
+    if 'jour' in types and paid_types:
+        return 'combinedWorkJour'
+    return 'normal'
+
+
+def jour_eligible(e):
+    return bool(e.get('jour'))
+
+
+def night_eligible(e):
+    return bool(e.get('night'))
+
+
+def type_start_date_flags(shifts, typ, start, end):
+    """Ett pass = ett startdatum. Inte kalenderöverlapp över midnatt."""
+    marked = {s['date'] for s in shifts if s.get('type') == typ}
+    return [day in marked for day in days(start, end)]
+
+
+def longest_true_run(flags):
+    run = best = 0
+    for w in flags:
+        run = run + 1 if w else 0
+        best = max(best, run)
+    return best
+
+
+def count_true_windows(flags, width):
+    if width <= 0 or len(flags) < width:
+        return 0
+    return sum(1 for i in range(len(flags) - width + 1) if all(flags[i:i + width]))
+
+
+def consecutive_jour_minutes_in_window(group, win_a, win_b):
+    blocked = []
+    for s in group:
+        typ = s.get('type') or (s.get('shift') or {}).get('type')
+        if typ != 'jour':
+            continue
+        a, b = _shift_span(s)
+        x, y = max(a, win_a), min(b, win_b)
+        if x < y:
+            blocked.append((x, y))
+    blocked.sort()
+    merged = []
+    for a, b in blocked:
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    return max((b - a for a, b in merged), default=0)
+
+
+def night_windows_overlapping(a, b, start_clock='22:00', end_clock='08:00'):
+    start_day = add_days(parts(a)[0], -1)
+    end_day = parts(b)[0]
+    for day in days(start_day, end_day):
+        wa = instant(day, start_clock)
+        wb = instant(add_days(day, 1) if end_clock <= start_clock else day, end_clock)
+        if overlap(a, b, wa, wb):
+            yield wa, wb
+
+
+def max_jour_in_night_windows(group, rules=None, profile=None):
+    spec = profile or shift_profiles(rules).get(occasion_profile_id(group, rules)) or {}
+    start_clock = spec.get('nightWindowStart') or '22:00'
+    end_clock = spec.get('nightWindowEnd') or '08:00'
+    a, b = occasion_span(group)
+    best = 0
+    for wa, wb in night_windows_overlapping(a, b, start_clock, end_clock):
+        best = max(best, consecutive_jour_minutes_in_window(group, wa, wb))
+    return best
+
+
+def compensatory_from_occasion(group, employee_id, rules):
+    """Intjäning bara för sammanvägt långt pass där profilen kräver vila = spannet."""
+    pid = occasion_profile_id(group, rules)
+    spec = shift_profiles(rules).get(pid) or {}
+    if not spec.get('compensatoryRestEqualToSpan'):
+        return None
+    a, b = occasion_span(group)
+    cap = float((rules or {}).get('maxShiftHours') or 12) * 60
+    if (b - a) <= cap + 1e-9:
+        return None
+    return dict(
+        employeeId=employee_id,
+        sourceDutyOccasionIds=[s.get('id') for s in group if s.get('id')],
+        earnedFrom=parts(b)[0],
+        minutesOwed=int(b - a),
+        mustFollowImmediately=bool(spec.get('compensatoryMustFollowImmediately', True)),
+        consumeBy=None,
+        status='owed',
+    )
 
 
 def calendar_work_days(shifts, start, end):
@@ -522,6 +668,8 @@ def check_input(d):
         for e in d['employees']:
             require(bool(re.fullmatch(r'[A-ZÅÄÖ0-9-]{1,8}', e['code'])), 'Använd medarbetarkoder.')
             require(numeric(e['ssg'],0,100) and type(e['night']) is bool, 'Ogiltig SSG/nattbehörighet.')
+            if 'jour' in e:
+                require(type(e['jour']) is bool, 'Ogiltig jourbehörighet.')
             require(e['status'] in ['active','vacant','inactive'], 'Ogiltig personalstatus.')
             require(e['profiles'] and set(e['profiles']) <= profiles, 'Ogiltiga passprofiler.')
             require(e['hourlyCost'] is None or numeric(e['hourlyCost'],0,100000), 'Ogiltig timkostnad.')
@@ -628,9 +776,20 @@ def check_input(d):
         ow = d.get('objectiveWeights') or {}
         require(isinstance(ow, dict), 'Ogiltiga målviktningar.')
         for key in ('continuitySek', 'spreadSekPerPermille', 'uncoveredSekPerMinute', 'preferredMissSek',
-                    'consecutive6Sek', 'consecutive7Sek', 'missingRestDaySek', 'missingPairOffSek', 'missingMinOffSek'):
+                    'consecutive6Sek', 'consecutive7Sek', 'missingRestDaySek', 'missingPairOffSek', 'missingMinOffSek',
+                    'nightSeries3Sek', 'nightSeries4Sek'):
             if key in ow:
                 require(numeric(ow[key], 0, 10000), f'Ogiltig målvikt: {key}.')
+        if 'compensatoryRest' in d and d['compensatoryRest'] is not None:
+            require(isinstance(d['compensatoryRest'], list) and len(d['compensatoryRest']) <= 2000, 'Ogiltig kompensationsvila.')
+            for row in d['compensatoryRest']:
+                require(isinstance(row, dict), 'Ogiltig kompensationsvila.')
+                require(row.get('employeeId') in employees, 'Kompensationsvila saknar medarbetare.')
+                require(numeric(row.get('minutesOwed'), 0, 48 * 60, True), 'Ogiltiga minuter kompensationsvila.')
+                if row.get('status') is not None:
+                    require(row['status'] in ('owed', 'consumed', 'waived'), 'Ogiltig status för kompensationsvila.')
+        if 'shiftProfiles' in d['rules'] and d['rules']['shiftProfiles'] is not None:
+            require(isinstance(d['rules']['shiftProfiles'], dict), 'Ogiltiga passprofiler.')
         require(type(d['boundaryAcknowledged']) is bool,'Periodgränser måste bekräftas explicit.')
         for s in d['boundaryShifts']:
             require(s['employeeId'] in employees, 'Gränspass saknar medarbetare.')

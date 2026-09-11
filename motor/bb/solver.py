@@ -11,7 +11,9 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      shift_allowed, rolling_week_windows, soft_constraints,
                      work_day_date, shifts_mergeable, occasion_work_day_date,
-                     rest_days_target, f01_known_span, f01_window_known)
+                     rest_days_target, f01_known_span, f01_window_known,
+                     candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
+                     shift_profiles)
 from .validate import validate
 
 
@@ -123,17 +125,23 @@ def solve(data, seconds=30):
         for day in days(add_days(wp['start'],-1),wp['end']):
             for profile in e['profiles']:
                 t=templates[profile]
-                if t['type']=='jour' and not jour_floor: continue
+                if t['type']=='jour' and not jour_eligible(e): continue
                 s=dict(id=f"{e['id']}:{day}:{profile}",employeeId=e['id'],date=day,start=t['start'],end=t['end'],type=t['type'],skills=t['skills'],breaks=t['breaks'])
+                if t.get('dutyProfile'):
+                    s['dutyProfile']=t['dutyProfile']
                 a,b=span(s)
                 if b<=lo or a>=hi or b-a>rules['maxShiftHours']*60: continue
                 if not shift_allowed(e,t,day,a,b,rules): continue
-                if is_night(a,b) and not e['night']: continue
-                if t['type']=='jour' and not e['night']: continue
+                if t['type']!='jour' and is_night(a,b) and not night_eligible(e): continue
                 if any(overlap(a,b,x,y) for x,y in absences): continue
                 work=paid(s)
                 if any(overlap(a,b,v['a'],v['b']) for v in boundary): continue
-                if work and any(v['work'] and not (a-v['b']>=rules['minRestHours']*60 or v['a']-b>=rules['minRestHours']*60) for v in boundary): continue
+                cand=dict(shift=s,a=a,b=b)
+                if any(
+                    not shifts_mergeable(candidate_as_shift(cand), candidate_as_shift(v))
+                    and not (a-v['b']>=rules['minRestHours']*60 or v['a']-b>=rules['minRestHours']*60)
+                    for v in boundary
+                ): continue
                 x=model.new_bool_var('shift:'+s['id'])
                 candidates.append(dict(shift=s,a=a,b=b,work=work,x=x))
     if len(candidates)>10000:
@@ -144,6 +152,7 @@ def solve(data, seconds=30):
 
     utilisations=[]
     workday_flags={}
+    night_series_flags={}
     for e in employees:
         rows=sorted((c for c in candidates if c['shift']['employeeId']==e['id']),key=lambda c:c['a'])
         fixed=[b for b in boundaries if b['shift']['employeeId']==e['id']]
@@ -151,10 +160,62 @@ def solve(data, seconds=30):
             for b in rows[i+1:]:
                 if overlap(a['a'],a['b'],b['a'],b['b']):
                     model.add(a['x']+b['x']<=1)
+        items=sorted(rows+fixed, key=lambda c: (c['a'], c['b']))
+        rest_need=int(round(rules['minRestHours']*60))
+        n_items=len(items)
+
+        def lit(x, name):
+            return _as_bool(model, x, name)
+
+        for i in range(n_items):
+            a=items[i]
+            ax=lit(a['x'], f'restfix:{e["id"]}:{i}')
+            for j in range(i+1, n_items):
+                b=items[j]
+                if overlap(a['a'],a['b'],b['a'],b['b']):
                     continue
-                if a['work'] and b['work']:
-                    if b['a']-a['b']>=rules['minRestHours']*60: break
-                    model.add(a['x']+b['x']<=1)
+                gap=b['a']-a['b']
+                if gap>=rest_need:
+                    break
+                bx=lit(b['x'], f'restfix:{e["id"]}:{i}:{j}')
+                if shifts_mergeable(candidate_as_shift(a), candidate_as_shift(b)):
+                    continue
+                bridges=[c for c in items[i+1:j] if a['b']<=c['a'] and c['b']<=b['a']
+                         and shifts_mergeable(candidate_as_shift(a), candidate_as_shift(c))
+                         and shifts_mergeable(candidate_as_shift(c), candidate_as_shift(b))]
+                if bridges:
+                    model.add(ax+bx<=1+sum(lit(c['x'], f'br:{e["id"]}:{i}:{j}:{t}') for t,c in enumerate(bridges)))
+                else:
+                    model.add(ax+bx<=1)
+        cap_hours=float(rules.get('maxShiftHours') or 12)*60
+        for i in range(n_items):
+            chain=[items[i]]
+            for k in range(i+1, n_items):
+                nxt=items[k]
+                if overlap(chain[-1]['a'], chain[-1]['b'], nxt['a'], nxt['b']):
+                    continue
+                if not shifts_mergeable(candidate_as_shift(chain[-1]), candidate_as_shift(nxt)):
+                    if nxt['a']>=chain[-1]['b']:
+                        break
+                    continue
+                chain.append(nxt)
+                types={c['shift'].get('type') for c in chain}
+                if 'jour' not in types or not (types-{'jour'}):
+                    continue
+                span_m=chain[-1]['b']-chain[0]['a']
+                spec=shift_profiles(rules).get(occasion_profile_id([c['shift'] for c in chain], rules)) or {}
+                if not spec.get('compensatoryRestEqualToSpan') or span_m<=cap_hours+1e-9:
+                    continue
+                rest_after=int(span_m)
+                xs_chain=[lit(c['x'], f'compc:{e["id"]}:{i}:{len(chain)}:{t}') for t,c in enumerate(chain)]
+                for t in range(k+1, n_items):
+                    later=items[t]
+                    if later['a']>=chain[-1]['b']+rest_after:
+                        break
+                    if shifts_mergeable(candidate_as_shift(chain[-1]), candidate_as_shift(later)):
+                        continue
+                    lx=lit(later['x'], f'compl:{e["id"]}:{i}:{len(chain)}:{t}')
+                    model.add(sum(xs_chain)+lx<=len(chain))
         cap=floor(ssg_cap_minutes(e,period_days,rules,wp)+1e-7)
         used=sum(min_period(c)*c['x'] for c in rows)+sum(min_period(c) for c in fixed)
         model.add(used<=cap)
@@ -182,19 +243,19 @@ def solve(data, seconds=30):
                 model.add(sum(flags[i:i+w])<=int(person_cap))
         workday_flags[e['id']]=(flags,flag_days)
         night_lim=hard_constraints(e).get('maxNightConsecutive')
+        nflags=[]
+        night_span_days=list(days(add_days(wp['start'],-7),add_days(wp['end'],7)))
+        for day in night_span_days:
+            nf=model.new_bool_var('nightday:'+e['id']+day)
+            covering=[c['x'] for c in rows+fixed if c['shift'].get('type')=='night' and c['shift'].get('date')==day]
+            if covering: model.add_max_equality(nf,covering)
+            else: model.add(nf==0)
+            nflags.append(nf)
         if night_lim:
-            nflags=[]
-            span_days=list(days(add_days(wp['start'],-7),add_days(wp['end'],7)))
-            for day in span_days:
-                a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
-                nf=model.new_bool_var('nightday:'+e['id']+day)
-                covering=[c['x'] for c in rows+fixed if c['shift'].get('type')=='night' and overlap(c['a'],c['b'],a,b)]
-                if covering: model.add_max_equality(nf,covering)
-                else: model.add(nf==0)
-                nflags.append(nf)
             nw=int(night_lim)+1
             for i in range(len(nflags)-nw+1):
                 model.add(sum(nflags[i:i+nw])<=int(night_lim))
+        night_series_flags[e['id']]=(nflags, night_span_days)
         min_off=hard_constraints(e).get('minConsecutiveOffDays')
         if min_off:
             need=int(min_off)
@@ -242,9 +303,8 @@ def solve(data, seconds=30):
         if jour_lim:
             jflags=[]
             for day in days(add_days(wp['start'],-7),add_days(wp['end'],7)):
-                a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
                 jf=model.new_bool_var('jourday:'+e['id']+day)
-                covering=[c['x'] for c in jour_rows if overlap(c['a'],c['b'],a,b)]
+                covering=[c['x'] for c in jour_rows if c['shift'].get('date')==day]
                 if covering: model.add_max_equality(jf,covering)
                 else: model.add(jf==0)
                 jflags.append(jf)
@@ -265,14 +325,14 @@ def solve(data, seconds=30):
     for a,b in night_intervals(wp['start'],wp['end']):
         a,b=max(a,lo),min(b,hi)
         if a>=b or not rules['nightFloor']: continue
-        valid_ids={e['id'] for e in employees if e['night']}
+        valid_ids={e['id'] for e in employees if night_eligible(e)}
         coverage=[(u,v,c['x']) for c in candidates+boundaries if c['shift']['employeeId'] in valid_ids for u,v in c['work']]
         edges=sorted({a,b}|{t for u,v,_ in coverage for t in (u,v) if a<t<b})
         for edge in edges[:-1]:
             model.add(sum(x for u,v,x in coverage if u<=edge<v)>=rules['nightFloor'])
 
     if jour_floor:
-        valid_ids={e['id'] for e in employees if e['night']}
+        valid_ids={e['id'] for e in employees if jour_eligible(e)}
         for a,b in jour_intervals(wp['start'],wp['end'],rules):
             a,b=max(a,lo),min(b,hi)
             if a>=b: continue
@@ -353,6 +413,8 @@ def solve(data, seconds=30):
     prefer_ore=int(round(float(ow.get('preferredMissSek',1))*100))
     c6_ore=int(round(float(ow.get('consecutive6Sek',20))*100))
     c7_ore=int(round(float(ow.get('consecutive7Sek',80))*100))
+    n3_ore=int(round(float(ow.get('nightSeries3Sek',30))*100))
+    n4_ore=int(round(float(ow.get('nightSeries4Sek',90))*100))
     pair_ore=int(round(float(ow.get('missingPairOffSek',25))*100))
     minoff_ore=int(round(float(ow.get('missingMinOffSek',40))*100))
     quality_extra=0
@@ -412,6 +474,25 @@ def solve(data, seconds=30):
                 ok=model.new_bool_var(f'softminoffok:{e["id"]}')
                 model.add_max_equality(ok, wins)
                 quality_extra += minoff_ore*(1-ok)
+        packed_n=night_series_flags.get(e['id'])
+        if packed_n and (n3_ore or n4_ore):
+            nflags, ndays=packed_n
+            for i in range(len(nflags)-2):
+                if not any(wp['start']<=ndays[i+j]<=wp['end'] for j in range(3)):
+                    continue
+                three=model.new_bool_var(f'n3:{e["id"]}:{i}')
+                s=sum(nflags[i:i+3])
+                model.add(s>=3).only_enforce_if(three)
+                model.add(s<=2).only_enforce_if(three.Not())
+                quality_extra += n3_ore*three
+            for i in range(len(nflags)-3):
+                if not any(wp['start']<=ndays[i+j]<=wp['end'] for j in range(4)):
+                    continue
+                four=model.new_bool_var(f'n4:{e["id"]}:{i}')
+                s=sum(nflags[i:i+4])
+                model.add(s>=4).only_enforce_if(four)
+                model.add(s<=3).only_enforce_if(four.Not())
+                quality_extra += n4_ore*four
     prefer_miss=0
     for e in employees:
         prefs=((e.get('constraints') or {}).get('soft') or {}).get('preferredCustomerIds') or []

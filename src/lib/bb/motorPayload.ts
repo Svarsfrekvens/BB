@@ -164,12 +164,13 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   const natt = idFor("night");
   const jour = idFor("jour");
   const p = String(m.passprofil || "").toLowerCase();
-  const nattOk = Boolean(m.nattbehorig || m.jour);
+  const nattOk = Boolean(m.nattbehorig);
+  const jourOk = Boolean(m.jour);
   let ut: string[] = [];
-  if (/natt|jour/.test(p) && !/dag|kväll|kvall/.test(p)) ut = nattOk ? [...natt, ...jour] : kvall;
+  if (/natt|jour/.test(p) && !/dag|kväll|kvall/.test(p)) ut = [...(nattOk ? natt : []), ...(jourOk ? jour : [])];
   else if (/kväll|kvall/.test(p)) ut = kvall;
   else if (/dag/.test(p)) ut = dag;
-  else ut = nattOk ? [...dag, ...kvall, ...natt, ...jour] : [...dag, ...kvall];
+  else ut = [...dag, ...kvall, ...(nattOk ? natt : []), ...(jourOk ? jour : [])];
   const rensad = ut.filter(Boolean);
   return rensad.length ? rensad : mallar.filter((t) => t.type !== "jour").slice(0, 1).map((t) => t.id);
 }
@@ -215,6 +216,7 @@ export type MotorRegler = {
   withinPassMinutesPerShift?: number;
   minRestDaysInFourWeeks?: number;
   jour?: { start: string; end: string; weekdays: number[] };
+  shiftProfiles?: Record<string, Record<string, unknown>>;
 };
 
 export type PayloadResultat = {
@@ -281,6 +283,24 @@ export function byggMotorPayload(opts: {
       start: opts.regler?.jour?.start || "23:00",
       end: opts.regler?.jour?.end || "06:30",
       weekdays: opts.regler?.jour?.weekdays?.length ? opts.regler.jour.weekdays : [1, 2, 3, 4, 5, 6, 7],
+    },
+    shiftProfiles: {
+      combinedWorkJour: {
+        maxSpanHours: 19,
+        minJourMinutesInNightWindow: 300,
+        nightWindowStart: "22:00",
+        nightWindowEnd: "08:00",
+        compensatoryRestEqualToSpan: true,
+        compensatoryMustFollowImmediately: true,
+      },
+      longException: {
+        maxSpanHours: 24,
+        minJourMinutesInNightWindow: 300,
+        nightWindowStart: "22:00",
+        nightWindowEnd: "08:00",
+        compensatoryRestEqualToSpan: true,
+        compensatoryMustFollowImmediately: true,
+      },
     },
     ...(opts.regler || {}),
   };
@@ -425,8 +445,8 @@ export function byggMotorPayload(opts: {
   const overTak = interventions.length > MOTOR_MAX_INSATSER;
   if (!interventions.length) varningar.push("Inga insatser i den valda perioden.");
 
-  // Vaken natt kräver att ett arbetspass täcker hela natten (22–06). I
-  // verksamheter där natten sköts av sovande jour finns inget sådant pass.
+  // Vaken natt kräver betald täckning 22–06. Om mallarna inte räcker ska
+  // kravet ändå skickas oförändrat – motorn redovisar brist, inte ett sänkt golv.
   const nattTackt = (minut: number) =>
     mallar.some((m) => {
       if (m.type === "jour") return false;
@@ -439,13 +459,12 @@ export function byggMotorPayload(opts: {
   let helaNatten = true;
   for (let m = 22 * 60; m < 30 * 60; m += 30) if (!nattTackt(m % 1440)) helaNatten = false;
   if (regler.nightFloor > 0 && !helaNatten) {
-    regler.nightFloor = 0;
-    regler.jourFloor = Math.max(1, regler.jourFloor || 0);
     varningar.push(
-      "Inget arbetspass täcker hela natten – nätterna sköts av sovande jour. Kravet på vaken natt ingår därför inte i den här beräkningen.",
+      "Inget arbetspass täcker hela natten. Kravet på vaken natt skickas oförändrat; sovande jour täcker det inte.",
     );
   }
-  if (regler.jourFloor > 0) {
+  const nagonJour = opts.medarbetare.some((m) => Boolean(m.jour) && !harHårt(((m as Medarbetare).villkor || []) as MedarbetarVillkor[], "ingen_jour", from, to));
+  if (regler.jourFloor > 0 || nagonJour) {
     const medJour = laggJourMall(mallar, regler);
     mallar.length = 0;
     mallar.push(...medJour);
@@ -470,7 +489,7 @@ export function byggMotorPayload(opts: {
     for (const k of kravSet) if (m.delegering || !/delegerin|sjuksk/.test(k)) skills.add(k);
     const farTillsattas = (m as { vikarieFarTillsattas?: boolean }).vikarieFarTillsattas;
     const villkor = ((m as Medarbetare).villkor || []) as MedarbetarVillkor[];
-    const night = Boolean(m.nattbehorig || m.jour) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to) && !harHårt(villkor, "endast_kvall", from, to);
+    const night = Boolean(m.nattbehorig) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to) && !harHårt(villkor, "endast_kvall", from, to);
     const jourOk = Boolean(m.jour) && !harHårt(villkor, "ingen_jour", from, to);
     const hard = hårdaMotorvillkor(m, from, to, kundId, i);
     const soft = mjukaMotorvillkor(villkor, from, to, kundId);
@@ -494,6 +513,7 @@ export function byggMotorPayload(opts: {
       ...(workTimeModelId ? { workTimeModelId } : {}),
       ...(windows.length ? { workTimeWindows: windows } : {}),
       night,
+      jour: jourOk,
       status: arVikarie && farTillsattas === false ? "inactive" : "active",
       profiles: profilerFor({ ...m, jour: jourOk, nattbehorig: night }, mallar),
       hourlyCost: Number(m.timkostnad) > 0 ? Number(m.timkostnad) : null,
@@ -598,19 +618,21 @@ export function byggMotorPayload(opts: {
       );
   }
 
-  // Kravet på vaken natt / sovande jour kan aldrig bli högre än nattbehöriga.
   const nattpersonal = employees.filter((e) => e.status === "active" && e.night).length;
+  const jourpersonal = employees.filter((e) => e.status === "active" && Boolean((e as { jour?: boolean }).jour)).length;
   if (regler.nightFloor > nattpersonal) {
-    if (nattpersonal < 1)
-      varningar.push("Ingen medarbetare är nattbehörig, så kravet på vaken natt kunde inte tillämpas i beräkningen.");
-    else varningar.push(`Kravet på vaken natt sänktes till ${nattpersonal} eftersom bara så många är nattbehöriga.`);
-    regler.nightFloor = nattpersonal;
+    varningar.push(
+      nattpersonal < 1
+        ? "Ingen medarbetare är nattbehörig, men kravet på vaken natt skickas oförändrat."
+        : `Bara ${nattpersonal} medarbetare är nattbehöriga mot kravet ${regler.nightFloor}. Kravet sänks inte.`,
+    );
   }
-  if (regler.jourFloor > nattpersonal) {
-    if (nattpersonal < 1)
-      varningar.push("Ingen medarbetare är nattbehörig, så kravet på sovande jour kunde inte tillämpas i beräkningen.");
-    else varningar.push(`Kravet på sovande jour sänktes till ${nattpersonal} eftersom bara så många är nattbehöriga.`);
-    regler.jourFloor = nattpersonal;
+  if (regler.jourFloor > jourpersonal) {
+    varningar.push(
+      jourpersonal < 1
+        ? "Ingen medarbetare är jourbehörig, men kravet på sovande jour skickas oförändrat."
+        : `Bara ${jourpersonal} medarbetare är jourbehöriga mot kravet ${regler.jourFloor}. Kravet sänks inte.`,
+    );
   }
 
   // Frånvaro ur medarbetarvyns fält. Motorn hanterar hela dagar.
@@ -728,11 +750,14 @@ export function byggMotorPayload(opts: {
     boundaryKnownFrom,
     boundaryKnownTo,
     rules: regler,
+    compensatoryRest: [],
     economy: { hourlyCost: Math.max(0, Number(opts.timkostnad) || 270) },
     objectiveWeights: {
       continuitySek: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.continuitySek ?? 50))),
       spreadSekPerPermille: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.spreadSekPerPermille ?? 2.5))),
       uncoveredSekPerMinute: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.uncoveredSekPerMinute ?? 500))),
+      nightSeries3Sek: 30,
+      nightSeries4Sek: 90,
     },
   };
 

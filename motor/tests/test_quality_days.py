@@ -88,6 +88,7 @@ class KvalitetDagarOchFridagar(unittest.TestCase):
         self.assertEqual(sum(flags), 1)
 
     def test_work_jour_work_is_one_work_day(self):
+        self.d['employees'][0]['jour'] = True
         self.s['shifts'] = [
             dict(id='e', employeeId='e1', date='2026-09-07', start='14:00', end='23:00', type='evening', skills=['Omsorg'], breaks=[]),
             _jour('e1', 'j', '2026-09-07'),

@@ -17,6 +17,7 @@ def with_jour(d, extra=0):
     d['templates'].append(jour_mall())
     d['employees'][0]['profiles'] = ['D', 'J']
     d['employees'][0]['night'] = True
+    d['employees'][0]['jour'] = True
     for i in range(extra):
         d['employees'].append({**d['employees'][0], 'id': f'e{i + 2}', 'code': f'M{i + 2:02d}'})
     return d
@@ -33,23 +34,27 @@ class SovandeJour(unittest.TestCase):
     def test_jour_is_not_awake_night_floor(self):
         d, s = fixture()
         d['templates'].append(jour_mall())
+        d['employees'][0]['jour'] = True
         d['rules']['nightFloor'] = 1
         s['shifts'] = [dict(id='j1', employeeId='e1', date='2026-09-07', start='23:00', end='06:30', type='jour', skills=[], breaks=[])]
         s['assignments'] = []
         codes = {e['rule'] for e in validate(d, s)['errors']}
         self.assertIn('NIGHT_FLOOR', codes)
 
-    def test_jour_requires_night_eligibility(self):
+    def test_jour_requires_jour_eligibility(self):
         d, s = fixture()
         d['templates'].append(jour_mall())
-        d['employees'][0]['night'] = False
+        d['employees'][0]['night'] = True
+        d['employees'][0]['jour'] = False
         s['shifts'] = [dict(id='j1', employeeId='e1', date='2026-09-07', start='23:00', end='06:30', type='jour', skills=[], breaks=[])]
         s['assignments'] = []
-        self.assertIn('NIGHT', {e['rule'] for e in validate(d, s)['errors']})
+        self.assertIn('JOUR', {e['rule'] for e in validate(d, s)['errors']})
+        self.assertNotIn('NIGHT', {e['rule'] for e in validate(d, s)['errors']})
 
     def test_jour_does_not_count_toward_ssg(self):
         d, s = fixture()
         d['templates'].append(jour_mall())
+        d['employees'][0]['jour'] = True
         s['shifts'] = [
             dict(id='s1', employeeId='e1', date='2026-09-07', start='06:00', end='14:00', type='day', skills=['Omsorg'], breaks=[]),
             dict(id='j1', employeeId='e1', date='2026-09-07', start='23:00', end='06:30', type='jour', skills=[], breaks=[]),
@@ -57,13 +62,14 @@ class SovandeJour(unittest.TestCase):
         codes = {e['rule'] for e in validate(d, s)['errors']}
         self.assertNotIn('CONTRACT', codes)
         self.assertNotIn('WEEK_HOURS', codes)
-        self.assertNotIn('REST', codes)
+        self.assertIn('REST', codes)
 
     def test_jour_over_48h_in_four_weeks_is_rejected(self):
         d, s = fixture()
         d['workplace']['end'] = '2026-10-04'
         cover_f01(d)
         d['templates'].append(jour_mall())
+        d['employees'][0]['jour'] = True
         s['shifts'] = [
             dict(id=f'j{i}', employeeId='e1', date=f'2026-09-{7 + i:02d}', start='23:00', end='06:30', type='jour', skills=[], breaks=[])
             for i in range(7)
@@ -76,6 +82,7 @@ class SovandeJour(unittest.TestCase):
         d['workplace'].update(start='2026-09-01', end='2026-09-30')
         cover_f01(d)
         d['templates'].append(jour_mall())
+        d['employees'][0]['jour'] = True
         s['shifts'] = [
             dict(id=f'j{i}', employeeId='e1', date=f'2026-09-{i:02d}', start='23:00', end='06:30', type='jour', skills=[], breaks=[])
             for i in range(1, 8)
@@ -86,6 +93,7 @@ class SovandeJour(unittest.TestCase):
     def test_task_cannot_sit_on_sleeping_oncall(self):
         d, s = fixture()
         d['templates'].append(jour_mall())
+        d['employees'][0]['jour'] = True
         d['interventions'][0].update(start='23:30', latestEnd='00:30', minutes=60)
         s['shifts'] = [dict(id='j1', employeeId='e1', date='2026-09-07', start='23:00', end='06:30', type='jour', skills=[], breaks=[])]
         s['assignments'] = [dict(
