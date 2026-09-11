@@ -68,6 +68,56 @@ describe("arbetstidsmodell i payload och visning", () => {
     expect((r.payload.rules as { fullTimeWeeklyHours: number }).fullTimeWeeklyHours).toBe(defaultWeeklyHours());
   });
 
+  it("legacy 36,33 utan workTimeModelId ärver verksamhetsdefault 37 h", () => {
+    const r = byggMotorPayload({
+      rader: [rad],
+      medarbetare: [person("Legacy")],
+      from: "2026-09-07",
+      dagar: 7,
+      timkostnad: 270,
+      heltidPerNamn: { Legacy: 36.33 },
+    });
+    const emps = (r.payload.employees as { name: string; workTimeModelId?: string }[]).filter((e) => e.name === "Legacy");
+    expect(emps[0]?.workTimeModelId).toBeUndefined();
+    const wp = r.payload.workplace as {
+      workTimeModels: { id: string; weeklyMinutes: number }[];
+      defaultWorkTimeModelId: string;
+    };
+    const cap = periodCapacityMinutes(
+      { ssg: 100 },
+      listPeriodDays("2026-09-07", "2026-09-13"),
+      r.payload.rules as { fullTimeWeeklyHours: number },
+      wp,
+    );
+    expect(cap / 60).toBeCloseTo(37, 5);
+  });
+
+  it("explicit standig-natt-36-20 ger 2180 min/vecka", () => {
+    const r = byggMotorPayload({
+      rader: [rad],
+      medarbetare: [person("Nattmått", { workTimeModelId: "standig-natt-36-20" })],
+      from: "2026-09-07",
+      dagar: 7,
+      timkostnad: 270,
+      heltidPerNamn: { Nattmått: 36.33 },
+    });
+    const emp = (r.payload.employees as { name: string; workTimeModelId?: string }[]).find((e) => e.name === "Nattmått");
+    expect(emp?.workTimeModelId).toBe("standig-natt-36-20");
+    const wp = r.payload.workplace as {
+      workTimeModels: { id: string; weeklyMinutes: number }[];
+      defaultWorkTimeModelId: string;
+    };
+    const natt = wp.workTimeModels.find((m) => m.id === "standig-natt-36-20");
+    expect(natt?.weeklyMinutes).toBe(2180);
+    const cap = periodCapacityMinutes(
+      { ssg: 100, workTimeModelId: emp?.workTimeModelId },
+      listPeriodDays("2026-09-07", "2026-09-13"),
+      r.payload.rules as { fullTimeWeeklyHours: number },
+      wp,
+    );
+    expect(cap).toBeCloseTo(2180, 5);
+  });
+
   it("passprofil byter inte arbetstidsmått", () => {
     const r = byggMotorPayload({
       rader: [rad],

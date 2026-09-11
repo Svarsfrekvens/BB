@@ -21,6 +21,11 @@ export type MotorPayload = Record<string, unknown>;
 
 const KLOCKA = /^([01]\d|2[0-3]):[0-5]\d$/;
 
+/** Historiskt importvärde, inte ett uttryckligt nattmått (36 h 20 min = 2180 min). */
+function arLegacyHeltid36_33(hours: number) {
+  return Math.round(hours * 60) === 36 * 60 + 20;
+}
+
 function isoDag(iso: string, n: number) {
   const d = new Date(iso + "T12:00:00Z");
   d.setUTCDate(d.getUTCDate() + n);
@@ -465,7 +470,8 @@ export function byggMotorPayload(opts: {
     const windows = workTimeWindowsFromVillkor(villkor, from, to);
     let workTimeModelId = String(m.workTimeModelId || "").trim() || undefined;
     const visadHeltid = opts.heltidPerNamn?.[m.namn];
-    if (!workTimeModelId && Number.isFinite(visadHeltid) && Number(visadHeltid) > 0) {
+    // Legacyimport satte 36,33 på alla rader. Det är inte ett valt nattmått.
+    if (!workTimeModelId && Number.isFinite(visadHeltid) && Number(visadHeltid) > 0 && !arLegacyHeltid36_33(Number(visadHeltid))) {
       const minutes = Math.round(Number(visadHeltid) * 60);
       const ensured = ensureMinutesModel(minutes, workTimeModels);
       workTimeModels = ensured.models;
