@@ -129,6 +129,7 @@ export type VyApi = {
   berakningsKalla: () => "motor" | "lokal" | null;
   anvandMotorResultat: (res: unknown) => boolean;
   schemaPassOriginal: () => DatumPass[];
+  schemaPassHorisont: () => DatumPass[];
 
   medarbetareSet: (namn: string, falt: string, varde: unknown) => void;
   medarbetareLaggTill: (namn: string) => void;

@@ -80,7 +80,7 @@ export function Motor({ state, api }: VyProps) {
       timkostnad: Number(state?.hourlyCost) || 270,
       heltidPerNamn,
       regler: api.motorRegler(),
-      schemaPass: api.schemaPassOriginal(),
+      schemaPass: api.schemaPassHorisont(),
       planAktiviteter: api.planAktiviteter(),
       kontaktpersoner: api.kontaktpersoner(),
       objectiveWeights: {
@@ -218,7 +218,7 @@ export function Motor({ state, api }: VyProps) {
         }
         delar.push(schema);
         const rapass = (JSON.parse(svar.schemaJson || "{}").shifts as Record<string, unknown>[]) || [];
-        lasta = svansPass(rapass).map((p) => ({ ...p, last: true }));
+        lasta = svansPass(rapass, 27).map((p) => ({ ...p, last: true }));
       }
 
       const samlat = slaSamman(delar);

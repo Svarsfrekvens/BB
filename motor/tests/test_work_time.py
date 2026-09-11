@@ -1,6 +1,6 @@
 import unittest
 from copy import deepcopy
-from test_rules import fixture
+from test_rules import fixture, cover_f01
 from bb.domain import check_input, days, paid, ssg_cap_minutes, weekly_minutes_for_day
 from bb.validate import validate
 

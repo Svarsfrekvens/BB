@@ -13,6 +13,7 @@ export const REGEL_RUBRIK: Record<string, string> = {
   CONSECUTIVE: "Arbetsdagar i följd",
   CONSECUTIVE_SOFT: "Arbetsdagar i följd (mjukt)",
   REST_DAYS: "Fridagar 28 dagar",
+  BOUNDARY_INCOMPLETE: "Ofullständig periodgräns (F-01)",
   PAIR_OFF_SOFT: "Sammanhängande ledighet (mjukt)",
   MIN_OFF: "Sammanhängande ledighet",
   MIN_OFF_SOFT: "Sammanhängande ledighet (mjukt)",

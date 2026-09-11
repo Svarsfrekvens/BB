@@ -170,7 +170,7 @@ describe("motorPayload ur Galaxen", () => {
     expect(ordinarie.every((e) => e.constraints?.hard?.maxConsecutiveDays == null)).toBe(true);
   });
 
-  it("minRestDaysInFourWeeks följer styrande villkor och kan stängas av", () => {
+  it("minRestDaysInFourWeeks följer styrande villkor och 0 stänger inte av F-01", () => {
     const on = payload(7).payload.rules as { minRestDaysInFourWeeks: number };
     expect(on.minRestDaysInFourWeeks).toBe(9);
     const av = byggMotorPayload({
@@ -181,6 +181,28 @@ describe("motorPayload ur Galaxen", () => {
       timkostnad: 270,
       regler: { ...reglerFranVillkor(), minRestDaysInFourWeeks: 0 },
     });
-    expect((av.payload.rules as { minRestDaysInFourWeeks: number }).minRestDaysInFourWeeks).toBe(0);
+    expect((av.payload.rules as { minRestDaysInFourWeeks: number }).minRestDaysInFourWeeks).toBe(9);
+    expect(av.varningar.some((v) => /F-01/.test(v))).toBe(true);
+  });
+
+  it("skickar natt och jour upp till 27 dagar som boundary", () => {
+    const personer = tillMedarbetare().slice(0, 2);
+    const r = byggMotorPayload({
+      rader: (sekoia.rows as Insats[]).slice(0, 5),
+      medarbetare: personer,
+      from: "2026-09-07",
+      dagar: 7,
+      timkostnad: 270,
+      regler: reglerFranVillkor(),
+      schemaPass: [
+        { namn: personer[0]!.namn, datum: "2026-08-11", start: "21:00", slut: "07:30" },
+        { namn: personer[0]!.namn, datum: "2026-08-12", start: "23:00", slut: "06:30", jour: true },
+      ],
+    });
+    const b = (r.payload.boundaryShifts as { date: string; type: string }[]) || [];
+    expect(b.some((s) => s.date === "2026-08-11" && s.type === "night")).toBe(true);
+    expect(b.some((s) => s.date === "2026-08-12" && s.type === "jour")).toBe(true);
+    expect(r.payload.boundaryKnownFrom).toBe("2026-08-11");
+    expect(String(r.payload.boundaryKnownTo) >= "2026-09-13").toBe(true);
   });
 });

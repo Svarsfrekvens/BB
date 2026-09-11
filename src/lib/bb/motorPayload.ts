@@ -296,6 +296,12 @@ export function byggMotorPayload(opts: {
   }
   regler.withinPassMinutesPerShift = Math.max(0, Math.min(180, Math.round(perPassMin)));
   if (regler.minWeeklyRestHours == null) regler.minWeeklyRestHours = 36;
+  if (!Number.isFinite(Number(regler.minRestDaysInFourWeeks)) || Number(regler.minRestDaysInFourWeeks) < 1) {
+    if (opts.regler && Object.prototype.hasOwnProperty.call(opts.regler, "minRestDaysInFourWeeks") && Number(opts.regler.minRestDaysInFourWeeks) === 0) {
+      varningar.push("F-01 kan inte stängas av. minRestDaysInFourWeeks 0 tolkas som 9.");
+    }
+    regler.minRestDaysInFourWeeks = 9;
+  }
   const mallTimmar = (t: Passmall) => {
     const a = klockMin(t.start);
     let b = klockMin(t.end);
@@ -637,17 +643,17 @@ export function byggMotorPayload(opts: {
     if (m1) absences.push({ id: `a${absences.length + 1}`, employeeId: id, start: m1[1], end: m1[2] });
   });
 
-  // Låsta pass: de sista två dagarna före perioden och de första två efter,
-  // så att dygnsvilan över periodgränsen respekteras. Sovande jour skickas inte.
+  // Låsta pass upp till 27 dagar före och efter, så F-01 kan räkna rullande 28-dagar.
+  // Sovande jour, natt och betalda pass ingår. workDayDate räknas i motorn.
   const namnTillId = new Map<string, string>();
   opts.medarbetare.slice(0, 80).forEach((m, i) => namnTillId.set(m.namn, `e${i + 1}`));
-  const gransFore = isoDag(from, -2);
-  const gransEfter = isoDag(to, 2);
+  const gransFore = isoDag(from, -27);
+  const gransEfter = isoDag(to, 27);
   const boundaryShifts: Record<string, unknown>[] = [];
   for (const p of opts.schemaPass || []) {
     const datum = String(p.datum || "").slice(0, 10);
     const utanfor = (datum >= gransFore && datum < from) || (datum > to && datum <= gransEfter);
-    if (!utanfor || p.jour) continue;
+    if (!utanfor) continue;
     const id = namnTillId.get(p.namn);
     const start = tid(p.start);
     const slut = tid(p.slut);
@@ -660,11 +666,14 @@ export function byggMotorPayload(opts: {
       date: datum,
       start,
       end: slut,
-      type: typAvStart(start),
-      skills: [],
-      breaks: langd >= 360 ? [{ offset: 240, minutes: 30 }] : [],
+      type: p.jour ? "jour" : typAvStart(start),
+      skills: p.jour ? [] : [],
+      breaks: !p.jour && langd >= 360 ? [{ offset: 240, minutes: 30 }] : [],
     });
   }
+  const schemaDatum = (opts.schemaPass || []).map((p) => String(p.datum || "").slice(0, 10)).filter((d) => d >= gransFore && d <= gransEfter);
+  const boundaryKnownFrom = [from, ...schemaDatum].sort()[0];
+  const boundaryKnownTo = [to, ...schemaDatum].sort().at(-1);
 
   const kundSkill = (cid: string) => `kund:${cid}`;
   for (const i of interventions) {
@@ -716,6 +725,8 @@ export function byggMotorPayload(opts: {
     absences,
     boundaryShifts,
     boundaryAcknowledged: true,
+    boundaryKnownFrom,
+    boundaryKnownTo,
     rules: regler,
     economy: { hourlyCost: Math.max(0, Number(opts.timkostnad) || 270) },
     objectiveWeights: {

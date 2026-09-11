@@ -1,7 +1,7 @@
 import importlib.util
 import unittest
 from copy import deepcopy
-from test_rules import fixture
+from test_rules import fixture, cover_f01
 from bb.domain import check_input, ssg_cap_minutes, days, instant, add_days, span, longest_rest_minutes
 from bb.validate import validate
 
@@ -16,6 +16,7 @@ class DatumstyrdSsgValidator(unittest.TestCase):
     def two_weeks(self):
         d, s = fixture()
         d['workplace']['end'] = '2026-09-20'
+        cover_f01(d)
         d['employees'][0]['ssgWindows'] = [
             dict(start='2026-09-07', end='2026-09-13', ssg=100),
             dict(start='2026-09-14', end='2026-09-20', ssg=75),
@@ -114,6 +115,7 @@ class Veckovila(unittest.TestCase):
         """Lör–sön plus må–fre: varje ISO-vecka har 36 h, rullande sju dagar har det inte."""
         d, s = fixture()
         d['workplace']['end'] = '2026-09-20'
+        cover_f01(d)
         d['rules']['minWeeklyRestHours'] = 36
         d['rules']['maxConsecutiveDays'] = 7
         d['rules']['maxWeeklyHours'] = 48

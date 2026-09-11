@@ -9,8 +9,68 @@ from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      instant, add_days, days, night_intervals, jour_intervals, is_night, monday,
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
-                     shift_allowed, rolling_week_windows, soft_constraints)
+                     shift_allowed, rolling_week_windows, soft_constraints,
+                     work_day_date, shifts_mergeable, occasion_work_day_date,
+                     rest_days_target, f01_known_span, f01_window_known)
 from .validate import validate
+
+
+def _as_bool(model, x, name):
+    if isinstance(x, int):
+        v = model.new_bool_var(name)
+        model.add(v == (1 if x else 0))
+        return v
+    return x
+
+
+def _schedule_workday_flags(model, items, flag_days, prefix):
+    """En workDayDate per tjänstgöringstillfälle. Inte kalenderöverlapp av betald tid."""
+    contrib = {}
+    sorted_items = sorted(items, key=lambda c: c['a'])
+    comps = []
+    for c in sorted_items:
+        row = dict(c['shift'], a=c['a'], b=c['b'], x=c['x'])
+        if comps and shifts_mergeable(comps[-1][-1], row):
+            comps[-1].append(row)
+        else:
+            comps.append([row])
+    nseg = 0
+    for ci, comp in enumerate(comps):
+        xs = [_as_bool(model, c['x'], f'{prefix}:sel:{ci}:{t}') for t, c in enumerate(comp)]
+        k = len(comp)
+        if k == 1:
+            d = work_day_date(comp[0]['a'], comp[0]['b'], comp[0].get('date'))
+            contrib.setdefault(d, []).append(xs[0])
+            continue
+        for i in range(k):
+            for j in range(i, k):
+                nseg += 1
+                seg = model.new_bool_var(f'{prefix}:seg:{ci}:{i}:{j}')
+                inner = xs[i:j + 1]
+                for x in inner:
+                    model.add(seg <= x)
+                if i > 0:
+                    model.add(seg + xs[i - 1] <= 1)
+                if j + 1 < k:
+                    model.add(seg + xs[j + 1] <= 1)
+                leftovers = [x.Not() for x in inner]
+                if i > 0:
+                    leftovers.append(xs[i - 1])
+                if j + 1 < k:
+                    leftovers.append(xs[j + 1])
+                model.add_bool_or([seg] + leftovers)
+                d = occasion_work_day_date(comp[i:j + 1])
+                contrib.setdefault(d, []).append(seg)
+    flags = []
+    for day in flag_days:
+        flag = model.new_bool_var(f'{prefix}:wd:{day}')
+        lits = contrib.get(day) or []
+        if lits:
+            model.add_max_equality(flag, lits)
+        else:
+            model.add(flag == 0)
+        flags.append(flag)
+    return flags
 
 
 def solve(data, seconds=30):
@@ -109,13 +169,7 @@ def solve(data, seconds=30):
             model.add(sum(sum(intersect(a,b,wa,wb) for a,b in c['work'])*c['x'] for c in rows+fixed)<=floor(rules['maxWeeklyHours']*60))
         flags=[]
         flag_days=list(days(add_days(wp['start'],-27),add_days(wp['end'],27)))
-        for day in flag_days:
-            a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
-            flag=model.new_bool_var('workday:'+e['id']+day)
-            covering=[c['x'] for c in rows+fixed if any(overlap(x,y,a,b) for x,y in c['work'])]
-            if covering: model.add_max_equality(flag,covering)
-            else: model.add(flag==0)
-            flags.append(flag)
+        flags=_schedule_workday_flags(model, rows+fixed, flag_days, 'wd:'+e['id'])
         legal=rules.get('hardMaxConsecutiveDays')
         if legal:
             w=int(legal)+1
@@ -302,7 +356,8 @@ def solve(data, seconds=30):
     pair_ore=int(round(float(ow.get('missingPairOffSek',25))*100))
     minoff_ore=int(round(float(ow.get('missingMinOffSek',40))*100))
     quality_extra=0
-    rest_target=int(rules.get('minRestDaysInFourWeeks', 9) or 0)
+    rest_target=rest_days_target(rules)
+    known_from, known_to = f01_known_span(data)
     for e in employees:
         packed=workday_flags.get(e['id'])
         if not packed:
@@ -310,14 +365,14 @@ def solve(data, seconds=30):
         flags, flag_days=packed
         period_idx=[i for i,d in enumerate(flag_days) if wp['start']<=d<=wp['end']]
         period_flags=[flags[i] for i in period_idx]
-        if rest_target>0:
-            # F-01 hård: restDaysIn28Days >= rest_target (standard 9).
-            # Inte ett kvalitetsstraff; fler fridagar än 9 maximeras inte.
-            max_work=28-rest_target
-            for i in range(len(flags)-27):
-                if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(28)):
-                    continue
-                model.add(sum(flags[i:i+28])<=max_work)
+        max_work=28-rest_target
+        for i in range(len(flags)-27):
+            start_w, end_w = flag_days[i], flag_days[i+27]
+            if end_w < wp['start'] or start_w > wp['end']:
+                continue
+            if not f01_window_known(start_w, end_w, known_from, known_to):
+                continue
+            model.add(sum(flags[i:i+28])<=max_work)
         for i in range(len(flags)-5):
             if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(6)):
                 continue
@@ -478,7 +533,8 @@ def solve(data, seconds=30):
             phases=phases,
         )
         result=validate(data,schedule)
-        if not result['valid']:
-            schedule.update(solverStatus='MODEL_INVALID',shifts=[],assignments=[],explanation='Förslaget stoppades av den fristående kontrollen: '+result['errors'][0]['message'])
+        blocking=[e for e in result['errors'] if e['rule']!='BOUNDARY_INCOMPLETE']
+        if blocking:
+            schedule.update(solverStatus='MODEL_INVALID',shifts=[],assignments=[],explanation='Förslaget stoppades av den fristående kontrollen: '+blocking[0]['message'])
         return dict(schedule=schedule,validation=result,modelScope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep']))
     return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep']))

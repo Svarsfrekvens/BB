@@ -4,7 +4,7 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect, i
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      clock_minutes, longest_rest_minutes, duty_week_windows, soft_constraints,
                      calendar_work_days, consecutive_six_seven_counts, longest_work_run,
-                     has_consecutive_off)
+                     has_consecutive_off, rest_days_target, f01_known_span, f01_window_known)
 
 
 def validate(data, schedule):
@@ -108,21 +108,28 @@ def validate(data, schedule):
                 warn('CONSECUTIVE_SOFT', f"{e['code']}: {run} arbetsdagar i följd (A-03, mål 5).", employeeId=e['id'])
             elif n6:
                 warn('CONSECUTIVE_SOFT', f"{e['code']}: 6 arbetsdagar i följd (A-02, mål 5).", employeeId=e['id'])
-            rest_target = int(r.get('minRestDaysInFourWeeks', 9) or 0)
-            if rest_target > 0:
-                span_from, span_to = add_days(wp['start'], -27), add_days(wp['end'], 27)
-                worked_ext = calendar_work_days(shifts, span_from, span_to)
-                days_ext = list(days(span_from, span_to))
-                for i, start_w in enumerate(days_ext):
-                    if i + 28 > len(worked_ext):
-                        break
-                    end_w = days_ext[i + 27]
-                    if end_w < wp['start'] or start_w > wp['end']:
-                        continue
-                    rest = sum(1 for w in worked_ext[i:i + 28] if not w)
-                    if rest < rest_target:
-                        issue('REST_DAYS', f"{e['code']}: färre än {rest_target} fridagar i 28-dagarsperioden från {start_w} (F-01).", employeeId=e['id'])
-                        break
+            rest_target = rest_days_target(r)
+            span_from, span_to = add_days(wp['start'], -27), add_days(wp['end'], 27)
+            known_from, known_to = f01_known_span(data)
+            worked_ext = calendar_work_days(shifts, span_from, span_to)
+            days_ext = list(days(span_from, span_to))
+            incomplete = False
+            for i, start_w in enumerate(days_ext):
+                if i + 28 > len(worked_ext):
+                    break
+                end_w = days_ext[i + 27]
+                if end_w < wp['start'] or start_w > wp['end']:
+                    continue
+                if not f01_window_known(start_w, end_w, known_from, known_to):
+                    incomplete = True
+                    continue
+                rest = sum(1 for w in worked_ext[i:i + 28] if not w)
+                if rest < rest_target:
+                    issue('REST_DAYS', f"{e['code']}: färre än {rest_target} fridagar i 28-dagarsperioden från {start_w} (F-01).", employeeId=e['id'])
+                    incomplete = False
+                    break
+            if incomplete:
+                issue('BOUNDARY_INCOMPLETE', f"{e['code']}: F-01 kan inte godkännas, 28-dagarsfönster saknar bekräftad boundary-data.", employeeId=e['id'])
             if len(worked) >= 2 and not has_consecutive_off(worked, 2):
                 warn('PAIR_OFF_SOFT', f"{e['code']}: saknar två sammanhängande fridagar (F-02).", employeeId=e['id'])
             min_off = hard_constraints(e).get('minConsecutiveOffDays')

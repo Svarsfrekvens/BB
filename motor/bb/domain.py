@@ -181,25 +181,100 @@ def soft_constraints(e):
     return ((e.get('constraints') or {}).get('soft') or {})
 
 
-def calendar_work_days(shifts, start, end):
-    """Kalenderdagar i [start, end] med betald arbetstid (ej sovande jour)."""
-    out = []
-    for day in days(start, end):
-        a, b = instant(day, '00:00'), instant(add_days(day, 1), '00:00')
-        worked = False
-        for s in shifts:
-            work = s.get('work')
-            if work is None:
-                work = paid(s)
-            if any(overlap(x, y, a, b) for x, y in work):
-                worked = True
-                break
-        out.append(worked)
+DUTY_MERGE_GAP_MINUTES = 3 * 60
+
+
+def minutes_on_calendar_days(a, b):
+    """Tjänstgöringsminuter per kalenderdag för intervallet [a, b)."""
+    out = {}
+    t = a
+    while t < b:
+        day, _ = parts(t)
+        nxt = instant(add_days(day, 1), '00:00')
+        chunk = min(b, nxt) - t
+        if chunk > 0:
+            out[day] = out.get(day, 0) + chunk
+        t = min(b, nxt)
     return out
 
 
+def work_day_date(a, b, fallback=None):
+    """Schemadatum: dagen med störst andel av passets tjänstgöringstid.
+
+    Vid exakt lika fördelning används startkalenderdagen (samma bokning som
+    Medvind-kolumnen / shift['date'] när passet skrivs på startdygnet).
+    """
+    by_day = minutes_on_calendar_days(a, b)
+    if not by_day:
+        return fallback or parts(a)[0]
+    best = max(by_day.values())
+    winners = [day for day, minutes in by_day.items() if minutes == best]
+    if len(winners) == 1:
+        return winners[0]
+    start_day = parts(a)[0]
+    if fallback and fallback in winners:
+        return fallback
+    if start_day in winners:
+        return start_day
+    return min(winners)
+
+
+def _shift_span(s):
+    if s.get('a') is not None and s.get('b') is not None:
+        return s['a'], s['b']
+    return span(s)
+
+
+def _crosses_midnight(a, b):
+    return parts(a)[0] != parts(b)[0] if b > a else False
+
+
+def shifts_mergeable(prev, nxt):
+    """Kedja arbete/jour/natt till ett tjänstgöringstillfälle vid kort lucka."""
+    a1, b1 = _shift_span(prev)
+    a2, b2 = _shift_span(nxt)
+    gap = a2 - b1
+    if gap < 0 or gap > DUTY_MERGE_GAP_MINUTES:
+        return False
+    types = {prev.get('type'), nxt.get('type')}
+    if 'jour' in types or 'night' in types:
+        return True
+    return _crosses_midnight(a1, b1) or _crosses_midnight(a2, b2)
+
+
+def duty_occasions(shifts):
+    rows = sorted(shifts, key=lambda s: _shift_span(s)[0])
+    groups = []
+    for s in rows:
+        if groups and shifts_mergeable(groups[-1][-1], s):
+            groups[-1].append(s)
+        else:
+            groups.append([s])
+    return groups
+
+
+def occasion_work_day_date(group):
+    a = min(_shift_span(s)[0] for s in group)
+    b = max(_shift_span(s)[1] for s in group)
+    return work_day_date(a, b, group[0].get('date') or parts(a)[0])
+
+
+def occasion_work_day_dates(shifts):
+    return {occasion_work_day_date(g) for g in duty_occasions(shifts)}
+
+
+def calendar_work_days(shifts, start, end):
+    """Kalenderdagar i [start, end] som är workDayDate för ett tjänstgöringstillfälle.
+
+    Ett pass över midnatt ger en arbetsdag, inte två. Sovande jour räknas som
+    ett passdatum. Flera pass med samma workDayDate ger fortfarande en dag.
+    """
+    marked = occasion_work_day_dates(shifts)
+    return [day in marked for day in days(start, end)]
+
+
 def consecutive_six_seven_counts(worked):
-    """Antal 6- respektive 7-dagarsfönster där alla dagar är arbete (A-02/A-03)."""
+    """Antal 6- respektive 7-dagarsfönster av workDayDate-flaggor (A-02/A-03)."""
     n6 = n7 = 0
     for i in range(len(worked) - 5):
         if all(worked[i:i + 6]):
@@ -220,6 +295,31 @@ def longest_work_run(worked):
 
 def rest_days_in_window(worked_slice):
     return sum(1 for w in worked_slice if not w)
+
+
+def rest_days_target(rules):
+    """F-01: saknad nyckel = 9. 0 stänger inte av regeln."""
+    rules = rules or {}
+    if 'minRestDaysInFourWeeks' not in rules:
+        return 9
+    v = int(rules['minRestDaysInFourWeeks'])
+    return 9 if v < 1 else v
+
+
+def f01_known_span(data):
+    """Kända kalenderdagar för F-01: schemaperioden plus deklarerat boundary-horisont."""
+    wp = data['workplace']
+    lo, hi = wp['start'], wp['end']
+    a, b = data.get('boundaryKnownFrom'), data.get('boundaryKnownTo')
+    if a and a < lo:
+        lo = a
+    if b and b > hi:
+        hi = b
+    return lo, hi
+
+
+def f01_window_known(start_w, end_w, known_from, known_to):
+    return start_w >= known_from and end_w <= known_to
 
 
 def rest_days_missing_in_windows(worked, window=28, target=9):
@@ -408,7 +508,7 @@ def check_input(d):
             if models:
                 require(default_model in {m['id'] for m in models}, 'Okänd default-arbetstidsmodell.')
         require(numeric(d['inputRevision'], 0, 10**10, True), 'Ogiltig revision.')
-        for key, limit in [('customers',100),('employees',80),('interventions',4000),('templates',12),('boundaryShifts',2000),('absences',2000)]:
+        for key, limit in [('customers',100),('employees',80),('interventions',4000),('templates',12),('boundaryShifts',8000),('absences',2000)]:
             require(isinstance(d[key], list) and len(d[key]) <= limit, f'Ogiltig storlek: {key}.')
             require(len({x['id'] for x in d[key]}) == len(d[key]), f'Dubbla id i {key}.')
         require(1 <= len(d['templates']) <= 12, 'Passmallar saknas.')
@@ -479,7 +579,10 @@ def check_input(d):
         if 'minWeeklyRestHours' in d['rules']:
             require(numeric(d['rules']['minWeeklyRestHours'], 0, 72, False), 'Ogiltig regel: minWeeklyRestHours.')
         if 'minRestDaysInFourWeeks' in d['rules']:
-            require(numeric(d['rules']['minRestDaysInFourWeeks'], 0, 28, True), 'Ogiltig regel: minRestDaysInFourWeeks.')
+            require(numeric(d['rules']['minRestDaysInFourWeeks'], 1, 28, True), 'Ogiltig regel: minRestDaysInFourWeeks. F-01 är hård och kan inte stängas av med 0.')
+        for key in ('boundaryKnownFrom', 'boundaryKnownTo'):
+            if d.get(key):
+                date.fromisoformat(d[key])
         if 'hardMaxConsecutiveDays' in d['rules']:
             require(numeric(d['rules']['hardMaxConsecutiveDays'], 1, 14, True), 'Ogiltig regel: hardMaxConsecutiveDays.')
         if 'withinPassMinutesPerShift' in d['rules']:

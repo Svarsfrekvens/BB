@@ -2,7 +2,7 @@ import importlib.util
 import unittest
 from collections import defaultdict
 from copy import deepcopy
-from test_rules import fixture
+from test_rules import fixture, cover_f01
 from bb.domain import check_input, instant, jour_intervals, paid, span
 from bb.validate import validate
 from bb.solver import solve
@@ -62,6 +62,7 @@ class SovandeJour(unittest.TestCase):
     def test_jour_over_48h_in_four_weeks_is_rejected(self):
         d, s = fixture()
         d['workplace']['end'] = '2026-10-04'
+        cover_f01(d)
         d['templates'].append(jour_mall())
         s['shifts'] = [
             dict(id=f'j{i}', employeeId='e1', date=f'2026-09-{7 + i:02d}', start='23:00', end='06:30', type='jour', skills=[], breaks=[])
@@ -73,6 +74,7 @@ class SovandeJour(unittest.TestCase):
     def test_jour_over_50h_in_calendar_month_is_rejected(self):
         d, s = fixture()
         d['workplace'].update(start='2026-09-01', end='2026-09-30')
+        cover_f01(d)
         d['templates'].append(jour_mall())
         s['shifts'] = [
             dict(id=f'j{i}', employeeId='e1', date=f'2026-09-{i:02d}', start='23:00', end='06:30', type='jour', skills=[], breaks=[])
@@ -140,6 +142,7 @@ class SovandeJourSolver(unittest.TestCase):
     def test_solver_does_not_exceed_jour_cap(self):
         d, _ = fixture()
         d['workplace']['end'] = '2026-09-20'
+        cover_f01(d)
         d = with_jour(d, extra=2)
         d['rules']['nightFloor'] = 0
         d['rules']['jourFloor'] = 1

@@ -105,7 +105,7 @@ export function payloadForFonster(
 }
 
 /** De sista dagarnas pass ur ett fönster – skickas som låsta pass i nästa fönster. */
-export function svansPass(pass: Record<string, unknown>[], dagar = 2): Record<string, unknown>[] {
+export function svansPass(pass: Record<string, unknown>[], dagar = 27): Record<string, unknown>[] {
   const datum = [...new Set(pass.map((p) => String((p as { date?: string }).date || "")))].sort();
   const sista = new Set(datum.slice(-dagar));
   return pass.filter((p) => sista.has(String((p as { date?: string }).date || "")));

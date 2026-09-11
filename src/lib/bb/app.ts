@@ -740,6 +740,16 @@ function schemaPass() {
   const dagarTot = Math.round((Date.parse(to + "T12:00:00Z") - Date.parse(start + "T12:00:00Z")) / 864e5) + 1;
   return MV.schemaTillDatum(state.schemaOriginal, start, dagarTot).filter((p) => p.datum >= from && p.datum <= to);
 }
+/** Schema inklusive upp till 27 dagar före/efter planperioden, för F-01-boundary. */
+function schemaPassHorisont() {
+  if (!state.schemaOriginal || !state.period) return [];
+  const { from, to } = analysPeriod();
+  const horisontFrom = addDays(from, -27);
+  const horisontTo = addDays(to, 27);
+  const start = MV.mandagen(horisontFrom);
+  const dagarTot = Math.round((Date.parse(horisontTo + "T12:00:00Z") - Date.parse(start + "T12:00:00Z")) / 864e5) + 1;
+  return MV.schemaTillDatum(state.schemaOriginal, start, dagarTot).filter((p) => p.datum >= horisontFrom && p.datum <= horisontTo);
+}
 /** Planerad schematid = riktiga Medvind-passen (vikarier med, sovande jour utan).
  * Efter en bemanningsbalans används exakt samma passlista som Före & efter
  * (efterPass), så alla vyer visar identisk schematid. */
@@ -2910,6 +2920,7 @@ function render() {
       berakningsKalla: () => (state.balans ? state.balans.kalla || "lokal" : null),
       anvandMotorResultat: (res) => anvandMotorResultat(res),
       schemaPassOriginal: () => schemaPass(),
+      schemaPassHorisont: () => schemaPassHorisont(),
 
       raderEfter: () => raderEfter(),
       regelbrott: () => {

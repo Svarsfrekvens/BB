@@ -1,13 +1,23 @@
 import unittest
 from copy import deepcopy
+from datetime import date, timedelta
 from bb.domain import instant, span, check_input
 from bb.validate import validate
+
+
+def cover_f01(d):
+    def add(day, n):
+        return (date.fromisoformat(day) + timedelta(days=n)).isoformat()
+    d['boundaryKnownFrom'] = add(d['workplace']['start'], -27)
+    d['boundaryKnownTo'] = add(d['workplace']['end'], 27)
+    return d
 
 
 def fixture():
     d=dict(schemaVersion=1,inputRevision=0,workplace=dict(name='Test',start='2026-09-07',end='2026-09-13',timezone='Europe/Stockholm'),customers=[dict(id='c1',code='Kund 1',active=True)],interventions=[dict(id='t1',customerId='c1',name='Stöd',type='fixed',start='09:00',latestEnd='10:00',minutes=60,doubleStaff=False,weekdays=[1],date='2026-09-07',skills=['Omsorg'])],employees=[dict(id='e1',code='M01',ssg=100,night=True,profiles=['D'],hourlyCost=None,status='active',skills=['Omsorg'])],templates=[dict(id='D',name='Dag',start='06:00',end='14:00',type='day',skills=['Omsorg'],breaks=[])],absences=[],boundaryShifts=[],boundaryAcknowledged=True,economy=dict(hourlyCost=250),rules=dict(minRestHours=11,fullTimeWeeklyHours=40,maxWeeklyHours=48,maxShiftHours=12,maxConsecutiveDays=5,nightFloor=0,flexibilityStep=15))
     s=dict(id='test',status='draft',basedOnRevision=0,shifts=[dict(id='s1',employeeId='e1',date='2026-09-07',start='06:00',end='14:00',type='day',skills=['Omsorg'],breaks=[])],assignments=[dict(occurrenceId='t1@2026-09-07',employeeId='e1',start=instant('2026-09-07','09:00'),end=instant('2026-09-07','10:00'))],solverStatus='NOT_RUN',explanation='',seconds=0,objective=None,bound=None)
     d['current']=s;d['proposal']=None;d['outcomes']=[]
+    cover_f01(d)
     return d,s
 
 
