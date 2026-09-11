@@ -16,7 +16,12 @@ export type SkalTab = {
   /** Sant när steget är genomfört (visar bock). */
   klar?: boolean;
 };
-export type SkalSteg = { id: string; label: string; lage?: "ej" | "pa" | "klar" | "varning" | "blockerad" };
+export type SkalSteg = {
+  id: string;
+  label: string;
+  lage?: "ej" | "pa" | "klar" | "varning" | "blockerad";
+  typ?: "lage" | "handling";
+};
 
 export type SkalDemo = { rubrik: string; text: string; nr: number; av: number };
 

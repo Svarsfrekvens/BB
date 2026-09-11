@@ -5,6 +5,8 @@ import {
   KAPACITET_FORKLARING,
   MEDARBETARE_ANDRAD_TEXT,
   PROCESS_STEG,
+  PROCESS_HANDLINGAR,
+  TIDSLINJE_ORDNING,
   TACKT_BEHOV_FORKLARING,
   TRE_OMRADEN_RUBRIKER,
   VC_FORBJUDNA_ORD,
@@ -21,6 +23,7 @@ import {
   MATCHNING_FORMEL,
   UNDERKAPACITET_FORMEL,
   OVERKAPACITET_FORMEL,
+  raknaSaknadeKompetenskrav,
   jamforTon,
   kundUnderlagStatus,
   lasMotorSummary,
@@ -55,14 +58,15 @@ function klarIndata(extra: Partial<Parameters<typeof getBemanningsbalansReadines
 describe("processsteg", () => {
   it("har ett sammanhängande VC-flöde med pilar", () => {
     expect(PROCESS_STEG.map((s) => s.label)).toEqual([
-      "Kundbehov",
-      "Medarbetare",
+      "Före",
       "Skapa balans",
+      "Balans",
       "Granska balans",
-      "Före → Balans",
       "Godkänn balans",
       "Utfall",
     ]);
+    expect(PROCESS_STEG.filter((s) => s.typ === "lage").map((s) => s.label)).toEqual([...TIDSLINJE_ORDNING]);
+    expect(PROCESS_STEG.filter((s) => s.typ === "handling").map((s) => s.label)).toEqual([...PROCESS_HANDLINGAR]);
     const src = readFileSync(join(rot, "src/components/bb/ProcessFlode.tsx"), "utf8");
     expect(src).toContain("→");
     expect(src).not.toMatch(/Progress/);
@@ -71,7 +75,8 @@ describe("processsteg", () => {
     expect(src).toContain("Klar");
     expect(src).toContain("Varning");
     expect(src).toContain("Blockerad");
-    expect(src).toContain("sm:inline");
+    expect(src).toContain("data-tidslinje");
+    expect(src).toContain("Före → Balans → Utfall");
   });
 
   it("visar processrad endast i skalet, inte på Hem", () => {
@@ -96,8 +101,8 @@ describe("processsteg", () => {
       harVarning: false,
     });
     expect(steg.find((s) => s.id === "skapa")?.lage).toBe("blockerad");
-    expect(steg.find((s) => s.id === "kundbehov")?.lage).toBe("ej");
-    expect(steg.find((s) => s.id === "medarbetare")?.lage).toBe("ej");
+    expect(steg.find((s) => s.id === "fore")?.lage).toBe("ej");
+    expect(steg.find((s) => s.id === "balans")?.lage).toBe("ej");
   });
 
   it("tom medarbetarlista är ej påbörjad, aldrig klar", () => {
@@ -420,16 +425,40 @@ describe("Före / Balans / Utfall", () => {
 
   it("har en CTA per läge", () => {
     expect(hemHuvudCta({ lage: "fore", ready: true, godkannbar: false }).label).toBe("Skapa balans");
+    expect(hemHuvudCta({ lage: "fore", ready: true, godkannbar: false }).disabled).toBe(false);
     expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: false }).label).toBe("Granska balans");
+    expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: false }).disabled).toBe(false);
     expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: true }).label).toBe("Godkänn balans");
     expect(hemHuvudCta({ lage: "utfall", ready: true, godkannbar: true }).label).toBe("Följ upp utfall");
   });
 
-  it("kan inte godkänna Balans under 100 % täckt behov eller med hårda regelbrott", () => {
+  it("kan skapa balans i Före trots täckt behov under 100 %, hårda regelbrott och underkapacitet", () => {
+    const src = readFileSync(join(rot, "src/lib/bb/vcFlode.ts"), "utf8");
+    const start = src.indexOf("export function getBemanningsbalansReadiness");
+    const end = src.indexOf("export function skapaBalansHinder");
+    const fn = src.slice(start, end);
+    expect(fn).not.toMatch(/tacktBehov|tackningPct|hardViolation|underkapacitet|overkapacitet|obemannatH/);
+    expect(getBemanningsbalansReadiness(klarIndata()).ready).toBe(true);
+    expect(hemHuvudCta({ lage: "fore", ready: true, godkannbar: false }).disabled).toBe(false);
+    const steg = processStegLagen({
+      aktivTab: "hem",
+      readiness: getBemanningsbalansReadiness(klarIndata()),
+      harResultat: false,
+      harVarning: true,
+    });
+    expect(steg.find((s) => s.id === "skapa")?.lage).not.toBe("blockerad");
+    expect(steg.map((s) => s.label).join(" → ")).toBe(
+      "Före → Skapa balans → Balans → Granska balans → Godkänn balans → Utfall",
+    );
+  });
+
+  it("kan inte godkänna Balans under 100 % täckt behov, med hårda regelbrott eller saknad kompetens", () => {
     expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).ok).toBe(false);
     expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 1 }).ok).toBe(false);
     expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 0 }).ok).toBe(true);
     expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).reasons[0]).toMatch(/kundbehov återstår/);
+    expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 0, saknadeKompetenskrav: 1 }).ok).toBe(false);
+    expect(raknaSaknadeKompetenskrav([{ message: "Insatsen kräver kompetens som saknas" }])).toBe(1);
   });
 
   it("håller Täckt behov och Kundnära tid isär", () => {
@@ -444,6 +473,7 @@ describe("Före / Balans / Utfall", () => {
     expect(MATCHNING_FORMEL.overlapparTacktBehov).toBe(false);
     expect(UNDERKAPACITET_FORMEL.falt).toContain("obemannatH");
     expect(OVERKAPACITET_FORMEL.anvanderDimensionerandeKurva).toBe(false);
+    expect(OVERKAPACITET_FORMEL.asymmetriUtvarderasEfterAxelsberg).toBe(true);
   });
 
   it("Hem har tre huvudområden och CTA, inte underbemanning som etikett för dimensionerande gap", () => {

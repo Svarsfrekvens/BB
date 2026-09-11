@@ -14,22 +14,30 @@ export function ProcessFlode({
   steg,
   onValj,
 }: {
-  steg: { id: string; label: string; lage: ProcessStegLage }[];
+  steg: { id: string; label: string; lage: ProcessStegLage; typ?: "lage" | "handling" }[];
   onValj?: (id: string) => void;
 }) {
   return (
-    <nav aria-label="Processflöde" data-process-flode="skal" className="flex flex-wrap items-center gap-x-1 gap-y-3">
+    <nav
+      aria-label="Före → Balans → Utfall"
+      data-process-flode="skal"
+      data-tidslinje="Före → Balans → Utfall"
+      className="flex flex-wrap items-center gap-x-1 gap-y-3"
+    >
       {steg.map((s, i) => {
         const vis = LAGE[s.lage];
+        const handling = s.typ === "handling";
         return (
           <div key={s.id} className="flex items-center gap-1">
             <button
               type="button"
               onClick={() => onValj?.(s.id)}
+              data-steg-typ={s.typ || "lage"}
               aria-current={s.lage === "pa" ? "step" : undefined}
               aria-label={`${s.label}: ${vis.text}`}
               className={cn(
-                "flex items-center gap-2 rounded-2xl border px-3 py-2 text-left text-sm font-semibold transition-colors",
+                "flex items-center gap-2 border text-left font-semibold transition-colors",
+                handling ? "rounded-xl px-2.5 py-1.5 text-xs" : "rounded-2xl px-3 py-2 text-sm",
                 vis.klass,
               )}
             >
@@ -46,7 +54,9 @@ export function ProcessFlode({
               </span>
               <span>
                 <span className="block leading-tight">{s.label}</span>
-                <span className="block text-[11px] font-medium opacity-80">{vis.text}</span>
+                <span className="block text-[11px] font-medium opacity-80">
+                  {handling ? `Handling · ${vis.text}` : vis.text}
+                </span>
               </span>
             </button>
             {i < steg.length - 1 ? (

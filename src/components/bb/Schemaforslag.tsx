@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { fmtH } from "@/lib/bb/vy";
 import type { VyProps } from "@/lib/bb/vy";
 import { TomtLage } from "./Tomt";
-import { balansKanGodkannas } from "@/lib/bb/vcFlode";
+import { balansKanGodkannas, lasMotorSummary, raknaSaknadeKompetenskrav } from "@/lib/bb/vcFlode";
 
 const VECKODAG = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"];
 
@@ -58,6 +58,15 @@ export function Schemaforslag({ api }: VyProps) {
 
   const lage = m.efter ?? m.fore;
   const visa = vald === "alla" ? namn : [vald];
+  const summary = lasMotorSummary(api.motorResultat());
+  const godkannbar = balansKanGodkannas({
+    tacktBehovPct: lage.tackningPct,
+    hardViolations: api.regelbrott(),
+    saknadeKompetenskrav: raknaSaknadeKompetenskrav([
+      ...(summary?.hardViolations || []),
+      ...(summary?.warnings || []),
+    ]),
+  });
 
   return (
     <div className="space-y-4">
@@ -85,14 +94,13 @@ export function Schemaforslag({ api }: VyProps) {
               </option>
             ))}
           </select>
-          {(() => {
-            const g = balansKanGodkannas({ tacktBehovPct: lage.tackningPct, hardViolations: api.regelbrott() });
-            return (
-              <Button disabled={!g.ok} title={g.ok ? undefined : g.reasons.join(" ")} onClick={() => api.godkannBalans?.()}>
-                Godkänn balans
-              </Button>
-            );
-          })()}
+          <Button
+            disabled={!godkannbar.ok}
+            title={godkannbar.ok ? undefined : godkannbar.reasons.join(" ")}
+            onClick={() => api.godkannBalans?.()}
+          >
+            Godkänn balans
+          </Button>
         </div>
       </Card>
 

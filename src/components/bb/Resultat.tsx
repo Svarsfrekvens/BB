@@ -2,7 +2,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VyProps } from "@/lib/bb/vy";
-import { berakningsKallaText, balansKanGodkannas, lasMotorSummary, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
+import { berakningsKallaText, balansKanGodkannas, lasMotorSummary, raknaSaknadeKompetenskrav, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { fmtPct } from "@/lib/bb/vy";
 import { ForeEfter } from "./ForeEfter";
@@ -15,6 +15,14 @@ export function Resultat(props: VyProps) {
   const efter = fe?.efter;
   const readiness = readinessFranApi(api);
 
+  const godkannbar = balansKanGodkannas({
+    tacktBehovPct: efter?.tackningPct,
+    hardViolations: api.regelbrott(),
+    saknadeKompetenskrav: raknaSaknadeKompetenskrav([
+      ...(summary?.hardViolations || []),
+      ...(summary?.warnings || []),
+    ]),
+  });
   if (!api.harBalans()) {
     return (
       <Card className="rounded-2xl p-8 text-center shadow-lift">
@@ -52,9 +60,9 @@ export function Resultat(props: VyProps) {
         <h2 className="mt-1 text-3xl font-extrabold text-deep">Så planerar vi schemaperioden</h2>
         <p className="mt-2 max-w-2xl text-base text-muted-foreground">{vcStatusText(summary?.status)}</p>
         <p className="mt-1 text-sm font-semibold text-deep">{berakningsKallaText(api.berakningsKalla())}</p>
-        {!balansKanGodkannas({ tacktBehovPct: efter?.tackningPct, hardViolations: api.regelbrott() }).ok ? (
+        {!godkannbar.ok ? (
           <p className="mt-3 text-sm font-semibold text-warning">
-            {balansKanGodkannas({ tacktBehovPct: efter?.tackningPct, hardViolations: api.regelbrott() }).reasons.join(" ")}
+            {godkannbar.reasons.join(" ")}
             {efter && efter.obemannatKundbehovH > 0
               ? ` ${efter.obemannatKundbehovH.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} h kundbehov saknar bemanning.`
               : ""}

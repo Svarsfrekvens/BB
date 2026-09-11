@@ -9,6 +9,7 @@ import {
   KUNDNARA_FORKLARING,
   TACKT_BEHOV_FORKLARING,
   balansKanGodkannas,
+  raknaSaknadeKompetenskrav,
   genomsnittligSsgPct,
   getTidslage,
   hemHuvudCta,
@@ -39,7 +40,10 @@ export function Hem(props: VyProps) {
   const hard = api.regelbrott();
   const godkannbar = balansKanGodkannas({
     tacktBehovPct: harBalans ? lage?.tackningPct : null,
-    hardViolations: hard,
+    hardViolations: harBalans ? hard : 0,
+    saknadeKompetenskrav: harBalans
+      ? raknaSaknadeKompetenskrav([...(summary?.hardViolations || []), ...(summary?.warnings || [])])
+      : 0,
   });
   const balansGodkand = Boolean(state && (state as { balansGodkand?: boolean }).balansGodkand);
   const cta = hemHuvudCta({ lage: lageId, ready: readiness.ready, godkannbar: godkannbar.ok, balansGodkand });

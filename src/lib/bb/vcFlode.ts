@@ -2,15 +2,18 @@
 
 export type ProcessStegLage = "ej" | "pa" | "klar" | "varning" | "blockerad";
 
+/** Tidslägen är Före → Balans → Utfall. Övriga poster är handlingar inom läget. */
 export const PROCESS_STEG = [
-  { id: "kundbehov", label: "Kundbehov" },
-  { id: "medarbetare", label: "Medarbetare" },
-  { id: "skapa", label: "Skapa balans" },
-  { id: "resultat", label: "Granska balans" },
-  { id: "foreefter", label: "Före → Balans" },
-  { id: "schemaforslag", label: "Godkänn balans" },
-  { id: "nyckeltal", label: "Utfall" },
+  { id: "fore", label: "Före", typ: "lage" as const },
+  { id: "skapa", label: "Skapa balans", typ: "handling" as const },
+  { id: "balans", label: "Balans", typ: "lage" as const },
+  { id: "resultat", label: "Granska balans", typ: "handling" as const },
+  { id: "schemaforslag", label: "Godkänn balans", typ: "handling" as const },
+  { id: "nyckeltal", label: "Utfall", typ: "lage" as const },
 ] as const;
+
+export const TIDSLINJE_ORDNING = ["Före", "Balans", "Utfall"] as const;
+export const PROCESS_HANDLINGAR = ["Skapa balans", "Granska balans", "Godkänn balans"] as const;
 
 export const TIDSLAGEN = [
   { id: "fore", label: "Före", text: "Så ser bemanningen ut i det underlag som lästs in." },
@@ -143,6 +146,7 @@ export type ReadinessMedarbetare = {
   jour?: boolean | null;
 };
 
+/** Indata för att *skapa* balans. KPI och regelbrott i Före-läget ingår inte. */
 export type BemanningsbalansReadinessIndata = {
   harKundrader: boolean;
   harSchema: boolean;
@@ -168,6 +172,11 @@ function treVarde(v: boolean | null | undefined): "ja" | "nej" | "okand" {
   return "okand";
 }
 
+/**
+ * Readiness för Före → Skapa balans.
+ * Blockerar bara saknad/ogodkänd grunddata. Täckt behov, hårda regelbrott,
+ * underkapacitet och överkapacitet i det inlästa nuläget blockerar inte.
+ */
 export function getBemanningsbalansReadiness(d: BemanningsbalansReadinessIndata): BemanningsbalansReadiness {
   const blockingReasons: string[] = [];
   const warnings: string[] = [];
@@ -246,49 +255,61 @@ export function skapaBalansHinder(d: {
   return { aktiv: skal.length === 0, skal, warnings: r.warnings, delar: r.delar };
 }
 
+export function aktivProcessId(tab: string): string {
+  if (tab === "motor") return "skapa";
+  if (tab === "foreefter") return "balans";
+  if (["hem", "kundbehov", "medarbetare", "uppladdning", "underlag"].includes(tab)) return "fore";
+  if (PROCESS_STEG.some((s) => s.id === tab)) return tab;
+  return tab;
+}
+
+export function processStegTab(id: string): string {
+  if (id === "fore") return "hem";
+  if (id === "balans") return "resultat";
+  if (id === "skapa") return "skapa";
+  return id;
+}
+
 export function processStegLagen(d: {
   aktivTab: string;
   readiness: BemanningsbalansReadiness;
   harResultat: boolean;
   harVarning: boolean;
   schemaForslagGodkant?: boolean;
-}): { id: string; label: string; lage: ProcessStegLage }[] {
-  const tabAlias = d.aktivTab === "motor" ? "skapa" : d.aktivTab;
+}): { id: string; label: string; lage: ProcessStegLage; typ: "lage" | "handling" }[] {
+  const aktiv = aktivProcessId(d.aktivTab);
+  const iBalansFlik = ["balans", "resultat", "schemaforslag"].includes(aktiv);
   return PROCESS_STEG.map((steg) => {
     let lage: ProcessStegLage = "ej";
-    if (steg.id === "kundbehov") {
-      if (d.readiness.delar.kund === "klar") lage = "klar";
-      else if (d.readiness.delar.kund === "forandrad") lage = "varning";
-      else if (d.readiness.delar.kund === "kompletteras" || tabAlias === "kundbehov") lage = "pa";
-      else lage = "ej";
-    } else if (steg.id === "medarbetare") {
-      if (!d.readiness.harMedarbetare) lage = "ej";
-      else if (d.readiness.delar.medarbetare === "klar") lage = "klar";
-      else if (d.readiness.delar.medarbetare === "forandrad") lage = "varning";
-      else if (d.readiness.delar.medarbetare === "kompletteras") lage = tabAlias === "medarbetare" ? "pa" : "ej";
-      else lage = tabAlias === "medarbetare" ? "pa" : "ej";
+    if (steg.id === "fore") {
+      if (!d.readiness.harKunddata && !d.readiness.harMedarbetare) lage = "ej";
+      else if (aktiv === "fore") lage = "pa";
+      else lage = "klar";
     } else if (steg.id === "skapa") {
       if (!d.readiness.ready && !d.harResultat) lage = "blockerad";
       else if (d.harResultat) lage = "klar";
-      else if (tabAlias === "skapa") lage = "pa";
+      else if (aktiv === "skapa") lage = "pa";
       else lage = "ej";
+    } else if (steg.id === "balans") {
+      if (!d.harResultat) lage = "ej";
+      else if (iBalansFlik) lage = "pa";
+      else lage = "klar";
     } else if (steg.id === "resultat") {
       if (!d.harResultat) lage = "ej";
       else if (d.harVarning) lage = "varning";
-      else lage = tabAlias === "resultat" ? "pa" : "klar";
-    } else if (steg.id === "foreefter") {
-      if (!d.harResultat) lage = "ej";
-      else lage = tabAlias === "foreefter" ? "pa" : "klar";
+      else if (aktiv === "resultat") lage = "pa";
+      else lage = "klar";
     } else if (steg.id === "schemaforslag") {
       if (!d.harResultat) lage = "ej";
       else if (d.schemaForslagGodkant) lage = "klar";
-      else lage = tabAlias === "schemaforslag" ? "pa" : "ej";
+      else if (aktiv === "schemaforslag") lage = "pa";
+      else lage = "ej";
     } else if (steg.id === "nyckeltal") {
-      lage = tabAlias === "nyckeltal" ? "pa" : "ej";
+      lage = aktiv === "nyckeltal" ? "pa" : "ej";
     }
-    if (tabAlias === steg.id && lage === "ej") lage = "pa";
-    if (tabAlias === steg.id && lage === "klar") lage = "pa";
-    return { id: steg.id, label: steg.label, lage };
+    if (aktiv === steg.id && lage === "ej" && steg.id !== "fore") lage = "pa";
+    if (aktiv === steg.id && lage === "klar") lage = "pa";
+    return { id: steg.id, label: steg.label, lage, typ: steg.typ };
   });
 }
 
@@ -415,11 +436,19 @@ export const OVERKAPACITET_FORMEL = {
   kod: "Σ (bemanning − rabehov) × 0,5 h där bemanning > rabehov",
   kalla: "modell.analysera 30-minutersintervall mot rått kundbehov (inte dimensionerat)",
   anvanderDimensionerandeKurva: false,
+  asymmetriUtvarderasEfterAxelsberg: true,
 } as const;
+
+export function raknaSaknadeKompetenskrav(
+  poster: { rule?: string; message?: string }[] | null | undefined,
+) {
+  return (poster || []).filter((w) => /kompetens|skill|delegering/i.test(`${w.rule || ""} ${w.message || ""}`)).length;
+}
 
 export function balansKanGodkannas(d: {
   tacktBehovPct: number | null | undefined;
   hardViolations: number;
+  saknadeKompetenskrav?: number;
 }) {
   const reasons: string[] = [];
   const tackt = d.tacktBehovPct;
@@ -428,6 +457,9 @@ export function balansKanGodkannas(d: {
   }
   if ((d.hardViolations || 0) > 0) {
     reasons.push("Balans kan inte godkännas – hårda regelbrott finns.");
+  }
+  if ((d.saknadeKompetenskrav || 0) > 0) {
+    reasons.push("Balans kan inte godkännas – kompetens- eller behörighetskrav saknas.");
   }
   return { ok: reasons.length === 0, reasons };
 }

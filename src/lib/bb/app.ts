@@ -14,7 +14,7 @@ import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKont
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
-import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas } from "./vcFlode";
+import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, aktivProcessId, raknaSaknadeKompetenskrav } from "./vcFlode";
 
 declare global {
   interface Window {
@@ -1160,14 +1160,21 @@ function godkannBalans() {
   const fe = foreEfterModell();
   const efter = fe && fe.efter;
   let hard = 0;
+  let saknadeKompetenskrav = 0;
   try {
     const m = buildSchemaModel();
     if (m) {
       const v = schemaVarningar(m, schemaEffektiv(m));
-      hard = Object.values(v.varningar).reduce((s, ws) => s + ws.filter((x) => !x.indikation).length, 0);
+      const alla = Object.values(v.varningar).flat();
+      hard = alla.filter((x) => !x.indikation).length;
+      saknadeKompetenskrav = raknaSaknadeKompetenskrav(alla.map((x) => ({ rule: x.typ, message: x.text })));
     }
-  } catch (e) { hard = 0; }
-  const r = balansKanGodkannas({ tacktBehovPct: efter ? efter.tackningPct : null, hardViolations: hard });
+  } catch (e) { hard = 0; saknadeKompetenskrav = 0; }
+  const r = balansKanGodkannas({
+    tacktBehovPct: efter ? efter.tackningPct : null,
+    hardViolations: hard,
+    saknadeKompetenskrav,
+  });
   if (!r.ok) {
     notera(r.reasons[0], "info", { detalj: r.reasons.join(" ") });
     return;
@@ -3129,7 +3136,8 @@ function renderStegrad() {
     harVarning: !!(state.balans && state.balans.schemaVarningar && state.balans.schemaVarningar.length),
     schemaForslagGodkant: !!state.schemaGodkand && !!state.balans,
   });
-  const idx = steg.findIndex((s) => s.id === tab || (tab === "motor" && s.id === "skapa"));
+  const aktiv = aktivProcessId(tab);
+  const idx = steg.findIndex((s) => s.id === aktiv);
   publiceraSkal({
     steg,
     stegIdx: idx < 0 ? 0 : idx,

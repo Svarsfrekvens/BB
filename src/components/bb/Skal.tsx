@@ -12,7 +12,7 @@ import { BekraftaDialog } from "./Bekrafta";
 import { Progress } from "@/components/ui/progress";
 import { ProcessFlode } from "./ProcessFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
-import { bbVy } from "@/lib/bb/vy";
+import { processStegTab } from "@/lib/bb/vcFlode";
 import type { ProcessStegLage } from "@/lib/bb/vcFlode";
 
 /** Kort förklarande undertext per sida – gör menyn självinstruerande. */
@@ -170,6 +170,7 @@ function Stegrad() {
           id: st.id,
           label: st.label,
           lage: (st.lage || "ej") as ProcessStegLage,
+          typ: st.typ,
         }))}
         onValj={(id) => {
           if (id === "skapa") {
@@ -177,7 +178,7 @@ function Stegrad() {
             if (v.api && s.skapaAktiv !== false) void korBemanningsbalans({ api: v.api, state: v.state });
             return;
           }
-          bbSkal.actions.setTab(id);
+          bbSkal.actions.setTab(processStegTab(id));
         }}
       />
     </div>
