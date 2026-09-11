@@ -8,9 +8,10 @@ from .domain import (
 )
 from .generate import (
     customer_need_interval_count, demand_blocks_for_day, need_intervals,
-    occurrence_window, planning_day_bounds, planning_mode,
+    need_intervals, occurrence_window, planning_day_bounds, planning_mode,
     shift_templates_for_solve, templates_for_employee,
 )
+from .replan import collect_locked_shifts
 
 
 def _absences(data, employee_id):
@@ -90,6 +91,9 @@ def enumerate_person_shift_slots(data, templates=None):
     for s in data['boundaryShifts']:
         a, b = span(s)
         boundary.append(dict(shift=s, a=a, b=b, employeeId=s['employeeId']))
+    for s in collect_locked_shifts(data):
+        a, b = span(s)
+        boundary.append(dict(shift=s, a=a, b=b, employeeId=s['employeeId']))
     before = after = 0
     slots = []
     for e in employees:
@@ -144,6 +148,28 @@ def feasibility_precheck(data):
     if not employees:
         diagnoses.append(_diag('NO_EMPLOYEES', 'Inga aktiva medarbetare finns för beräkningen.', 'critical'))
         return diagnoses
+
+    by_emp = {e['id']: e for e in employees}
+    for s in collect_locked_shifts(data):
+        e = by_emp.get(s.get('employeeId'))
+        if not e:
+            diagnoses.append(_diag(
+                'LOCKED_CONFLICT',
+                f"Låst pass {s.get('id')} saknar aktiv medarbetare. Låsta pass har inte hävts.",
+                'critical', shiftId=s.get('id'),
+            ))
+            continue
+        try:
+            a, b = span(s)
+        except (ValueError, KeyError, TypeError):
+            diagnoses.append(_diag('LOCKED_CONFLICT', f"Låst pass {s.get('id')} har ogiltig tid. Låsta pass har inte hävts.", 'critical', shiftId=s.get('id')))
+            continue
+        if _absent(_absences(data, e['id']), a, b):
+            diagnoses.append(_diag(
+                'LOCKED_CONFLICT',
+                f"{e['code']}: låst pass {s.get('id')} krockar med frånvaro. Låsta pass har inte hävts.",
+                'critical', shiftId=s.get('id'), employeeId=e['id'],
+            ))
 
     period_days = list(days(wp['start'], wp['end']))
     need_min = sum(o['task']['minutes'] * o['count'] for o in occ)
@@ -265,14 +291,17 @@ def has_critical_precheck(diagnoses):
     return any(d.get('severity') == 'critical' for d in diagnoses)
 
 
-def explain_with_precheck(solver_status, diagnoses, fallback):
+def explain_with_precheck(solver_status, diagnoses, fallback, locked=False):
     if solver_status != 'INFEASIBLE':
         return fallback
     critical = [d for d in diagnoses if d.get('severity') == 'critical']
     useful = critical or diagnoses
+    prefix = 'Full bemanning kan inte skapas med nuvarande förutsättningar.'
+    if locked:
+        prefix = prefix + ' Låsta pass gör omplaneringen omöjlig och har inte hävts.'
     if not useful:
-        return fallback
-    lines = ['Full bemanning kan inte skapas med nuvarande förutsättningar.']
+        return prefix + ' ' + fallback if locked else fallback
+    lines = [prefix]
     for d in useful[:8]:
         lines.append(d['message'])
     return ' '.join(lines)
@@ -282,17 +311,36 @@ def planning_diagnostics(data, extra=None):
     extra = extra or {}
     employees = [e for e in data['employees'] if e['status'] == 'active']
     start, end = planning_day_bounds(data)
+    before = int(extra.get('before') or 0)
+    after = int(extra.get('after') or 0)
+    filtered = (before - after) / before if before else 0.0
+    stats = extra.get('templateStats') or {}
     return dict(
         planningMode=planning_mode(data),
         employees=len(employees),
         planningDays=(date.fromisoformat(end) - date.fromisoformat(start)).days + 1,
         customerNeedIntervals=customer_need_interval_count(data),
-        generatedShiftTemplates=extra.get('generatedShiftTemplates', 0),
-        personShiftCombinationsBeforeFilter=extra.get('before', 0),
-        personShiftCombinationsAfterFilter=extra.get('after', 0),
+        generatedShiftTemplates=extra.get('generatedShiftTemplates', stats.get('total', 0)),
+        generatedTemplatesPerDayMax=stats.get('perDayMax', 0),
+        generatedTemplatesTotal=stats.get('total', extra.get('generatedShiftTemplates', 0)),
+        personShiftCombinationsBeforeFilter=before,
+        personShiftCombinationsAfterFilter=after,
+        filteredShare=round(filtered, 4),
         solverVariables=extra.get('solverVariables', 0),
         solverConstraints=extra.get('solverConstraints', 0),
         preCheckTimeMs=extra.get('preCheckTimeMs', 0),
+        generateTimeMs=extra.get('generateTimeMs', 0),
         solveTimeMs=extra.get('solveTimeMs', 0),
+        coveragePhaseMs=extra.get('coveragePhaseMs', 0),
+        costPhaseMs=extra.get('costPhaseMs', 0),
+        qualityPhaseMs=extra.get('qualityPhaseMs', 0),
+        validateTimeMs=extra.get('validateTimeMs', 0),
+        totalTimeMs=extra.get('totalTimeMs', 0),
+        memoryPeakMb=extra.get('memoryPeakMb'),
         solverStatus=extra.get('solverStatus', 'NOT_RUN'),
+        coveredNeedPct=extra.get('coveredNeedPct'),
+        customerNearPct=extra.get('customerNearPct'),
+        scheduleCostOre=extra.get('scheduleCostOre'),
+        lockedShifts=extra.get('lockedShifts', 0),
+        targets=dict(typical28dMs=30000, pilotMs=60000, stressMs=180000),
     )

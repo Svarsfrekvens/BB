@@ -15,11 +15,13 @@ from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      rest_days_target, f01_known_span, f01_window_known,
                      candidate_as_shift, jour_eligible, night_eligible, occasion_profile_id,
                      shift_profiles, required_rest_after_minutes)
-from .generate import planning_mode, shift_templates_for_solve
+from .generate import generated_template_stats, planning_mode, shift_templates_for_solve
 from .precheck import (
     enumerate_person_shift_slots, explain_with_precheck, feasibility_precheck,
     has_critical_precheck, planning_diagnostics,
 )
+from .replan import collect_locked_shifts
+from .perf import peak_memory_mb, schedule_kpis
 from .validate import validate
 
 
@@ -89,33 +91,54 @@ def solve(data, seconds=30):
     lo,hi = instant(wp['start'],'00:00'),instant(add_days(wp['end'],1),'00:00')
     period_days=list(days(wp['start'],wp['end']))
     employees=[e for e in data['employees'] if e['status']=='active']
-    templates={t['id']:t for t in shift_templates_for_solve(data)}
+    t0=perf_counter()
+    t_gen=perf_counter()
+    template_list=shift_templates_for_solve(data)
+    generate_ms=int(round((perf_counter()-t_gen)*1000))
+    templates={t['id']:t for t in template_list}
     occ=occurrences(data)
     reserve=int(rules.get('withinPassMinutesPerShift') or 0)
     mode=planning_mode(data)
+    tpl_stats=generated_template_stats(template_list)
+    locked_shifts=collect_locked_shifts(data)
 
     t_pre=perf_counter()
     diagnoses=feasibility_precheck(data)
     pre_ms=int(round((perf_counter()-t_pre)*1000))
-    enum=enumerate_person_shift_slots(data, list(templates.values()))
-    generated_n=sum(1 for t in templates.values() if t.get('generated'))
+    enum=enumerate_person_shift_slots(data, template_list)
+    generated_n=tpl_stats.get('total') or sum(1 for t in templates.values() if t.get('generated'))
 
-    def diagnostics(status, solve_ms=0, nvars=0, ncons=0):
-        return planning_diagnostics(data, dict(
+    def diagnostics(status, solve_ms=0, nvars=0, ncons=0, validate_ms=0, kpis=None, phases=None):
+        extra=dict(
             generatedShiftTemplates=generated_n,
+            templateStats=tpl_stats,
             before=enum['before'],
             after=enum['after'],
             solverVariables=nvars,
             solverConstraints=ncons,
             preCheckTimeMs=pre_ms,
+            generateTimeMs=generate_ms,
             solveTimeMs=solve_ms,
+            validateTimeMs=validate_ms,
+            totalTimeMs=int(round((perf_counter()-t0)*1000)),
+            memoryPeakMb=peak_memory_mb(),
             solverStatus=status,
-        ))
+            lockedShifts=len(locked_shifts),
+        )
+        if phases:
+            by={p['name']:int(round(float(p.get('seconds') or 0)*1000)) for p in phases}
+            extra['coveragePhaseMs']=by.get('coverage',0)
+            extra['costPhaseMs']=by.get('cost',0)
+            extra['qualityPhaseMs']=by.get('quality',0)
+        if kpis:
+            extra.update(kpis)
+        return planning_diagnostics(data, extra)
 
     def empty_infeasible(message, status='INFEASIBLE'):
-        explanation=explain_with_precheck(status, diagnoses, message)
+        explanation=explain_with_precheck(status, diagnoses, message, locked=bool(locked_shifts))
+        diag=diagnostics(status)
         schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=status,explanation=explanation,feasibilityNotes=[],preCheck=diagnoses,seconds=pre_ms/1000,objective=None,bound=None)
-        return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=0,occurrences=len(occ),startStep=rules['flexibilityStep'],**diagnostics(status)))
+        return dict(schedule=schedule,validation=None,modelScope=dict(candidateShifts=0,occurrences=len(occ),startStep=rules['flexibilityStep'],**diag),diagnostics=dict(performance=diag))
 
     if has_critical_precheck(diagnoses):
         return empty_infeasible('Ingen lösning uppfyller alla hårda villkor.')
@@ -152,6 +175,11 @@ def solve(data, seconds=30):
     for s in data['boundaryShifts']:
         a,b=span(s)
         boundaries.append(dict(shift=s,a=a,b=b,work=paid(s),x=1))
+    locked_fixed=[]
+    for s in locked_shifts:
+        a,b=span(s)
+        locked_fixed.append(dict(shift=s,a=a,b=b,work=paid(s),x=1))
+    duty_anchor=boundaries+locked_fixed
     by_emp={e['id']:e for e in employees}
     for slot in enum['slots']:
         if not slot['eligible']:
@@ -177,7 +205,7 @@ def solve(data, seconds=30):
     night_series_flags={}
     for e in employees:
         rows=sorted((c for c in candidates if c['shift']['employeeId']==e['id']),key=lambda c:c['a'])
-        fixed=[b for b in boundaries if b['shift']['employeeId']==e['id']]
+        fixed=[b for b in duty_anchor if b['shift']['employeeId']==e['id']]
         for i,a in enumerate(rows):
             for b in rows[i+1:]:
                 if overlap(a['a'],a['b'],b['a'],b['b']):
@@ -357,7 +385,7 @@ def solve(data, seconds=30):
         a,b=max(a,lo),min(b,hi)
         if a>=b or not rules['nightFloor']: continue
         valid_ids={e['id'] for e in employees if night_eligible(e)}
-        coverage=[(u,v,c['x']) for c in candidates+boundaries if c['shift']['employeeId'] in valid_ids for u,v in c['work']]
+        coverage=[(u,v,c['x']) for c in candidates+duty_anchor if c['shift']['employeeId'] in valid_ids for u,v in c['work']]
         edges=sorted({a,b}|{t for u,v,_ in coverage for t in (u,v) if a<t<b})
         for edge in edges[:-1]:
             model.add(sum(x for u,v,x in coverage if u<=edge<v)>=rules['nightFloor'])
@@ -367,7 +395,7 @@ def solve(data, seconds=30):
         for a,b in jour_intervals(wp['start'],wp['end'],rules):
             a,b=max(a,lo),min(b,hi)
             if a>=b: continue
-            coverage=[(c['a'],c['b'],c['x']) for c in candidates+boundaries if c['shift'].get('type')=='jour' and c['shift']['employeeId'] in valid_ids]
+            coverage=[(c['a'],c['b'],c['x']) for c in candidates+duty_anchor if c['shift'].get('type')=='jour' and c['shift']['employeeId'] in valid_ids]
             edges=sorted({a,b}|{t for u,v,_ in coverage for t in (u,v) if a<t<b})
             for edge in edges[:-1]:
                 model.add(sum(x for u,v,x in coverage if u<=edge<v)>=jour_floor)
@@ -397,7 +425,7 @@ def solve(data, seconds=30):
             krav = o['task'].get('requiredEmployeeId')
             if krav and e['id'] != krav: continue
             if o['task']['customerId'] in set(hard_constraints(e).get('forbiddenCustomerIds') or []): continue
-            candidates_for_e=[c for c in candidates+boundaries if c['shift']['employeeId']==e['id']]
+            candidates_for_e=[c for c in candidates+duty_anchor if c['shift']['employeeId']==e['id']]
             options=[]
             for c in candidates_for_e:
                 for a,b in shrink_work(c['work'], reserve):
@@ -639,16 +667,19 @@ def solve(data, seconds=30):
         'INFEASIBLE':'Ingen lösning uppfyller alla hårda villkor inom valda passmallar och tidssteg. Kontrollera behov, kompetens, tillgänglighet och passmallar. Inga regler har lättats.',
         'UNKNOWN':'Sökningen avbröts vid tidsgränsen utan en hittad lösning. Detta bevisar inte att problemet är olösbart.',
         'MODEL_INVALID':'Optimeringsmodellen är ogiltig. Inget schemaförslag kan användas.'}
-    explanation=explain_with_precheck(code, diagnoses, explanations.get(code,'Okänd beräkningsstatus.'))
+    explanation=explain_with_precheck(code, diagnoses, explanations.get(code,'Okänd beräkningsstatus.'), locked=bool(locked_shifts))
     if weekend_notes:
         explanation=explanation+' Helgförvarning: '+'; '.join(weekend_notes)
-    diag=diagnostics(code, solve_ms, nvars, ncons)
     schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,preCheck=diagnoses,seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
-    scope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep'],**diag)
+    result=None
+    validate_ms=0
+    kpis=None
     if last:
-        schedule['shifts']=last['shifts']
+        seen={s['id'] for s in last['shifts']}
+        schedule['shifts']=[s for s in locked_shifts if s['id'] not in seen]+list(last['shifts'])
         schedule['assignments']=last['assignments']
         schedule['uncovered']=last['uncovered']
+        schedule['uncoveredMinutes']=last['uncoveredMinutes']
         schedule['objective']=last['objective']
         schedule['bound']=last['bound']
         schedule['objectiveBreakdown']=dict(costOre=last['costOre'],continuityOre=last['continuityOre'],spreadOre=last['spreadOre'],uncoveredMinutes=last['uncoveredMinutes'])
@@ -659,9 +690,14 @@ def solve(data, seconds=30):
             coverageProven=any(p['name']=='coverage' and p['status']=='OPTIMAL' for p in phases),
             phases=phases,
         )
+        t_val=perf_counter()
         result=validate(data,schedule)
+        validate_ms=int(round((perf_counter()-t_val)*1000))
         blocking=[e for e in result['errors'] if e['rule']!='BOUNDARY_INCOMPLETE']
         if blocking:
             schedule.update(solverStatus='MODEL_INVALID',shifts=[],assignments=[],explanation='Förslaget stoppades av den fristående kontrollen: '+blocking[0]['message'])
-        return dict(schedule=schedule,validation=result,modelScope=scope)
-    return dict(schedule=schedule,validation=None,modelScope=scope)
+        else:
+            kpis=schedule_kpis(data, schedule)
+    diag=diagnostics(schedule['solverStatus'], solve_ms, nvars, ncons, validate_ms, kpis, phases)
+    scope=dict(candidateShifts=len(candidates),occurrences=len(occ),startStep=rules['flexibilityStep'],**diag)
+    return dict(schedule=schedule,validation=result,modelScope=scope,diagnostics=dict(performance=diag))

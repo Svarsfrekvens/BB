@@ -760,6 +760,13 @@ def check_input(d):
                     date.fromisoformat(d['planningRange'][key])
         if 'existingSchedule' in d and d['existingSchedule'] is not None:
             require(isinstance(d['existingSchedule'], dict), 'Ogiltigt befintligt schema.')
+            if d['existingSchedule'].get('shifts') is not None:
+                require(isinstance(d['existingSchedule']['shifts'], list), 'Ogiltiga låsta pass.')
+        if d.get('lockedShiftIds') is not None:
+            require(isinstance(d['lockedShiftIds'], list) and len(d['lockedShiftIds']) <= 8000, 'Ogiltiga låsta pass-id.')
+            require(all(isinstance(x, str) and x for x in d['lockedShiftIds']), 'Ogiltiga låsta pass-id.')
+        if 'lockedOutsidePlanningRange' in d and d['lockedOutsidePlanningRange'] is not None:
+            require(type(d['lockedOutsidePlanningRange']) is bool, 'Ogiltig låsning utanför planeringsintervall.')
         for key, limit in [('customers',100),('employees',80),('interventions',4000),('templates',12),('boundaryShifts',8000),('absences',2000)]:
             require(isinstance(d[key], list) and len(d[key]) <= limit, f'Ogiltig storlek: {key}.')
             require(len({x['id'] for x in d[key]}) == len(d[key]), f'Dubbla id i {key}.')

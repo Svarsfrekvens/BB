@@ -167,6 +167,8 @@ def generate_shift_templates(data):
     order = []
 
     def add(start_clock, end_clock, typ, customers, source, day):
+        if day < start or day > end:
+            return
         key = (start_clock, end_clock, typ)
         if key in seen:
             prev = seen[key]
@@ -257,6 +259,18 @@ def templates_for_employee(employee, templates, mode):
     generated = [t for t in templates if t.get('generated')]
     named = [by_id[p] for p in (employee.get('profiles') or []) if p in by_id]
     return merge_templates(named, generated)
+
+
+def generated_template_stats(templates):
+    per_day = {}
+    total = 0
+    for t in templates or []:
+        if not t.get('generated'):
+            continue
+        total += 1
+        for day in t.get('dates') or []:
+            per_day[day] = per_day.get(day, 0) + 1
+    return dict(total=total, perDayMax=max(per_day.values(), default=0), perDay=per_day)
 
 
 def customer_need_interval_count(data):
