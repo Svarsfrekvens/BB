@@ -18,7 +18,7 @@
 
 import * as C from "./core";
 import type { DatumPass } from "./medvind";
-import { beraknaKpi, rymInomPass } from "./kpi";
+import { beraknaKpi, rymIArbetspass } from "./kpi";
 
 export type Slot = { datum: string; klockan: string; behov: number; dimensionerat: number; bemanning: number; jour: number };
 
@@ -122,6 +122,8 @@ export function analysera(opts: {
   /** Kundnära tid som ryms i redan schemalagda pass (tidstyp inom_pass). Ökar inte schematid. */
   extraInomPassKundnaraH?: number;
   extraInomPassEjKundnaraH?: number;
+  extraInomPassPerPassKundnaraH?: number;
+  extraInomPassPerPassEjKundnaraH?: number;
 }): Lage {
   const { rader, pass, fran, till, timkostnad } = opts;
   const lista = dagar(fran, till);
@@ -159,11 +161,40 @@ export function analysera(opts: {
   const arbetspass = pass.filter((p) => !p.jour);
   const schematidH = arbetspass.reduce((s, p) => s + p.timmar, 0);
   const jourH = pass.filter((p) => p.jour).reduce((s, p) => s + p.timmar, 0);
-  const rymd = rymInomPass({
-    schematidH,
-    direktKundnaraH: bemannatKundbehovH,
-    inomPassKundnaraH: opts.extraInomPassKundnaraH || 0,
-    inomPassEjKundnaraH: opts.extraInomPassEjKundnaraH || 0,
+  const direktPerPass = arbetspass.map(() => 0);
+  const tackar = (p: DatumPass, datum: string, klockan: string) => {
+    const s = klockMin(p.start);
+    let e = klockMin(p.slut);
+    const k = klockMin(klockan);
+    if (s == null || e == null || k == null) return false;
+    const overnatt = e <= s;
+    if (overnatt) e += 1440;
+    if (p.datum === datum) {
+      const t = overnatt && k < s ? k + 1440 : k;
+      return t >= s && t < e;
+    }
+    if (overnatt) {
+      const nasta = new Date(p.datum + "T12:00:00Z");
+      nasta.setUTCDate(nasta.getUTCDate() + 1);
+      if (datum === nasta.toISOString().slice(0, 10)) return k < e - 1440;
+    }
+    return false;
+  };
+  for (const sl of slots) {
+    const covering: number[] = [];
+    arbetspass.forEach((p, i) => {
+      if (tackar(p, sl.datum, sl.klockan)) covering.push(i);
+    });
+    if (!covering.length) continue;
+    const andel = Math.min(sl.behov, sl.bemanning) * 0.5 / covering.length;
+    for (const i of covering) direktPerPass[i] = (direktPerPass[i] || 0) + andel;
+  }
+  const rymd = rymIArbetspass({
+    pass: arbetspass.map((p, i) => ({ timmar: p.timmar, direktKundnaraH: direktPerPass[i] || 0 })),
+    perPassKundnaraH: opts.extraInomPassPerPassKundnaraH || 0,
+    perPassEjKundnaraH: opts.extraInomPassPerPassEjKundnaraH || 0,
+    periodKundnaraH: opts.extraInomPassKundnaraH || 0,
+    periodEjKundnaraH: opts.extraInomPassEjKundnaraH || 0,
   });
   const kpiRaw = beraknaKpi({
     schematidH,

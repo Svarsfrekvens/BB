@@ -134,4 +134,33 @@ describe("motorPayload ur Galaxen", () => {
     const jourId = mallar.find((m) => m.type === "jour")?.id;
     expect(anstallda.some((e) => e.night && jourId && e.profiles.includes(jourId))).toBe(true);
   });
+
+  it("skickar datumstyrd helg och veckovila till motorn", () => {
+    const r = payload(7);
+    const employees = (r.payload.employees as { constraints?: { hard?: { weekendMode?: string } } }[]) || [];
+    const ordinarie = employees.filter((e) => !String((e as { code?: string }).code || "").startsWith("V") && !String((e as { id?: string }).id || "").startsWith("x"));
+    expect(ordinarie.length).toBeGreaterThan(1);
+    expect(ordinarie.every((e) => e.constraints?.hard?.weekendMode === "every_other")).toBe(true);
+    const rules = r.payload.rules as { minWeeklyRestHours: number; withinPassMinutesPerShift: number };
+    expect(rules.minWeeklyRestHours).toBe(36);
+    expect(rules.withinPassMinutesPerShift).toBe(0);
+  });
+
+  it("endast dag i passprofil ger inte nattmall", () => {
+    const personer = tillMedarbetare();
+    personer[0] = { ...personer[0]!, passprofil: "Dag", nattbehorig: true };
+    const r = byggMotorPayload({
+      rader: (sekoia.rows as Insats[]).slice(0, 20),
+      medarbetare: personer.slice(0, 3),
+      from: "2026-08-03",
+      dagar: 7,
+      timkostnad: 270,
+      regler: reglerFranVillkor(),
+    });
+    const e = (r.payload.employees as { name: string; profiles: string[]; constraints: { hard: { allowedTypes?: string[] } } }[])[0];
+    const mallar = r.payload.templates as { id: string; type: string }[];
+    const nattIds = mallar.filter((m) => m.type === "night" || m.type === "jour").map((m) => m.id);
+    expect(e?.constraints.hard.allowedTypes).toEqual(["day"]);
+    expect(e?.profiles.some((id) => nattIds.includes(id))).toBe(false);
+  });
 });

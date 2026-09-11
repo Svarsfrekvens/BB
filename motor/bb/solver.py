@@ -7,20 +7,10 @@ Hårda regler lättas aldrig. Täckning får inte sänkas för att spara kostnad
 from math import floor
 from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
-                     instant, add_days, days, night_intervals, jour_intervals, is_night, monday)
+                     instant, add_days, days, night_intervals, jour_intervals, is_night, monday,
+                     ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
+                     shift_allowed, rolling_week_windows)
 from .validate import validate
-
-
-def ssg_for_day(e, day):
-    ssg = e['ssg']
-    for w in e.get('ssgWindows') or []:
-        if w['start'] <= day <= w['end']:
-            ssg = w['ssg']
-    return ssg
-
-
-def ssg_cap_minutes(e, period_days, rules):
-    return sum(ssg_for_day(e, day) / 100 * rules['fullTimeWeeklyHours'] * 60 / 7 for day in period_days)
 
 
 def solve(data, seconds=30):
@@ -33,6 +23,33 @@ def solve(data, seconds=30):
     employees=[e for e in data['employees'] if e['status']=='active']
     templates={t['id']:t for t in data['templates']}
     occ=occurrences(data)
+    reserve=int(rules.get('withinPassMinutesPerShift') or 0)
+
+    def shrink_work(intervals, take):
+        if take<=0: return list(intervals)
+        left,out=take,[]
+        for a,b in intervals:
+            if left<=0:
+                out.append((a,b)); continue
+            cut=min(left,b-a)
+            if a+cut<b: out.append((a+cut,b))
+            left-=cut
+        return out
+
+    weekend_notes=[]
+    from datetime import date as _date
+    for day in period_days:
+        if _date.fromisoformat(day).isoweekday() not in (6,7): continue
+        need=[o for o in occ if o['date']==day]
+        if not need: continue
+        eligible=[e for e in employees if weekend_allowed(e,day)]
+        if not eligible:
+            weekend_notes.append(f'{day}: helgbehov finns men ingen medarbetare får arbeta enligt helgmönstret.')
+            continue
+        for o in need:
+            if not any(set(o['task']['skills'])<=skills_on_day(e,day) for e in eligible):
+                weekend_notes.append(f'{day}: {o["task"]["name"]} saknar helgbehörig kompetens.')
+
     jour_floor=int(rules.get('jourFloor') or 0)
     model=cp_model.CpModel()
     candidates=[]
@@ -50,7 +67,9 @@ def solve(data, seconds=30):
                 s=dict(id=f"{e['id']}:{day}:{profile}",employeeId=e['id'],date=day,start=t['start'],end=t['end'],type=t['type'],skills=t['skills'],breaks=t['breaks'])
                 a,b=span(s)
                 if b<=lo or a>=hi or b-a>rules['maxShiftHours']*60: continue
-                if not set(t['skills'])<=set(e['skills']) or (is_night(a,b) and not e['night']): continue
+                if not shift_allowed(e,t,day,a,b,rules): continue
+                if is_night(a,b) and not e['night']: continue
+                if t['type']=='jour' and not e['night']: continue
                 if any(overlap(a,b,x,y) for x,y in absences): continue
                 work=paid(s)
                 if any(overlap(a,b,v['a'],v['b']) for v in boundary): continue
@@ -98,7 +117,82 @@ def solve(data, seconds=30):
         window=rules['maxConsecutiveDays']+1
         for i in range(len(flags)-window+1):
             model.add(sum(flags[i:i+window])<=rules['maxConsecutiveDays'])
+        person_cap=hard_constraints(e).get('maxConsecutiveDays')
+        if person_cap:
+            w=int(person_cap)+1
+            for i in range(len(flags)-w+1):
+                model.add(sum(flags[i:i+w])<=int(person_cap))
+        night_lim=hard_constraints(e).get('maxNightConsecutive')
+        if night_lim:
+            nflags=[]
+            span_days=list(days(add_days(wp['start'],-rules['maxConsecutiveDays']),add_days(wp['end'],rules['maxConsecutiveDays'])))
+            for day in span_days:
+                a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
+                nf=model.new_bool_var('nightday:'+e['id']+day)
+                covering=[c['x'] for c in rows+fixed if c['shift'].get('type')=='night' and overlap(c['a'],c['b'],a,b)]
+                if covering: model.add_max_equality(nf,covering)
+                else: model.add(nf==0)
+                nflags.append(nf)
+            nw=int(night_lim)+1
+            for i in range(len(nflags)-nw+1):
+                model.add(sum(nflags[i:i+nw])<=int(night_lim))
+        min_off=hard_constraints(e).get('minConsecutiveOffDays')
+        if min_off:
+            need=int(min_off)
+            pad=rules['maxConsecutiveDays']
+            period_flags=flags[pad:pad+len(period_days)]
+            if need<=len(period_flags):
+                windows=[]
+                for i in range(len(period_flags)-need+1):
+                    w=model.new_bool_var(f'minoff:{e["id"]}:{i}')
+                    for j in range(need):
+                        model.add(period_flags[i+j]==0).only_enforce_if(w)
+                    windows.append(w)
+                if windows:
+                    model.add(sum(windows)>=1)
+        jour_lim=hard_constraints(e).get('maxJourConsecutive')
+        weekly=float(rules.get('minWeeklyRestHours') or 36)
+        if weekly>0:
+            need=int(round(weekly*60))
+            duty=rows+fixed
+            for day,wa,wb in rolling_week_windows(wp['start'],wp['end']):
+                a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
+                covering=[c['x'] for c in duty if overlap(c['a'],c['b'],a,b)]
+                if not covering:
+                    continue
+                work=model.new_bool_var(f'wrest_day:{e["id"]}:{day}')
+                model.add_max_equality(work,covering)
+                slots=[]
+                t=wa
+                step=3*60
+                while t+need<=wb:
+                    overlapping=[c for c in duty if overlap(c['a'],c['b'],t,t+need)]
+                    if any(isinstance(c['x'],int) and c['x']==1 for c in overlapping):
+                        t+=step
+                        continue
+                    free=model.new_bool_var(f'wrest:{e["id"]}:{day}:{t}')
+                    for c in overlapping:
+                        if not isinstance(c['x'],int):
+                            model.add(c['x']==0).only_enforce_if(free)
+                    slots.append(free)
+                    t+=step
+                if slots:
+                    model.add(sum(slots)>=1).only_enforce_if(work)
+                else:
+                    model.add(work==0)
         jour_rows=[c for c in rows+fixed if c['shift'].get('type')=='jour']
+        if jour_lim:
+            jflags=[]
+            for day in days(add_days(wp['start'],-7),add_days(wp['end'],7)):
+                a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
+                jf=model.new_bool_var('jourday:'+e['id']+day)
+                covering=[c['x'] for c in jour_rows if overlap(c['a'],c['b'],a,b)]
+                if covering: model.add_max_equality(jf,covering)
+                else: model.add(jf==0)
+                jflags.append(jf)
+            jw=int(jour_lim)+1
+            for i in range(len(jflags)-jw+1):
+                model.add(sum(jflags[i:i+jw])<=int(jour_lim))
         for start_day in sorted({c['shift']['date'] for c in jour_rows}):
             limit=add_days(start_day,27)
             model.add(sum((c['b']-c['a'])*c['x'] for c in jour_rows if start_day<=c['shift']['date']<=limit)<=48*60)
@@ -150,13 +244,14 @@ def solve(data, seconds=30):
         model.add(end==start+duration)
         assigns=[]
         for e in employees:
-            if not set(o['task']['skills'])<=set(e['skills']): continue
+            if not set(o['task']['skills'])<=skills_on_day(e, o['date']): continue
             krav = o['task'].get('requiredEmployeeId')
             if krav and e['id'] != krav: continue
+            if o['task']['customerId'] in set(hard_constraints(e).get('forbiddenCustomerIds') or []): continue
             candidates_for_e=[c for c in candidates+boundaries if c['shift']['employeeId']==e['id']]
             options=[]
             for c in candidates_for_e:
-                for a,b in c['work']:
+                for a,b in shrink_work(c['work'], reserve):
                     if b-a<duration or b<o['earliest']+duration or a>o['latest']: continue
                     z=model.new_bool_var('support:'+str(supports_count));supports_count+=1
                     support_hints.append(z)
@@ -197,6 +292,29 @@ def solve(data, seconds=30):
     ow=data.get('objectiveWeights') or {}
     continuity_ore=int(round(float(ow.get('continuitySek',50))*100))
     spread_ore=int(round(float(ow.get('spreadSekPerPermille',2.5))*100))
+    prefer_ore=int(round(float(ow.get('preferredMissSek',1))*100))
+    prefer_miss=0
+    for e in employees:
+        prefs=((e.get('constraints') or {}).get('soft') or {}).get('preferredCustomerIds') or []
+        types=((e.get('constraints') or {}).get('soft') or {}).get('preferredTypes') or []
+        for cid in prefs:
+            xs=customer_links.get((cid,e['id'])) or []
+            if not xs: continue
+            used=model.new_bool_var('prefer:'+e['id']+':'+cid)
+            model.add_max_equality(used,xs)
+            prefer_miss += 1-used
+        if types:
+            typed=[c['x'] for c in candidates if c['shift']['employeeId']==e['id'] and c['shift'].get('type') in types]
+            other=[c['x'] for c in candidates if c['shift']['employeeId']==e['id'] and c['shift'].get('type') not in types]
+            if typed and other:
+                prefer_miss += sum(other)
+        reqs=hard_constraints(e).get('requiredCustomerIds') or []
+        for cid in reqs:
+            xs=customer_links.get((cid,e['id'])) or []
+            if xs:
+                model.add(sum(xs)>=1)
+            else:
+                weekend_notes.append(f"{e['code']}: måste arbeta med kund {cid} men saknar giltig tilldelning.")
     uncovered_minutes=sum(o['task']['minutes']*gap for o,gap in gaps)
     max_unc=max(1,sum(o['task']['minutes']*o['count'] for o,_ in gaps))
     unc_var=model.new_int_var(0,max_unc,'uncovered_minutes')
@@ -204,7 +322,7 @@ def solve(data, seconds=30):
     cost_var=model.new_int_var(0,10**12,'cost_ore')
     model.add(cost_var==cost)
     qual_var=model.new_int_var(0,10**12,'quality_ore')
-    model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread)
+    model.add(qual_var==continuity_ore*sum(links)+spread_ore*spread+prefer_ore*prefer_miss)
     for c in candidates:
         model.add_hint(c['x'],0)
     for x in support_hints:
@@ -277,7 +395,10 @@ def solve(data, seconds=30):
         'INFEASIBLE':'Ingen lösning uppfyller alla hårda villkor inom valda passmallar och tidssteg. Kontrollera behov, kompetens, tillgänglighet och passmallar. Inga regler har lättats.',
         'UNKNOWN':'Sökningen avbröts vid tidsgränsen utan en hittad lösning. Detta bevisar inte att problemet är olösbart.',
         'MODEL_INVALID':'Optimeringsmodellen är ogiltig. Inget schemaförslag kan användas.'}
-    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanations.get(code,'Okänd beräkningsstatus.'),seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
+    explanation=explanations.get(code,'Okänd beräkningsstatus.')
+    if weekend_notes:
+        explanation=explanation+' Helgförvarning: '+'; '.join(weekend_notes)
+    schedule=dict(id=str(uuid4()),status='draft',basedOnRevision=data['inputRevision'],shifts=[],assignments=[],uncovered=[],solverStatus=code,explanation=explanation,feasibilityNotes=weekend_notes,seconds=sum(p['seconds'] for p in phases) if phases else solver.wall_time,objective=None,bound=None)
     if last:
         schedule['shifts']=last['shifts']
         schedule['assignments']=last['assignments']

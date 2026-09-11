@@ -5,8 +5,8 @@
 
 import type { Insats } from "./typer";
 import type { Medarbetare } from "./vy";
-import { expanderaAktiviteter, kunderUtanKontakt, type PlanAktivitet } from "./aktiviteter";
-import { ssgWindows, harHårt, forbudnaKunder, type MedarbetarVillkor } from "./villkor";
+import { ssgWindows, harHårt, forbudnaKunder, hårdaMotorvillkor, mjukaMotorvillkor, skillWindowsFromVillkor, type MedarbetarVillkor } from "./villkor";
+import { defaultTidstyp, expanderaAktiviteter, kunderUtanKontakt, type PlanAktivitet } from "./aktiviteter";
 
 export type MotorPayload = Record<string, unknown>;
 
@@ -152,11 +152,10 @@ function profilerFor(m: Medarbetare, mallar: Passmall[]) {
   const p = String(m.passprofil || "").toLowerCase();
   const nattOk = Boolean(m.nattbehorig || m.jour);
   let ut: string[] = [];
-  if (/natt|jour/.test(p)) ut = nattOk ? natt : kvall;
-  else if (/kväll|kvall/.test(p)) ut = nattOk ? [...kvall, ...natt] : kvall;
-  else if (/dag/.test(p)) ut = nattOk ? [...dag, ...natt] : dag;
-  else ut = nattOk ? [...dag, ...kvall, ...natt] : [...dag, ...kvall];
-  if (nattOk) ut = [...ut, ...jour];
+  if (/natt|jour/.test(p) && !/dag|kväll|kvall/.test(p)) ut = nattOk ? [...natt, ...jour] : kvall;
+  else if (/kväll|kvall/.test(p)) ut = kvall;
+  else if (/dag/.test(p)) ut = dag;
+  else ut = nattOk ? [...dag, ...kvall, ...natt, ...jour] : [...dag, ...kvall];
   const rensad = ut.filter(Boolean);
   return rensad.length ? rensad : mallar.filter((t) => t.type !== "jour").slice(0, 1).map((t) => t.id);
 }
@@ -198,6 +197,8 @@ export type MotorRegler = {
   nightFloor: number;
   jourFloor: number;
   flexibilityStep: number;
+  minWeeklyRestHours?: number;
+  withinPassMinutesPerShift?: number;
   jour?: { start: string; end: string; weekdays: number[] };
 };
 
@@ -255,6 +256,8 @@ export function byggMotorPayload(opts: {
     nightFloor: 1,
     jourFloor: 0,
     flexibilityStep: 15,
+    minWeeklyRestHours: 36,
+    withinPassMinutesPerShift: 0,
     jour: {
       start: opts.regler?.jour?.start || "23:00",
       end: opts.regler?.jour?.end || "06:30",
@@ -267,6 +270,13 @@ export function byggMotorPayload(opts: {
     end: regler.jour?.end || "06:30",
     weekdays: regler.jour?.weekdays?.length ? regler.jour.weekdays : [1, 2, 3, 4, 5, 6, 7],
   };
+  let perPassMin = 0;
+  for (const a of opts.planAktiviteter || []) {
+    if (!a.aktiv || a.frekvens !== "per_pass" || defaultTidstyp(a) !== "inom_pass") continue;
+    perPassMin += a.enhet === "timmar" ? a.omfattning * 60 : a.omfattning;
+  }
+  regler.withinPassMinutesPerShift = Math.max(0, Math.min(180, Math.round(perPassMin)));
+  if (regler.minWeeklyRestHours == null) regler.minWeeklyRestHours = 36;
   const mallTimmar = (t: Passmall) => {
     const a = klockMin(t.start);
     let b = klockMin(t.end);
@@ -433,8 +443,11 @@ export function byggMotorPayload(opts: {
     for (const k of kravSet) if (m.delegering || !/delegerin|sjuksk/.test(k)) skills.add(k);
     const farTillsattas = (m as { vikarieFarTillsattas?: boolean }).vikarieFarTillsattas;
     const villkor = ((m as Medarbetare).villkor || []) as MedarbetarVillkor[];
-    const night = Boolean(m.nattbehorig || m.jour) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to);
+    const night = Boolean(m.nattbehorig || m.jour) && !harHårt(villkor, "ingen_natt", from, to) && !harHårt(villkor, "endast_dag", from, to) && !harHårt(villkor, "endast_kvall", from, to);
     const jourOk = Boolean(m.jour) && !harHårt(villkor, "ingen_jour", from, to);
+    const hard = hårdaMotorvillkor(m, from, to, kundId, i);
+    const soft = mjukaMotorvillkor(villkor, from, to, kundId);
+    const datedSkills = skillWindowsFromVillkor(villkor, from, to);
     return {
       id,
       code,
@@ -446,6 +459,11 @@ export function byggMotorPayload(opts: {
       profiles: profilerFor({ ...m, jour: jourOk, nattbehorig: night }, mallar),
       hourlyCost: Number(m.timkostnad) > 0 ? Number(m.timkostnad) : null,
       skills: [...skills],
+      skillWindows: datedSkills,
+      constraints: {
+        hard,
+        ...(Object.keys(soft).length ? { soft } : {}),
+      },
     };
   });
   if (!employees.length) varningar.push("Ingen personal är inläst – motorn kan inte lägga pass.");
@@ -515,6 +533,8 @@ export function byggMotorPayload(opts: {
         ssgWindows: [],
         status: "active",
         hourlyCost: opts.timkostnad > 0 ? opts.timkostnad : null,
+        constraints: { hard: { weekendMode: "all" } },
+        skillWindows: [],
       });
     }
     if (extra)

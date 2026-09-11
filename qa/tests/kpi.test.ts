@@ -151,7 +151,8 @@ describe("planeringsaktiviteter", () => {
       kontaktpersoner: {},
     });
     const tim = aktivitetstimmar(exp);
-    expect(tim.inomPassKundnaraH).toBeCloseTo(10 * 10 / 60, 5);
+    expect(tim.perPassKundnaraH).toBeCloseTo(10 * 10 / 60, 5);
+    expect(tim.inomPassKundnaraH).toBe(0);
     expect(tim.separatEjKundnaraH).toBeGreaterThan(0);
     expect(exp.find((e) => e.typ === "lasa_journal")?.tidstyp).toBe("inom_pass");
     expect(exp.find((e) => e.typ === "verksamhetsmote")?.tidstyp).toBe("separat_tid");

@@ -82,6 +82,21 @@ describe("passkapacitet för inom_pass", () => {
     expect(r.platsBrist).toBe(true);
   });
 
+  it("journal per pass ryms inte genom att kapa mot hela perioden", () => {
+    const lage = analysera({
+      rader: [rad({ start: "08:00", slut: "16:00", minuter: 480 })],
+      pass: [pass(), pass({ id: "p2", namn: "Bo", datum: "2026-09-08" })],
+      fran: "2026-09-07",
+      till: "2026-09-08",
+      timkostnad: 270,
+      extraInomPassPerPassKundnaraH: 1,
+    });
+    expect(lage.schematidH).toBe(16);
+    expect(lage.inomPassOverflowH).toBeGreaterThan(0);
+    expect(lage.modellFel).toBe(true);
+    expect(lage.kundnaraH).toBeLessThanOrEqual(16);
+  });
+
   it("obemannat kundbehov och dimensionerande gap är olika fält", () => {
     const lage = analysera({
       rader: [rad()],

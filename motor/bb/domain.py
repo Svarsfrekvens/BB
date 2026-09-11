@@ -105,6 +105,141 @@ def monday(day):
     return add_days(day, -date.fromisoformat(day).weekday())
 
 
+def ssg_for_day(e, day):
+    ssg = e['ssg']
+    for w in e.get('ssgWindows') or []:
+        if w['start'] <= day <= w['end']:
+            ssg = w['ssg']
+    return ssg
+
+
+def ssg_cap_minutes(e, period_days, rules):
+    return sum(ssg_for_day(e, day) / 100 * rules['fullTimeWeeklyHours'] * 60 / 7 for day in period_days)
+
+
+def skills_on_day(e, day):
+    base = set(e.get('skills') or [])
+    windows = e.get('skillWindows') or []
+    if not windows:
+        return base
+    dated = {}
+    for w in windows:
+        dated.setdefault(w['skill'], []).append(w)
+    out = set()
+    for s in base:
+        if s not in dated:
+            out.add(s)
+        elif any(w['start'] <= day <= w['end'] for w in dated[s]):
+            out.add(s)
+    return out
+
+
+def hard_constraints(e):
+    return ((e.get('constraints') or {}).get('hard') or {})
+
+
+def weekend_allowed(e, day):
+    wd = date.fromisoformat(day).isoweekday()
+    if wd < 6:
+        return True
+    mode = hard_constraints(e).get('weekendMode') or 'all'
+    if mode == 'all':
+        return True
+    if mode == 'none':
+        return False
+    week = date.fromisoformat(day).isocalendar()[1]
+    offset = int(hard_constraints(e).get('weekendOffset') or 0)
+    if mode == 'every_other':
+        return (week + offset) % 2 == 0
+    if mode == 'every_third':
+        return (week + offset) % 3 == 0
+    return True
+
+
+def clock_minutes(clock):
+    h, m = clock.split(':')
+    return int(h) * 60 + int(m)
+
+
+def shift_allowed(e, template, day, a, b, rules):
+    hard = hard_constraints(e)
+    types = hard.get('allowedTypes')
+    if types and template.get('type') not in types:
+        return False
+    weekdays = hard.get('weekdays')
+    if weekdays and date.fromisoformat(day).isoweekday() not in weekdays:
+        return False
+    if not weekend_allowed(e, day):
+        return False
+    start_m = clock_minutes(template['start'])
+    end_m = clock_minutes(template['end'])
+    earliest = hard.get('earliestStart')
+    latest = hard.get('latestEnd')
+    if earliest and start_m < clock_minutes(earliest):
+        return False
+    if latest:
+        lim = clock_minutes(latest)
+        if end_m > start_m and end_m > lim:
+            return False
+        if end_m <= start_m and lim < 24 * 60 and end_m > lim:
+            return False
+    hours = (b - a) / 60
+    min_h = hard.get('minShiftHours')
+    max_h = hard.get('maxShiftHours')
+    if min_h is not None and template.get('type') != 'jour' and hours + 1e-9 < float(min_h):
+        return False
+    if max_h is not None and hours > float(max_h) + 1e-9:
+        return False
+    if not set(template.get('skills') or []) <= skills_on_day(e, day):
+        return False
+    return True
+
+
+def rolling_week_windows(period_start, period_end):
+    """Alla 7×24 h-fönster med start vid midnatt, inkl. sex dagar före perioden."""
+    for day in days(add_days(period_start, -6), period_end):
+        yield day, instant(day, '00:00'), instant(add_days(day, 7), '00:00')
+
+
+def duty_week_windows(period_start, period_end, duties):
+    """Veckovila enligt 14 § ATL, förankrad i arbetsdygn.
+
+    För varje kalenderdygn med tjänstgöring ska de följande sju dygnen innehålla
+    minst 36 timmars sammanhängande ledighet. Det fångar rullande sjudagarsblock
+    över söndag–måndag, utan att kräva 36 h i *varje* fasförskjuten kalendervecka
+    (vilket skulle underkänna vanliga må–fre-scheman).
+    """
+    for day, wa, wb in rolling_week_windows(period_start, period_end):
+        a, b = instant(day, '00:00'), instant(add_days(day, 1), '00:00')
+        if any(overlap(x, y, a, b) for x, y in duties):
+            yield day, wa, wb
+
+
+def longest_rest_minutes(duties, window_a, window_b):
+    """Longest consecutive off-duty stretch inside [window_a, window_b). Duties are (start, end)."""
+    if window_b <= window_a:
+        return 0
+    blocked = []
+    for a, b in duties:
+        x, y = max(a, window_a), min(b, window_b)
+        if x < y:
+            blocked.append((x, y))
+    blocked.sort()
+    merged = []
+    for a, b in blocked:
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], b))
+        else:
+            merged.append((a, b))
+    rest = 0
+    cursor = window_a
+    for a, b in merged:
+        rest = max(rest, a - cursor)
+        cursor = b
+    rest = max(rest, window_b - cursor)
+    return rest
+
+
 def occurrences(data):
     active = {c['id'] for c in data['customers'] if c['active']}
     lo, hi = instant(data['workplace']['start'], '00:00'), instant(add_days(data['workplace']['end'], 1), '00:00')
@@ -196,10 +331,48 @@ def check_input(d):
                     and set(jour['weekdays']) <= set(range(1, 8)),
                     'Ogiltiga jour-veckodagar.',
                 )
+        if 'minWeeklyRestHours' in d['rules']:
+            require(numeric(d['rules']['minWeeklyRestHours'], 0, 72, False), 'Ogiltig regel: minWeeklyRestHours.')
+        if 'withinPassMinutesPerShift' in d['rules']:
+            require(numeric(d['rules']['withinPassMinutesPerShift'], 0, 180, True), 'Ogiltig regel: withinPassMinutesPerShift.')
+        for e in d['employees']:
+            if e.get('skillWindows') is not None:
+                require(isinstance(e['skillWindows'], list), 'Ogiltiga kompetensfönster.')
+                for w in e['skillWindows']:
+                    require(isinstance(w, dict) and w.get('start') <= w.get('end'), 'Ogiltigt kompetensfönster.')
+                    date.fromisoformat(w['start']); date.fromisoformat(w['end'])
+                    require(isinstance(w.get('skill'), str) and w['skill'], 'Ogiltig kompetens i fönster.')
+            cons = e.get('constraints')
+            if cons is not None:
+                require(isinstance(cons, dict), 'Ogiltiga individvillkor.')
+                hard = cons.get('hard') or {}
+                require(isinstance(hard, dict), 'Ogiltiga hårda individvillkor.')
+                if 'allowedTypes' in hard:
+                    require(isinstance(hard['allowedTypes'], list) and set(hard['allowedTypes']) <= {'day', 'evening', 'night', 'jour'}, 'Ogiltiga tillåtna passtyper.')
+                if 'weekdays' in hard:
+                    require(isinstance(hard['weekdays'], list) and set(hard['weekdays']) <= set(range(1, 8)), 'Ogiltiga veckodagar i individvillkor.')
+                if 'weekendMode' in hard:
+                    require(hard['weekendMode'] in ('all', 'none', 'every_other', 'every_third'), 'Ogiltigt helgmönster.')
+                if 'weekendOffset' in hard:
+                    require(type(hard['weekendOffset']) is int, 'Ogiltig helgförskjutning.')
+                for key in ('earliestStart', 'latestEnd'):
+                    if key in hard and hard[key]:
+                        require(bool(re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', hard[key])), f'Ogiltig tid: {key}.')
+                for key, lo, hi in (('minShiftHours', 1, 16), ('maxShiftHours', 1, 16), ('maxConsecutiveDays', 1, 7), ('maxNightConsecutive', 1, 14), ('maxJourConsecutive', 1, 14), ('minConsecutiveOffDays', 1, 14)):
+                    if key in hard:
+                        require(numeric(hard[key], lo, hi, False if 'Hours' in key else True), f'Ogiltigt individtak: {key}.')
+                soft = cons.get('soft') or {}
+                require(isinstance(soft, dict), 'Ogiltiga mjuka individvillkor.')
+                if 'preferredTypes' in soft:
+                    require(isinstance(soft['preferredTypes'], list) and set(soft['preferredTypes']) <= {'day', 'evening', 'night', 'jour'}, 'Ogiltiga önskade passtyper.')
+                for key in ('forbiddenCustomerIds', 'requiredCustomerIds', 'preferredCustomerIds'):
+                    if key in hard or key in soft:
+                        src = hard if key in hard else soft
+                        require(isinstance(src[key], list), f'Ogiltig lista: {key}.')
         require(numeric(d['economy']['hourlyCost'],0,100000), 'Ogiltig timkostnad.')
         ow = d.get('objectiveWeights') or {}
         require(isinstance(ow, dict), 'Ogiltiga målviktningar.')
-        for key in ('continuitySek', 'spreadSekPerPermille', 'uncoveredSekPerMinute'):
+        for key in ('continuitySek', 'spreadSekPerPermille', 'uncoveredSekPerMinute', 'preferredMissSek'):
             if key in ow:
                 require(numeric(ow[key], 0, 10000), f'Ogiltig målvikt: {key}.')
         require(type(d['boundaryAcknowledged']) is bool,'Periodgränser måste bekräftas explicit.')

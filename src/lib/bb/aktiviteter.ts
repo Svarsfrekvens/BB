@@ -42,6 +42,7 @@ export type ExpanderadAktivitet = {
   kundnara: boolean;
   tidstyp: AktivitetsTidstyp;
   timmar: number;
+  perPass?: boolean;
   kund?: string;
   medarbetare?: string;
   kalla: AktivitetsKalla;
@@ -123,7 +124,7 @@ export function expanderaAktiviteter(opts: {
     const kunder = a.kundId ? [a.kundId] : opts.kunder;
     const tidstyp = defaultTidstyp(a);
     if (a.frekvens === "per_pass") {
-      pushUnik({ id: a.id, typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, tidstyp, timmar: tim * opts.arbetspass, kalla: a.kalla });
+      pushUnik({ id: a.id, typ: a.aktivitetstyp, namn: a.namn, kundnara: a.kundnara, tidstyp, timmar: tim * opts.arbetspass, perPass: true, kalla: a.kalla });
       continue;
     }
     if (a.frekvens === "per_kund_vecka") {
@@ -177,9 +178,13 @@ export function expanderaAktiviteter(opts: {
 export function aktivitetstimmar(expanderade: ExpanderadAktivitet[]) {
   const inom = expanderade.filter((a) => a.tidstyp !== "separat_tid");
   const separat = expanderade.filter((a) => a.tidstyp === "separat_tid");
+  const perPass = inom.filter((a) => a.perPass);
+  const period = inom.filter((a) => !a.perPass);
   return {
-    inomPassKundnaraH: inom.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
-    inomPassEjKundnaraH: inom.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    inomPassKundnaraH: period.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    inomPassEjKundnaraH: period.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    perPassKundnaraH: perPass.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
+    perPassEjKundnaraH: perPass.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
     separatKundnaraH: separat.filter((a) => a.kundnara).reduce((s, a) => s + a.timmar, 0),
     separatEjKundnaraH: separat.filter((a) => !a.kundnara).reduce((s, a) => s + a.timmar, 0),
   };
