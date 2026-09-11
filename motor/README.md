@@ -36,6 +36,6 @@ Läs `LOVABLE-INTEGRATION.md` för kopplingen till Lovable.
 
 ## Vad som behöver göras före pilot
 
-Modellen måste provas mot verkliga men avidentifierade scheman och SeKoia-underlag. Frösunda behöver fastställa alla regler, passmallar och prioriteringar. Regler som nio fridagar, helgtjänstgöring, lokala avtal och individuella villkor behöver läggas till och testas om de ska styra pilotens schema.
+Modellen måste provas mot verkliga men avidentifierade scheman och SeKoia-underlag. Frösunda behöver fastställa alla regler, passmallar och prioriteringar. F-01 minst nio fridagar per 28 dagar är hård i motorn. Helgtjänstgöring, lokala avtal och individuella villkor behöver fortsatt granskas.
 
 Motorn garanterar att ett returnerat förslag följer de regler som faktiskt finns i koden och passerar validatorn. Den kan inte garantera att alla verksamhetsregler är rätt beskrivna eller fullständiga utan verksamhetens granskning.

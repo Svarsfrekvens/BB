@@ -108,7 +108,7 @@ def solve(data, seconds=30):
             wa,wb=instant(week,'00:00'),instant(add_days(week,7),'00:00')
             model.add(sum(sum(intersect(a,b,wa,wb) for a,b in c['work'])*c['x'] for c in rows+fixed)<=floor(rules['maxWeeklyHours']*60))
         flags=[]
-        flag_days=list(days(add_days(wp['start'],-6),add_days(wp['end'],6)))
+        flag_days=list(days(add_days(wp['start'],-27),add_days(wp['end'],27)))
         for day in flag_days:
             a,b=instant(day,'00:00'),instant(add_days(day,1),'00:00')
             flag=model.new_bool_var('workday:'+e['id']+day)
@@ -144,7 +144,7 @@ def solve(data, seconds=30):
         min_off=hard_constraints(e).get('minConsecutiveOffDays')
         if min_off:
             need=int(min_off)
-            period_flags=flags[6:6+len(period_days)]
+            period_flags=flags[27:27+len(period_days)]
             if need<=len(period_flags):
                 windows=[]
                 for i in range(len(period_flags)-need+1):
@@ -299,7 +299,6 @@ def solve(data, seconds=30):
     prefer_ore=int(round(float(ow.get('preferredMissSek',1))*100))
     c6_ore=int(round(float(ow.get('consecutive6Sek',20))*100))
     c7_ore=int(round(float(ow.get('consecutive7Sek',80))*100))
-    rest_ore=int(round(float(ow.get('missingRestDaySek',15))*100))
     pair_ore=int(round(float(ow.get('missingPairOffSek',25))*100))
     minoff_ore=int(round(float(ow.get('missingMinOffSek',40))*100))
     quality_extra=0
@@ -311,6 +310,14 @@ def solve(data, seconds=30):
         flags, flag_days=packed
         period_idx=[i for i,d in enumerate(flag_days) if wp['start']<=d<=wp['end']]
         period_flags=[flags[i] for i in period_idx]
+        if rest_target>0:
+            # F-01 hård: restDaysIn28Days >= rest_target (standard 9).
+            # Inte ett kvalitetsstraff; fler fridagar än 9 maximeras inte.
+            max_work=28-rest_target
+            for i in range(len(flags)-27):
+                if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(28)):
+                    continue
+                model.add(sum(flags[i:i+28])<=max_work)
         for i in range(len(flags)-5):
             if not any(wp['start']<=flag_days[i+j]<=wp['end'] for j in range(6)):
                 continue
@@ -327,16 +334,6 @@ def solve(data, seconds=30):
             model.add(s>=7).only_enforce_if(sev)
             model.add(s<=6).only_enforce_if(sev.Not())
             quality_extra += c7_ore*sev
-        if rest_target>0 and len(period_flags)>=28:
-            zero=model.new_int_var(0,0,f'rest0:{e["id"]}')
-            model.add(zero==0)
-            for i in range(len(period_flags)-27):
-                rest=sum(1-f for f in period_flags[i:i+28])
-                short=model.new_int_var(-28, rest_target, f'restshort:{e["id"]}:{i}')
-                model.add(short==rest_target-rest)
-                miss=model.new_int_var(0, rest_target, f'restmiss:{e["id"]}:{i}')
-                model.add_max_equality(miss,[zero, short])
-                quality_extra += rest_ore*miss
         if pair_ore and len(period_flags)>=2:
             pairs=[]
             for i in range(len(period_flags)-1):

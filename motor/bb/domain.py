@@ -218,8 +218,12 @@ def longest_work_run(worked):
     return best
 
 
+def rest_days_in_window(worked_slice):
+    return sum(1 for w in worked_slice if not w)
+
+
 def rest_days_missing_in_windows(worked, window=28, target=9):
-    """Summa underskott mot target fridagar i varje window-långt fönster (F-01)."""
+    """Antal 28-dagarsfönster (eller window) som underskrider F-01. 0 om regeln är av."""
     if target <= 0 or len(worked) < window:
         return 0
     missing = 0

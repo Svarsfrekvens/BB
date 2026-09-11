@@ -667,7 +667,9 @@ export function optimeraSchema(opts: {
   return { pass: P, forandringar, varningar: kontrolleraPass(P, medarbetare, veckor, fran, till) };
 }
 
-/* ---------- Styrande villkor (ersätter FORINSTALLDA_VILLKOR) ---------- */
+/* ---------- Styrande villkor (ersätter FORINSTALLDA_VILLKOR) ----------
+ * BB REGELBIBEL: F-01 minst 9 fridagar / 28 dagar är HÅRD (inte MJUK/lokal).
+ * F-02 två sammanhängande fridagar är MJUK kvalitet. */
 export const STYRANDE_VILLKOR: { grupp: string; villkor: [string, string, string, string, string][] }[] = [
   { grupp: "Arbetstidsregler", villkor: [
     ["Minsta dygnsvila", "11", "h", "Röd kontroll vid kortare vila", "krav"],
@@ -676,7 +678,7 @@ export const STYRANDE_VILLKOR: { grupp: string; villkor: [string, string, string
     ["Långpass – gul varning", "10", "h", "Optimeringsgräns", "gul"],
     ["Långpass – röd varning", "12", "h", "Kräver särskild bedömning", "krav"],
     ["Max arbetsdagar i följd", "5", "dagar", "Normalläge", "krav"],
-    ["Minsta fridagar", "9", "dagar/4 v", "Fast lokal regel", "krav"],
+    ["Minsta fridagar", "9", "dagar/4 v", "Hård miniminivå, minst 9 fridagar per 28 dagar (F-01)", "krav"],
     ["Schema i förväg", "14", "dagar", "Två veckor enligt avtal", "krav"],
     ["Längsta schemaperiod", "16", "veckor", "Avtalets huvudregel", "krav"],
     ["Individuell kontrollperiod", "28", "dagar", "Fyra veckor", "info"],
