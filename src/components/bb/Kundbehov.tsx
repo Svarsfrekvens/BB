@@ -297,7 +297,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
           </Button>
         </div>
       {visaDetaljer ? (
-
+        <>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex items-center gap-2 rounded-xl bg-muted p-2">
               <Val
@@ -345,7 +345,6 @@ export function Kundbehov({ d, state, api }: VyProps) {
               <RotateCcw /> Återställ
             </Button>
           </div>
-        </div>
 
         <div className="max-h-[640px] overflow-auto border-t border-border">
           <Table>
@@ -536,6 +535,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
             ) : null}
           </span>
         </div>
+        </>
       ) : null}
       </Card>
 
