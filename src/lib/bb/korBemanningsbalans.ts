@@ -10,7 +10,9 @@ import { delaPeriod, payloadForFonster, svansPass } from "./motorPeriod";
 import { passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "./motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "./motor.functions";
 import { byggMotorPayload, type PayloadResultat } from "./motorPayload";
+import { startaAsynkBalans, startaMotorJobbPoll, balansUtfallText } from "./motorJobb";
 import { readinessFranApi } from "./vcFlode";
+import { lasJourDiagnosFranMotorSvar, visaJourResursbrist } from "./jourDiagnos";
 import type { VyApi, VyTillstand } from "./vy";
 
 export function byggUnderlagForBerakning(api: VyApi, state: VyTillstand | Record<string, unknown> | null) {
@@ -42,7 +44,100 @@ export function byggUnderlagForBerakning(api: VyApi, state: VyTillstand | Record
   });
 }
 
-export type KorUtfall = "motor" | "lokal" | "blockerad";
+export type KorUtfall = "motor" | "lokal" | "blockerad" | "pagaende";
+
+export function underlagFingeravtryckFranPayload(payload: Record<string, unknown>) {
+  const s = JSON.stringify({
+    w: payload["workplace"],
+    e: payload["employees"],
+    i: Array.isArray(payload["interventions"]) ? payload["interventions"].length : 0,
+    r: payload["rules"],
+    a: payload["absences"],
+    b: payload["boundaryShifts"],
+    t: payload["templates"],
+  });
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+  return (h >>> 0).toString(16);
+}
+
+export function sparaJourResursbrist(api: VyApi, svar: MotorSvar, extraVarningar: string[] = []) {
+  const diagnos = lasJourDiagnosFranMotorSvar(svar);
+  if (!visaJourResursbrist(diagnos)) return false;
+  return api.anvandMotorResultat({
+    pass: [],
+    flyttade: [],
+    forandringar: [],
+    varningar: extraVarningar,
+    solverStatus: svar.status || "INFEASIBLE",
+    explanation: svar.forklaring || diagnos?.userMessage || "",
+    summary: svar.summary,
+    resourceDiagnostics: svar.resourceDiagnostics || (diagnos ? { jour: diagnos } : null),
+    obemannade: [],
+    ofullstandig: true,
+  });
+}
+
+function infordMotorSvar(opts: {
+  api: VyApi;
+  underlagMotor: PayloadResultat;
+  svar: MotorSvar;
+  stale?: boolean;
+}) {
+  const { api, underlagMotor, svar } = opts;
+  const extraStale = opts.stale
+    ? ["Balansen bygger på ett tidigare underlag – skapa om Balans."]
+    : [];
+  if (sparaJourResursbrist(api, svar, [...underlagMotor.varningar, ...extraStale])) return "motor" as const;
+  const schema = svar.schemaJson
+    ? tolkaMotorSchema(svar.schemaJson, { medarbetare: underlagMotor.medarbetarKarta, insatser: underlagMotor.insatsKarta })
+    : null;
+  if (!schema || !schema.pass.length || svar.status === "INFEASIBLE" || svar.status === "UNKNOWN" || svar.status === "MODEL_INVALID") {
+    api.skapa();
+    return "lokal" as const;
+  }
+  const original = api.schemaPassOriginal();
+  const forandringar = passForandringar(original, schema.pass);
+  const obemannadeTimmar = schema.obemannade.reduce((s, u) => s + (u.minuter * u.antal) / 60, 0);
+  const extraVarningar = obemannadeTimmar
+    ? [
+        `${schema.obemannade.length} insatstillfällen (${obemannadeTimmar.toLocaleString("sv-SE", { maximumFractionDigits: 1 })} timmar) kunde inte bemannas utan att bryta mot vila-, helg- eller jourreglerna.`,
+      ]
+    : [];
+  const infordes = api.anvandMotorResultat({
+    pass: schema.pass,
+    flyttade: schema.flyttade,
+    forandringar,
+    varningar: [...underlagMotor.varningar, ...extraVarningar, ...extraStale],
+    solverStatus: schema.solverStatus,
+    explanation: schema.explanation,
+    tilldelningar: schema.tilldelningar,
+    fonster: 1,
+    objectiveBreakdown: schema.objectiveBreakdown,
+    summary: svar.summary,
+    resourceDiagnostics: schema.resourceDiagnostics || svar.resourceDiagnostics || null,
+  });
+  return infordes ? ("motor" as const) : ("lokal" as const);
+}
+
+export function atterupptaMotorJobb(api: VyApi, state: VyTillstand | Record<string, unknown> | null) {
+  const job = api.motorJobb?.();
+  if (!job?.id) return;
+  const underlagMotor = byggUnderlagForBerakning(api, state);
+  startaMotorJobbPoll(api, (svar, klartJobb) => {
+    if (!svar.result) {
+      api.skapa();
+      api.sattMotorJobb?.(null);
+      return;
+    }
+    infordMotorSvar({ api, underlagMotor, svar: svar.result, stale: Boolean(klartJobb.stale) });
+    api.sattMotorJobb?.({
+      ...klartJobb,
+      phase: "completed",
+      phaseText: balansUtfallText(svar.outcome) || klartJobb.phaseText || "",
+    });
+  });
+}
 
 export async function korBemanningsbalans(opts: {
   api: VyApi;
@@ -57,9 +152,11 @@ export async function korBemanningsbalans(opts: {
   const steg = (s: string) => opts.onSteg?.(s);
 
   let tillganglig = false;
+  let asyncJobs = false;
   try {
     const status = await motorStatus();
     tillganglig = Boolean(status?.installd && status?.klar);
+    asyncJobs = Boolean((status as { asyncJobs?: boolean })?.asyncJobs);
   } catch {
     tillganglig = false;
   }
@@ -69,16 +166,43 @@ export async function korBemanningsbalans(opts: {
   }
 
   const underlagMotor = byggUnderlagForBerakning(opts.api, opts.state);
+  const underlagHash = underlagFingeravtryckFranPayload(underlagMotor.payload as Record<string, unknown>);
+  const pagaende = opts.api.motorJobb?.();
+  if (pagaende?.id && pagaende.phase !== "completed" && pagaende.phase !== "failed") {
+    steg("Balans skapas redan");
+    atterupptaMotorJobb(opts.api, opts.state);
+    return "pagaende";
+  }
   const insatser = (underlagMotor.payload["interventions"] as { date?: string }[]) || [];
   const fonster = delaPeriod(underlagMotor.info.from, underlagMotor.info.to, insatser);
-  const delar: MotorSchema[] = [];
-  let lasta: Record<string, unknown>[] = [];
-  let senasteSummary: Record<string, unknown> | null = null;
-
   const lokal = () => {
     opts.api.skapa();
     return "lokal" as const;
   };
+  if (asyncJobs && fonster.length === 1) {
+    const del = payloadForFonster(underlagMotor.payload, fonster[0]!, []);
+    const jobbTid = opts.sekunder ?? 180;
+    const start = await startaAsynkBalans({
+      api: opts.api,
+      del,
+      underlagHash,
+      sekunder: jobbTid,
+      onKlart: (svar, klartJobb) => {
+        if (!svar.result) {
+          opts.api.skapa();
+          opts.api.sattMotorJobb?.(null);
+          return;
+        }
+        infordMotorSvar({ api: opts.api, underlagMotor, svar: svar.result, stale: Boolean(klartJobb.stale) });
+      },
+    });
+    if (!start || typeof start !== "object" || !("ok" in start) || !start.ok) return lokal();
+    steg("Bemanningsbalans skapas");
+    return "pagaende";
+  }
+  const delar: MotorSchema[] = [];
+  let lasta: Record<string, unknown>[] = [];
+  let senasteSummary: Record<string, unknown> | null = null;
 
   try {
     for (let i = 0; i < fonster.length; i++) {
@@ -97,6 +221,7 @@ export async function korBemanningsbalans(opts: {
         ? tolkaMotorSchema(svar.schemaJson, { medarbetare: underlagMotor.medarbetarKarta, insatser: underlagMotor.insatsKarta })
         : null;
       if (svar.summary) senasteSummary = svar.summary;
+      if (sparaJourResursbrist(opts.api, svar, underlagMotor.varningar)) return "motor";
       if (!schema || !schema.pass.length || svar.status === "INFEASIBLE" || svar.status === "UNKNOWN" || svar.status === "MODEL_INVALID") {
         return lokal();
       }
@@ -126,6 +251,7 @@ export async function korBemanningsbalans(opts: {
       fonster: fonster.length,
       objectiveBreakdown: samlat.objectiveBreakdown,
       summary: senasteSummary,
+      resourceDiagnostics: samlat.resourceDiagnostics || null,
     });
     return infordes ? "motor" : lokal();
   } catch {

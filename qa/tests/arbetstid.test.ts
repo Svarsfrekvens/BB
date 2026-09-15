@@ -4,8 +4,10 @@ import {
   DEFAULT_WORK_TIME_MODEL_ID,
   STANDARD_WORK_TIME_MODELS,
   defaultWeeklyHours,
+  harTillrackligArbetstidsmodell,
   listPeriodDays,
   periodCapacityMinutes,
+  weeklyMinutesForDay,
 } from "@/lib/bb/arbetstid";
 import { byggMotorPayload } from "@/lib/bb/motorPayload";
 import type { Medarbetare } from "@/lib/bb/vy";
@@ -149,5 +151,22 @@ describe("arbetstidsmodell i payload och visning", () => {
       { workTimeModels: STANDARD_WORK_TIME_MODELS, defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID },
     );
     expect(cap / 60).toBeCloseTo(37 * (10 / 7), 5);
+  });
+
+  it("arbetstidsmodell: fönster slår person som slår verksamhetsdefault", () => {
+    const wp = { workTimeModels: STANDARD_WORK_TIME_MODELS, defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID };
+    const rules = { fullTimeWeeklyHours: 40 };
+    expect(harTillrackligArbetstidsmodell({}, wp)).toBe(true);
+    expect(harTillrackligArbetstidsmodell({}, { workTimeModels: STANDARD_WORK_TIME_MODELS, defaultWorkTimeModelId: "" })).toBe(false);
+    expect(
+      weeklyMinutesForDay(
+        { ssg: 100, workTimeModelId: "helgfri-40", workTimeWindows: [{ start: "2026-09-07", end: "2026-09-07", modelId: "standig-natt-36-20" }] },
+        "2026-09-07",
+        rules,
+        wp,
+      ),
+    ).toBe(36 * 60 + 20);
+    expect(weeklyMinutesForDay({ ssg: 100, workTimeModelId: "helgfri-40" }, "2026-09-08", rules, wp)).toBe(40 * 60);
+    expect(weeklyMinutesForDay({ ssg: 100 }, "2026-09-08", rules, wp)).toBe(37 * 60);
   });
 });

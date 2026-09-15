@@ -99,7 +99,7 @@ export function Medarbetare({ api }: VyProps) {
       <TomtLage
         ikon={Upload}
         rubrik="Medarbetarna kommer från schemat"
-        text="Läs in det befintliga schemat först – då fylls listan med medarbetare, sysselsättningsgrad och vikarier för de obemannade raderna."
+        text="Läs in det befintliga schemat först – då fylls listan med namngivna medarbetare. Vakanta pass blir inte personer."
         atgarder={[{ text: "Läs in schema", onClick: () => api.setTab("uppladdning"), ikon: Upload }]}
       />
     );
@@ -122,7 +122,7 @@ export function Medarbetare({ api }: VyProps) {
         {andrad ? <p className="mt-2 text-sm text-warning">{MEDARBETARE_ANDRAD_TEXT}</p> : null}
         {antalVikarier ? (
           <p className="mt-3 inline-block rounded-lg bg-warning-soft px-3 py-1.5 text-[13px] font-semibold text-warning">
-            {antalVikarier} vikarier från obemannade schemarader
+            {antalVikarier} namngivna vikarier (inte öppna pass)
           </p>
         ) : null}
       </Card>

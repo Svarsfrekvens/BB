@@ -15,6 +15,7 @@ import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema,
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "@/lib/bb/motor.functions";
 import { byggMotorPayload, type PayloadResultat } from "@/lib/bb/motorPayload";
 import { vcStatusText, filtreraJamforRader, visningEffekt } from "@/lib/bb/vcFlode";
+import { sparaJourResursbrist } from "@/lib/bb/korBemanningsbalans";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -214,6 +215,13 @@ export function Motor({ state, api }: VyProps) {
         });
         setKorningar([...loggar]);
         if (svar.summary) senasteSummary = svar.summary;
+        if (sparaJourResursbrist(api, svar, underlagMotor.varningar)) {
+          setKlar(true);
+          setKalla("motor");
+          setJobbar(false);
+          setSteg("");
+          return;
+        }
         if (!schema || !schema.pass.length || svar.status === "INFEASIBLE" || svar.status === "UNKNOWN" || svar.status === "MODEL_INVALID") {
           setDiagnos(byggDiagnos(underlagMotor));
           lokalBerakning();
@@ -251,6 +259,7 @@ export function Motor({ state, api }: VyProps) {
         fonster: fonster.length,
         objectiveBreakdown: samlat.objectiveBreakdown,
         summary: senasteSummary,
+        resourceDiagnostics: samlat.resourceDiagnostics || null,
       });
       if (infordes) {
         setKlar(true);

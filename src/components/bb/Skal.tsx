@@ -11,7 +11,7 @@ import { Notiser } from "./Notiser";
 import { BekraftaDialog } from "./Bekrafta";
 import { Progress } from "@/components/ui/progress";
 import { ProcessFlode } from "./ProcessFlode";
-import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
+import { korBemanningsbalans, atterupptaMotorJobb } from "@/lib/bb/korBemanningsbalans";
 import { processStegTab } from "@/lib/bb/vcFlode";
 import type { ProcessStegLage } from "@/lib/bb/vcFlode";
 
@@ -220,6 +220,11 @@ export function Skal({ children }: { children: ReactNode }) {
     window.addEventListener("beforeunload", varna);
     return () => window.removeEventListener("beforeunload", varna);
   }, [s.osparat]);
+
+  useEffect(() => {
+    const v = bbVy.get();
+    if (v.api && v.state) atterupptaMotorJobb(v.api, v.state);
+  }, []);
 
   return (
     <TooltipProvider delayDuration={200}>

@@ -37,10 +37,13 @@ describe("Galaxen – Sekoia", () => {
 
 describe("Galaxen – Medvind", () => {
   it("medarbetare, vikarier och pass", () => {
-    expect(medvind.medarbetare.length).toBe(11);
-    expect(medvind.medarbetare.filter(m => m.vikarie).length).toBe(6);
+    expect(medvind.medarbetare.length).toBe(5);
+    expect(medvind.medarbetare.map((m) => m.namn)).toEqual(["Topas", "Turmalin", "Jade", "Bärnsten", "Ametist"]);
+    expect(medvind.medarbetare.filter((m) => m.vikarie).length).toBe(0);
+    expect(medvind.medarbetare.filter((m) => m.vakant).length).toBe(0);
     expect(medvind.pass.length).toBe(143);
     expect(medvind.vakantaPass).toBe(40);
+    expect(medvind.pass.filter((p) => p.vakant).length).toBe(40);
   });
   it("schematid exkl. sovande jour", () => {
     expect(medvind.timmarTot).toBeCloseTo(832.0, 1);

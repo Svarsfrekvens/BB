@@ -9,6 +9,8 @@ import secrets
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .domain import check_input
+from .jobs import async_jobs_enabled, create_job, execute, find_active, get_job, public_view
+from .limits import reported_limits
 from .validate import validate
 
 app=FastAPI(title='Bemanningsbalans optimeringsmotor',version='1.0.0')
@@ -59,7 +61,7 @@ async def payload(request):
 @app.get('/api/health')
 async def health():
     import importlib.util
-    return dict(ready=importlib.util.find_spec('ortools') is not None,storage='session-and-excel')
+    return dict(ready=importlib.util.find_spec('ortools') is not None,storage='session-and-excel',limits=reported_limits())
 
 
 @app.post('/api/validate')
@@ -80,6 +82,44 @@ async def optimize(request:Request):
         raise HTTPException(503,'OR-Tools är inte installerat. Följ startinstruktionerna.') from exc
     except (ValueError,TypeError,OverflowError) as exc:
         raise HTTPException(422,str(exc)) from exc
+
+
+@app.post('/api/optimize/jobs')
+async def start_optimize_job(request:Request):
+    if not async_jobs_enabled():
+        raise HTTPException(404,'Asynkron beräkning är inte påslagen.')
+    body=await payload(request)
+    from .jobs import input_fingerprint
+    fp=input_fingerprint(body['data'])
+    existing=find_active(fp)
+    if existing:
+        existing['reused']=True
+        return public_view(existing)
+    if gate.locked():
+        raise HTTPException(429,'En beräkning pågår. Försök igen när den är klar.')
+    seconds=body.get('seconds',30)
+    job=create_job(body['data'], seconds)
+    async def runner():
+        try:
+            async with gate:
+                await asyncio.to_thread(execute, job)
+        except Exception as exc:
+            job['status']='failed'
+            job['phase']='failed'
+            job['error']=str(exc)
+            job['outcome']='tekniskt_fel'
+    asyncio.create_task(runner())
+    return public_view(job)
+
+
+@app.get('/api/optimize/jobs/{job_id}')
+async def read_optimize_job(job_id:str):
+    if not async_jobs_enabled():
+        raise HTTPException(404,'Asynkron beräkning är inte påslagen.')
+    job=get_job(job_id)
+    if not job:
+        raise HTTPException(404,'Beräkningen hittades inte. Den kan ha försvunnit vid omstart.')
+    return public_view(job, include_result=job.get('status') in ('completed','failed'))
 
 
 @app.get('/')

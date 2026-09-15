@@ -1,14 +1,24 @@
 """Independent validator. It never imports solver.py or trusts solver status."""
 from .domain import (check_input, occurrences, span, paid, overlap, intersect, instant,
-                     add_days, days, parts, night_intervals, jour_intervals, is_night, monday,
+                     add_days, days, parts, night_intervals, jour_intervals, monday,
                      ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      clock_minutes, longest_rest_minutes, duty_week_windows, soft_constraints,
                      calendar_work_days, consecutive_six_seven_counts, longest_work_run,
                      has_consecutive_off, rest_days_target, f01_known_span, f01_window_known,
                      duty_occasions, occasion_span, occasion_profile_id, shift_profiles,
-                     max_jour_in_night_windows,
-                     jour_eligible, night_eligible,
+                     occasion_exceeds_max_span, max_jour_in_night_windows,
+                     jour_eligible, night_eligible, pass_requires_night_eligibility,
                      consecutive_pass_run, required_rest_after_minutes)
+from .generate import planning_day_bounds
+
+
+def _all_boundary(group, boundaries):
+    ids = [s.get('id') for s in group if s.get('id')]
+    return bool(ids) and all(i in boundaries for i in ids)
+
+
+def _history(warnings, source, message, **more):
+    warnings.append(dict(rule='BOUNDARY_HISTORY', sourceRule=source, message=message, **more))
 
 
 def validate(data, schedule):
@@ -45,8 +55,12 @@ def validate(data, schedule):
                 meta = dict(employeeId=e['id'],shiftId=s['id'])
                 if s['id'] not in boundaries and e['status'] != 'active':
                     issue('STATUS',f"{e['code']}: inte aktiv.",**meta)
-                if s.get('type') != 'jour' and not night_eligible(e) and (s.get('type') == 'night' or is_night(a,b)):
-                    issue('NIGHT',f"{e['code']}: saknar nattbehörighet.",**meta)
+                if pass_requires_night_eligibility(s) and not night_eligible(e):
+                    msg = f"{e['code']}: saknar nattbehörighet."
+                    if s['id'] in boundaries:
+                        _history(warnings, 'NIGHT', msg, **meta)
+                    else:
+                        issue('NIGHT', msg, **meta)
                 if s.get('type') == 'jour' and not jour_eligible(e):
                     issue('JOUR',f"{e['code']}: saknar jourbehörighet.",**meta)
                 hard = hard_constraints(e)
@@ -79,7 +93,11 @@ def validate(data, schedule):
                 if not set(s['skills']) <= skills_on_day(e, s['date']):
                     issue('SKILL',f"{e['code']}: saknar passkompetens.",**meta)
                 if b-a > r['maxShiftHours']*60:
-                    issue('SHIFT_LENGTH',f"{e['code']}: för långt pass.",**meta)
+                    msg=f"{e['code']}: för långt pass."
+                    if s['id'] in boundaries:
+                        _history(warnings,'SHIFT_LENGTH',msg,**meta)
+                    else:
+                        issue('SHIFT_LENGTH',msg,**meta)
                 if any(v['employeeId']==e['id'] and overlap(a,b,instant(v['start'],'00:00'),instant(add_days(v['end'],1),'00:00')) for v in data['absences']):
                     issue('ABSENCE',f"{e['code']}: pass under frånvaro.",**meta)
             except (ValueError,KeyError,TypeError) as exc:
@@ -91,43 +109,93 @@ def validate(data, schedule):
                 if i:
                     prev = groups[i - 1]
                     gap = occasion_span(group)[0] - occasion_span(prev)[1]
+                    hist = _all_boundary(prev, boundaries) and _all_boundary(group, boundaries)
                     if gap < 0:
-                        issue('SHIFT_OVERLAP', f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}.", employeeId=e['id'], shiftId=group[0].get('id'))
+                        msg = f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}."
+                        if hist:
+                            _history(warnings, 'SHIFT_OVERLAP', msg, employeeId=e['id'], shiftId=group[0].get('id'))
+                        else:
+                            issue('SHIFT_OVERLAP', msg, employeeId=e['id'], shiftId=group[0].get('id'))
                     elif gap < r['minRestHours'] * 60:
-                        issue('REST', f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}.", employeeId=e['id'], shiftId=group[0].get('id'))
+                        msg = f"{e['code']}: {gap/60:g} timmars vila före {group[0]['date']} {group[0]['start']}."
+                        if hist:
+                            _history(warnings, 'REST', msg, employeeId=e['id'], shiftId=group[0].get('id'))
+                        else:
+                            issue('REST', msg, employeeId=e['id'], shiftId=group[0].get('id'))
                 pid = occasion_profile_id(group, r)
                 spec = shift_profiles(r).get(pid) or {}
                 span_a, span_b = occasion_span(group)
-                max_span = spec.get('maxSpanHours')
-                if max_span is not None and (span_b - span_a) > float(max_span) * 60 + 1e-9:
-                    issue('COMPOSITE_LENGTH', f"{e['code']}: sammanvägt tjänstgöringstillfälle längre än profilen {pid} tillåter.", employeeId=e['id'])
+                if occasion_exceeds_max_span(group, r):
+                    msg = f"{e['code']}: sammanvägt tjänstgöringstillfälle längre än profilen {pid} tillåter."
+                    if _all_boundary(group, boundaries):
+                        _history(warnings, 'COMPOSITE_LENGTH', msg, employeeId=e['id'])
+                    else:
+                        issue('COMPOSITE_LENGTH', msg, employeeId=e['id'])
                 need_jour = spec.get('minJourMinutesInNightWindow')
                 if need_jour:
                     got = max_jour_in_night_windows(group, r, spec)
                     if got + 1e-9 < int(need_jour):
-                        issue('COMPOSITE_JOUR_WINDOW', f"{e['code']}: sammanvägt pass saknar minst {int(need_jour)/60:g} timmar sammanhängande jour i nattfönstret.", employeeId=e['id'])
+                        msg = f"{e['code']}: sammanvägt pass saknar minst {int(need_jour)/60:g} timmar sammanhängande jour i nattfönstret."
+                        if _all_boundary(group, boundaries):
+                            _history(warnings, 'COMPOSITE_JOUR_WINDOW', msg, employeeId=e['id'])
+                        else:
+                            issue('COMPOSITE_JOUR_WINDOW', msg, employeeId=e['id'])
                 owed = required_rest_after_minutes(group, r)
                 if owed and i + 1 < len(groups):
                     nxt = groups[i + 1]
                     wait = occasion_span(nxt)[0] - span_b
                     if wait + 1e-9 < owed:
-                        issue('COMP_REST', f"{e['code']}: {owed/60:g} timmars efterföljande vila krävs efter sammanvägt pass.", employeeId=e['id'])
+                        msg = f"{e['code']}: {owed/60:g} timmars efterföljande vila krävs efter sammanvägt pass."
+                        if _all_boundary(group, boundaries) and _all_boundary(nxt, boundaries):
+                            _history(warnings, 'COMP_REST', msg, employeeId=e['id'])
+                        else:
+                            issue('COMP_REST', msg, employeeId=e['id'])
+            bound_shifts = [s for s in shifts if s.get('id') in boundaries]
             used = sum(intersect(a,b,lo,hi) for s in shifts for a,b in s['work'])
+            used_b = sum(intersect(a,b,lo,hi) for s in bound_shifts for a,b in s['work'])
             cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
             if used > cap+0.01:
-                issue('CONTRACT',f"{e['code']}: fler timmar än periodkapaciteten enligt SSG.",employeeId=e['id'])
+                msg=f"{e['code']}: fler timmar än periodkapaciteten enligt SSG."
+                if used_b > cap+0.01:
+                    _history(warnings,'CONTRACT',msg,employeeId=e['id'])
+                    if used > used_b+0.01:
+                        issue('CONTRACT',msg,employeeId=e['id'])
+                else:
+                    issue('CONTRACT',msg,employeeId=e['id'])
             for week in {monday(day) for day in days(wp['start'],wp['end'])}:
                 wa,wb = instant(week,'00:00'),instant(add_days(week,7),'00:00')
-                if sum(intersect(a,b,wa,wb) for s in shifts for a,b in s['work']) > r['maxWeeklyHours']*60:
-                    issue('WEEK_HOURS',f"{e['code']}: för många timmar kalenderveckan {week}.",employeeId=e['id'])
+                wh=sum(intersect(a,b,wa,wb) for s in shifts for a,b in s['work'])
+                wh_b=sum(intersect(a,b,wa,wb) for s in bound_shifts for a,b in s['work'])
+                if wh > r['maxWeeklyHours']*60:
+                    msg=f"{e['code']}: för många timmar kalenderveckan {week}."
+                    if wh_b > r['maxWeeklyHours']*60:
+                        _history(warnings,'WEEK_HOURS',msg,employeeId=e['id'])
+                        if wh > wh_b+0.01:
+                            issue('WEEK_HOURS',msg,employeeId=e['id'])
+                    else:
+                        issue('WEEK_HOURS',msg,employeeId=e['id'])
             worked = calendar_work_days(shifts, wp['start'], wp['end'])
+            worked_b = calendar_work_days(bound_shifts, wp['start'], wp['end'])
             run = longest_work_run(worked)
+            run_b = longest_work_run(worked_b)
             legal = r.get('hardMaxConsecutiveDays')
             if legal and run > int(legal):
-                issue('CONSECUTIVE', f"{e['code']}: fler än {int(legal)} arbetsdagar i följd (hårt tak).", employeeId=e['id'])
+                msg=f"{e['code']}: fler än {int(legal)} arbetsdagar i följd (hårt tak)."
+                if run_b > int(legal):
+                    _history(warnings,'CONSECUTIVE',msg,employeeId=e['id'])
+                    if run > run_b:
+                        issue('CONSECUTIVE', msg, employeeId=e['id'])
+                else:
+                    issue('CONSECUTIVE', msg, employeeId=e['id'])
             person_cap = hard_constraints(e).get('maxConsecutiveDays')
             if person_cap and run > int(person_cap):
-                issue('CONSECUTIVE', f"{e['code']}: fler arbetsdagar i följd än individens hårda tak.", employeeId=e['id'])
+                msg=f"{e['code']}: fler arbetsdagar i följd än individens hårda tak."
+                if run_b > int(person_cap):
+                    _history(warnings,'CONSECUTIVE',msg,employeeId=e['id'])
+                    if run > run_b:
+                        issue('CONSECUTIVE', msg, employeeId=e['id'])
+                else:
+                    issue('CONSECUTIVE', msg, employeeId=e['id'])
             n6, n7 = consecutive_six_seven_counts(worked)
             if n7:
                 warn('CONSECUTIVE_SOFT', f"{e['code']}: {run} arbetsdagar i följd (A-03, mål 5).", employeeId=e['id'])
@@ -137,6 +205,7 @@ def validate(data, schedule):
             span_from, span_to = add_days(wp['start'], -27), add_days(wp['end'], 27)
             known_from, known_to = f01_known_span(data)
             worked_ext = calendar_work_days(shifts, span_from, span_to)
+            worked_b_ext = calendar_work_days(bound_shifts, span_from, span_to)
             days_ext = list(days(span_from, span_to))
             incomplete = False
             for i, start_w in enumerate(days_ext):
@@ -149,10 +218,19 @@ def validate(data, schedule):
                     incomplete = True
                     continue
                 rest = sum(1 for w in worked_ext[i:i + 28] if not w)
+                rest_b = sum(1 for w in worked_b_ext[i:i + 28] if not w)
                 if rest < rest_target:
-                    issue('REST_DAYS', f"{e['code']}: färre än {rest_target} fridagar i 28-dagarsperioden från {start_w} (F-01).", employeeId=e['id'])
-                    incomplete = False
-                    break
+                    msg = f"{e['code']}: färre än {rest_target} fridagar i 28-dagarsperioden från {start_w} (F-01)."
+                    if rest_b < rest_target:
+                        _history(warnings, 'REST_DAYS', msg, employeeId=e['id'])
+                        if rest < rest_b:
+                            issue('REST_DAYS', msg, employeeId=e['id'])
+                            incomplete = False
+                            break
+                    else:
+                        issue('REST_DAYS', msg, employeeId=e['id'])
+                        incomplete = False
+                        break
             if incomplete:
                 issue('BOUNDARY_INCOMPLETE', f"{e['code']}: F-01 kan inte godkännas, 28-dagarsfönster saknar bekräftad boundary-data.", employeeId=e['id'])
             if len(worked) >= 2 and not has_consecutive_off(worked, 2):
@@ -161,7 +239,11 @@ def validate(data, schedule):
             if min_off:
                 need = int(min_off)
                 if any(worked) and not has_consecutive_off(worked, need):
-                    issue('MIN_OFF', f"{e['code']}: saknar {need} sammanhängande lediga dagar.", employeeId=e['id'])
+                    msg = f"{e['code']}: saknar {need} sammanhängande lediga dagar."
+                    if any(worked_b) and not has_consecutive_off(worked_b, need):
+                        _history(warnings, 'MIN_OFF', msg, employeeId=e['id'])
+                    else:
+                        issue('MIN_OFF', msg, employeeId=e['id'])
             soft_off = soft_constraints(e).get('minConsecutiveOffDays')
             if soft_off:
                 need = int(soft_off)
@@ -170,36 +252,74 @@ def validate(data, schedule):
             weekly = float(r.get('minWeeklyRestHours') or 36)
             if weekly > 0:
                 duties = [(s['a'], s['b']) for s in shifts]
+                bound_duties = [(s['a'], s['b']) for s in bound_shifts]
                 for day, wa, wb in duty_week_windows(wp['start'], wp['end'], duties):
                     if longest_rest_minutes(duties, wa, wb) + 1e-9 < weekly * 60:
-                        issue('WEEK_REST', f"{e['code']}: mindre än {weekly:g} timmars sammanhängande veckovila i sju dagarsperioden från {day}.", employeeId=e['id'])
+                        msg = f"{e['code']}: mindre än {weekly:g} timmars sammanhängande veckovila i sju dagarsperioden från {day}."
+                        if bound_duties and longest_rest_minutes(bound_duties, wa, wb) + 1e-9 < weekly * 60:
+                            _history(warnings, 'WEEK_REST', msg, employeeId=e['id'])
+                        else:
+                            issue('WEEK_REST', msg, employeeId=e['id'])
             night_run_lim = hard_constraints(e).get('maxNightConsecutive')
             jour_run_lim = hard_constraints(e).get('maxJourConsecutive')
             nrun = consecutive_pass_run(shifts, 'night')
             jrun = consecutive_pass_run(shifts, 'jour')
+            nrun_b = consecutive_pass_run(bound_shifts, 'night')
+            jrun_b = consecutive_pass_run(bound_shifts, 'jour')
             if night_run_lim and nrun > int(night_run_lim):
-                issue('NIGHT_SERIES', f"{e['code']}: för många nattpass i följd.", employeeId=e['id'])
+                msg = f"{e['code']}: för många nattpass i följd."
+                if nrun_b > int(night_run_lim):
+                    _history(warnings, 'NIGHT_SERIES', msg, employeeId=e['id'])
+                    if nrun > nrun_b:
+                        issue('NIGHT_SERIES', msg, employeeId=e['id'])
+                else:
+                    issue('NIGHT_SERIES', msg, employeeId=e['id'])
             if jour_run_lim and jrun > int(jour_run_lim):
-                issue('JOUR_SERIES', f"{e['code']}: för många jourpass i följd.", employeeId=e['id'])
+                msg = f"{e['code']}: för många jourpass i följd."
+                if jrun_b > int(jour_run_lim):
+                    _history(warnings, 'JOUR_SERIES', msg, employeeId=e['id'])
+                    if jrun > jrun_b:
+                        issue('JOUR_SERIES', msg, employeeId=e['id'])
+                else:
+                    issue('JOUR_SERIES', msg, employeeId=e['id'])
             if nrun >= 4:
                 warn('NIGHT_SERIES_STRONG', f"{e['code']}: {nrun} nattpass i följd (röd kvalitetsavvikelse, mål 2).", employeeId=e['id'])
             elif nrun >= 3:
                 warn('NIGHT_SERIES_SOFT', f"{e['code']}: 3 nattpass i följd (gul kvalitetsavvikelse, mål 2).", employeeId=e['id'])
             jour = [s for s in shifts if s.get('type') == 'jour']
             sorterade = sorted(jour, key=lambda s: s['date'])
+            bound_jour = [s for s in sorterade if s.get('id') in boundaries]
             for i, start in enumerate(sorterade):
                 gransen = add_days(start['date'], 27)
                 total = sum(s['b'] - s['a'] for s in sorterade[i:] if s['date'] <= gransen)
+                total_b = sum(s['b'] - s['a'] for s in bound_jour if start['date'] <= s['date'] <= gransen)
                 if total > 48 * 60 + 0.01:
-                    issue('JOUR_4W', f"{e['code']}: mer än 48 timmar jourtid under fyra veckor från {start['date']}.", employeeId=e['id'])
-                    break
+                    msg = f"{e['code']}: mer än 48 timmar jourtid under fyra veckor från {start['date']}."
+                    if total_b > 48 * 60 + 0.01:
+                        _history(warnings, 'JOUR_4W', msg, employeeId=e['id'])
+                        if total > total_b + 0.01:
+                            issue('JOUR_4W', msg, employeeId=e['id'])
+                            break
+                    else:
+                        issue('JOUR_4W', msg, employeeId=e['id'])
+                        break
             per_manad = {}
+            per_manad_b = {}
             for s in sorterade:
                 k = s['date'][:7]
                 per_manad[k] = per_manad.get(k, 0) + (s['b'] - s['a'])
+                if s.get('id') in boundaries:
+                    per_manad_b[k] = per_manad_b.get(k, 0) + (s['b'] - s['a'])
             for manad, total in per_manad.items():
                 if total > 50 * 60 + 0.01:
-                    issue('JOUR_MONTH', f"{e['code']}: mer än 50 timmar jourtid i {manad}.", employeeId=e['id'])
+                    msg = f"{e['code']}: mer än 50 timmar jourtid i {manad}."
+                    tb = per_manad_b.get(manad, 0)
+                    if tb > 50 * 60 + 0.01:
+                        _history(warnings, 'JOUR_MONTH', msg, employeeId=e['id'])
+                        if total > tb + 0.01:
+                            issue('JOUR_MONTH', msg, employeeId=e['id'])
+                    else:
+                        issue('JOUR_MONTH', msg, employeeId=e['id'])
         assignments=schedule['assignments']
         known={o['id'] for o in occ}
         # Ett förslag får redovisa obemannat behov, men bara om det är öppet
@@ -255,8 +375,12 @@ def validate(data, schedule):
                 for b in rows[i+1:]:
                     if b['start']>=a['end']: break
                     issue('TASK_OVERLAP',f"{e['code']}: dubbelbokad på {a['occurrenceId']} och {b['occurrenceId']}.",employeeId=e['id'])
+        floor_lo, floor_hi = lo, hi
+        if data.get('_rhClipFloors'):
+            ps, pe = planning_day_bounds(data)
+            floor_lo, floor_hi = instant(ps, '00:00'), instant(add_days(pe, 1), '00:00')
         for a,b in night_intervals(wp['start'],wp['end']):
-            a,b=max(a,lo),min(b,hi)
+            a,b=max(a,floor_lo),min(b,floor_hi)
             if a>=b: continue
             work=[(x,y,s['employeeId']) for s in processed if employees.get(s['employeeId'],{}).get('night') and employees[s['employeeId']]['status']=='active' for x,y in s['work']]
             points=sorted({a,b}|{t for x,y,_ in work for t in (x,y) if a<t<b})
@@ -266,7 +390,7 @@ def validate(data, schedule):
         jour_floor = int(r.get('jourFloor') or 0)
         if jour_floor:
             for a,b in jour_intervals(wp['start'],wp['end'],r):
-                a,b=max(a,lo),min(b,hi)
+                a,b=max(a,floor_lo),min(b,floor_hi)
                 if a>=b: continue
                 covering=[(s['a'],s['b'],s['employeeId']) for s in processed if s.get('type')=='jour' and jour_eligible(employees.get(s['employeeId'],{})) and employees.get(s['employeeId'],{}).get('status')=='active']
                 points=sorted({a,b}|{t for x,y,_ in covering for t in (x,y) if a<t<b})

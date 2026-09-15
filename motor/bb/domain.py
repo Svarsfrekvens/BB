@@ -6,6 +6,7 @@ rejected explicitly; night shifts across a DST change keep their real duration.
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from math import isfinite
+from .limits import effective_max_occurrences, validate_limits_block
 
 TZ = ZoneInfo('Europe/Stockholm')
 
@@ -98,7 +99,21 @@ def jour_intervals(start, end, rules=None):
 
 
 def is_night(a, b):
+    """KPI/dimensionering: tiden överlappar nattintervallet 22:00–06:00.
+
+    Detta är inte definitionen av nattbehörighet. Använd
+    ``pass_requires_night_eligibility`` för employee.night.
+    """
+    return time_overlaps_night_interval(a, b)
+
+
+def time_overlaps_night_interval(a, b):
     return any(overlap(a, b, x, y) for x, y in night_intervals(parts(a)[0], parts(b)[0]))
+
+
+def pass_requires_night_eligibility(shift_or_template):
+    """Vaken natt kräver employee.night. Kväll och jour gör det inte."""
+    return (shift_or_template or {}).get('type') == 'night'
 
 
 def monday(day):
@@ -245,7 +260,12 @@ def shifts_mergeable(prev, nxt):
 
 
 def duty_occasions(shifts):
-    rows = sorted(shifts, key=lambda s: _shift_span(s)[0])
+    """Tjänstgöringstillfällen från *valda* pass, tidsordnade.
+
+    Samma merge-regel som ``iter_mergeable_chains``: konsekutiva par enligt
+    ``shifts_mergeable``. Validatorn anropar denna på det faktiska urvalet.
+    """
+    rows = sorted(shifts, key=lambda s: (_shift_span(s)[0], _shift_span(s)[1], str(s.get('id') or '')))
     groups = []
     for s in rows:
         if groups and shifts_mergeable(groups[-1][-1], s):
@@ -253,6 +273,40 @@ def duty_occasions(shifts):
         else:
             groups.append([s])
     return groups
+
+
+def iter_mergeable_chains(items, max_len=12):
+    """Alla ko-selektbara kedjor som skulle bilda ett tillfälle om de valdes.
+
+    Konkurrerande mallar med samma start (t.ex. 06:30–10:00 och 06:30–15:00)
+    analyseras som separata val. Ordningen bland icke-mergeable mellanliggande
+    mallar får inte klippa kedjan.
+    """
+    seq = sorted(
+        items,
+        key=lambda c: (_shift_span(c)[0], _shift_span(c)[1], str((c.get('shift') or c).get('id') or '')),
+    )
+    n = len(seq)
+
+    def rec(idxs):
+        chain = [seq[i] for i in idxs]
+        yield chain
+        if len(idxs) >= max_len:
+            return
+        last = seq[idxs[-1]]
+        last_s = candidate_as_shift(last)
+        for j in range(idxs[-1] + 1, n):
+            nxt = seq[j]
+            a1, b1 = _shift_span(last)
+            a2, b2 = _shift_span(nxt)
+            if overlap(a1, b1, a2, b2):
+                continue
+            if not shifts_mergeable(last_s, candidate_as_shift(nxt)):
+                continue
+            yield from rec(idxs + [j])
+
+    for i in range(n):
+        yield from rec([i])
 
 
 def occasion_work_day_date(group):
@@ -339,6 +393,23 @@ def occasion_profile_id(group, rules=None):
     if 'jour' in types and paid_types:
         return 'combinedWorkJour'
     return 'normal'
+
+
+def occasion_max_span_limit_minutes(group, rules=None):
+    """Samma tak som validatorn: profile.maxSpanHours från rules.shiftProfiles."""
+    spec = shift_profiles(rules).get(occasion_profile_id(group, rules)) or {}
+    max_span = spec.get('maxSpanHours')
+    if max_span is None:
+        return None
+    return float(max_span) * 60
+
+
+def occasion_exceeds_max_span(group, rules=None):
+    limit = occasion_max_span_limit_minutes(group, rules)
+    if limit is None:
+        return False
+    a, b = occasion_span(group)
+    return (b - a) > limit + 1e-9
 
 
 def segment_minutes(s):
@@ -565,6 +636,16 @@ def f01_window_known(start_w, end_w, known_from, known_to):
     return start_w >= known_from and end_w <= known_to
 
 
+def is_fixed_choice(x):
+    """True när passvalet redan är låst (boundary/locked), inte en CP-SAT-variabel."""
+    return isinstance(x, int)
+
+
+def remaining_capacity(limit, fixed_used):
+    """Kvarvarande utrymme för beslut. Negativ historik ger 0, inte en osan constraint."""
+    return max(0, int(limit) - int(fixed_used))
+
+
 def rest_days_missing_in_windows(worked, window=28, target=9):
     """Antal 28-dagarsfönster (eller window) som underskrider F-01. 0 om regeln är av."""
     if target <= 0 or len(worked) < window:
@@ -588,6 +669,16 @@ def has_consecutive_off(worked, need=2):
             if run >= need:
                 return True
     return False
+
+
+def dates_allowed(e, day):
+    """Tillfällig resurs bara på uttryckligen registrerade datum. Tom lista = ingen dag."""
+    hard = hard_constraints(e)
+    if 'dates' in hard:
+        return day in (hard.get('dates') or [])
+    if e.get('resourceType') == 'temporary':
+        return False
+    return True
 
 
 def weekend_allowed(e, day):
@@ -614,6 +705,8 @@ def clock_minutes(clock):
 
 
 def shift_allowed(e, template, day, a, b, rules):
+    if not dates_allowed(e, day):
+        return False
     hard = hard_constraints(e)
     types = hard.get('allowedTypes')
     if types and template.get('type') not in types:
@@ -710,6 +803,14 @@ def occurrences(data):
     return out
 
 
+def active_employees(data):
+    """Registrerade personer som motorn får schemalägga. Öppna pass och temp_pool ingår inte."""
+    return [
+        e for e in data['employees']
+        if e['status'] == 'active' and e.get('resourceType', 'employee') in ('employee', 'temporary')
+    ]
+
+
 def check_input(d):
     """Fail closed on malformed data, supported size limits and rule values."""
     def require(ok, message):
@@ -786,6 +887,8 @@ def check_input(d):
             if 'jour' in e:
                 require(type(e['jour']) is bool, 'Ogiltig jourbehörighet.')
             require(e['status'] in ['active','vacant','inactive'], 'Ogiltig personalstatus.')
+            if e.get('resourceType') is not None:
+                require(e['resourceType'] in ('employee', 'temp_pool', 'temporary'), 'Ogiltig resurstyp.')
             prof = e.get('profiles') or []
             require(isinstance(prof, list), 'Ogiltiga passprofiler.')
             if mode == 'generateFromNeeds':
@@ -877,6 +980,13 @@ def check_input(d):
                     require(isinstance(hard['weekdays'], list) and set(hard['weekdays']) <= set(range(1, 8)), 'Ogiltiga veckodagar i individvillkor.')
                 if 'weekendMode' in hard:
                     require(hard['weekendMode'] in ('all', 'none', 'every_other', 'every_third'), 'Ogiltigt helgmönster.')
+                if 'dates' in hard:
+                    require(isinstance(hard['dates'], list), 'Ogiltiga tillgänglighetsdatum.')
+                    for day in hard['dates']:
+                        require(isinstance(day, str) and day, 'Ogiltigt tillgänglighetsdatum.')
+                        date.fromisoformat(day)
+                if 'maxPaidMinutes' in hard:
+                    require(numeric(hard['maxPaidMinutes'], 0, 200000, True), 'Ogiltigt maxtak för arbetstid.')
                 if 'weekendOffset' in hard:
                     require(type(hard['weekendOffset']) is int, 'Ogiltig helgförskjutning.')
                 for key in ('earliestStart', 'latestEnd'):
@@ -918,12 +1028,30 @@ def check_input(d):
         for s in d['boundaryShifts']:
             require(s['employeeId'] in employees, 'Gränspass saknar medarbetare.')
             paid(s)
+        vacant = d.get('vacantShifts')
+        if vacant is None:
+            vacant = d.get('openShifts')
+        if vacant is not None:
+            require(isinstance(vacant, list) and len(vacant) <= 8000, 'Ogiltiga öppna pass.')
+            ids = set()
+            for s in vacant:
+                require(isinstance(s, dict), 'Ogiltigt öppet pass.')
+                sid = s.get('id')
+                require(isinstance(sid, str) and sid, 'Öppet pass saknar id.')
+                require(sid not in ids, 'Dubbla id i öppna pass.')
+                ids.add(sid)
+                date.fromisoformat(s['date'])
+                require(isinstance(s.get('start'), str) and isinstance(s.get('end'), str), 'Öppet pass saknar tid.')
+                require(s.get('source') in (None, 'medvind', 'fore'), 'Ogiltig källa för öppet pass.')
         for t in d['templates']:
             require(t['type'] in ['day','evening','night','jour'], 'Ogiltig passtyp.')
             require(isinstance(t['skills'],list), 'Passkompetens saknas.')
             for day in days(wp['start'],wp['end']):
                 paid({**t,'date':day})
-        require(len(occurrences(d)) <= 1600, 'Högst 1 600 insatstillfällen per beräkning. Förkorta perioden.')
+        if d.get('limits') is not None:
+            validate_limits_block(d.get('limits'))
+        occ_cap = effective_max_occurrences(d)
+        require(len(occurrences(d)) <= occ_cap, f'Högst {occ_cap} insatstillfällen per beräkning. Förkorta perioden.')
     except (KeyError,TypeError,AttributeError) as exc:
         raise ValueError('Grunduppgifter saknas eller har fel format.') from exc
     return d

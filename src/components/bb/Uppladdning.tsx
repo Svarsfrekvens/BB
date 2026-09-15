@@ -167,7 +167,7 @@ export function Uppladdning(props: VyProps) {
                   kalla="Medvind-export – blir läget före"
                   status={
                     schema
-                      ? `${schema.medarbetare} medarbetare · ${schema.vikarier} vikarier · ${schema.pass} pass · ${fmtH(schema.timmar)}`
+                      ? `${schema.medarbetare} medarbetare · ${schema.vakantaPass} öppna pass · ${schema.pass} pass · ${fmtH(schema.timmar)}`
                       : undefined
                   }
                   knapp={schema ? "Byt fil" : "Välj fil"}

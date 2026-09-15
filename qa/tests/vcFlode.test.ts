@@ -18,6 +18,7 @@ import {
   getBemanningsbalansReadiness,
   getTidslage,
   hemHuvudCta,
+  hemStatusText,
   balansKanGodkannas,
   effektPilFranForandring,
   MATCHNING_FORMEL,
@@ -41,6 +42,7 @@ import {
 } from "@/lib/bb/vcFlode";
 import { kanStartaFranEttKlick } from "@/lib/bb/korBemanningsbalans";
 import { byggMotorPayload } from "@/lib/bb/motorPayload";
+import { DEFAULT_WORK_TIME_MODEL_ID, STANDARD_WORK_TIME_MODELS } from "@/lib/bb/arbetstid";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -159,10 +161,58 @@ describe("en enda readiness-selector", () => {
     const r = getBemanningsbalansReadiness(
       klarIndata({
         medarbetare: [{ namn: "Anna" }, { namn: "Bo" }, { namn: "Cia", workTimeModelId: "helgfri-40", nattbehorig: true }],
+        defaultWorkTimeModelId: "",
+        workTimeModels: [],
       }),
     );
     expect(r.ready).toBe(false);
     expect(r.blockingReasons.some((s) => s.includes("2 medarbetare saknar arbetstidsmodell"))).toBe(true);
+  });
+
+  it("ärver verksamhetsdefault när individuell modell saknas", () => {
+    const r = getBemanningsbalansReadiness(
+      klarIndata({
+        medarbetare: [{ namn: "Anna" }, { namn: "Bo", workTimeModelId: "helgfri-40" }],
+        defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID,
+        workTimeModels: STANDARD_WORK_TIME_MODELS,
+      }),
+    );
+    expect(r.ready).toBe(true);
+    expect(r.blockingReasons).toEqual([]);
+    expect(r.delar.medarbetare).toBe("klar");
+  });
+
+  it("blockerar när varken individuell modell eller giltig verksamhetsdefault finns", () => {
+    const r = getBemanningsbalansReadiness(
+      klarIndata({
+        medarbetare: [{ namn: "Anna" }],
+        defaultWorkTimeModelId: "finns-inte",
+        workTimeModels: STANDARD_WORK_TIME_MODELS,
+      }),
+    );
+    expect(r.ready).toBe(false);
+    expect(r.blockingReasons.some((s) => s.includes("saknar arbetstidsmodell"))).toBe(true);
+  });
+
+  it("datumstyrt fönster räknas som individuell modell före default", () => {
+    const r = getBemanningsbalansReadiness(
+      klarIndata({
+        medarbetare: [{ namn: "Anna", workTimeWindows: [{ start: "2026-08-01", end: "2026-08-31", modelId: "standig-natt-36-20" }] }],
+        defaultWorkTimeModelId: "",
+        workTimeModels: [],
+      }),
+    );
+    expect(r.ready).toBe(true);
+  });
+
+  it("readinessFranApi använder verksamhetens standardmodell så Galaxen-import inte blockeras", () => {
+    const api = {
+      underlag: () => ({ godkand: { kund: true, schema: true }, sekoia: {}, schema: {} }),
+      medarbetare: () => [{ namn: "Topas" }, { namn: "Turmalin" }, { namn: "Jade" }, { namn: "Bärnsten" }, { namn: "Ametist" }],
+    };
+    const r = readinessFranApi(api);
+    expect(r.ready).toBe(true);
+    expect(r.blockingReasons).toEqual([]);
   });
 
   it("natt unknown blockerar inte och defaultas inte till ja", () => {
@@ -284,6 +334,7 @@ describe("tekniska motorord", () => {
       "src/components/bb/Medarbetare.tsx",
       "src/components/bb/Resultat.tsx",
       "src/components/bb/TreOmraden.tsx",
+      "src/components/bb/ResursbristPanel.tsx",
       "src/components/bb/Uppladdning.tsx",
     ];
     for (const f of filer) {
@@ -433,6 +484,7 @@ describe("Före / Balans / Utfall", () => {
     expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: false }).disabled).toBe(false);
     expect(hemHuvudCta({ lage: "balans", ready: true, godkannbar: true }).label).toBe("Godkänn balans");
     expect(hemHuvudCta({ lage: "utfall", ready: true, godkannbar: true }).label).toBe("Följ upp utfall");
+    expect(hemHuvudCta({ lage: "fore", ready: true, godkannbar: false, pagaende: true }).label).toBe("Visa status");
   });
 
   it("kan skapa balans i Före trots täckt behov under 100 %, hårda regelbrott och underkapacitet", () => {
@@ -457,9 +509,10 @@ describe("Före / Balans / Utfall", () => {
 
   it("kan inte godkänna Balans under 100 % täckt behov, med hårda regelbrott eller saknad kompetens", () => {
     expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).ok).toBe(false);
+    expect(balansKanGodkannas({ tacktBehovPct: 99.74, hardViolations: 0 }).ok).toBe(false);
     expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 1 }).ok).toBe(false);
     expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 0 }).ok).toBe(true);
-    expect(balansKanGodkannas({ tacktBehovPct: 88.7, hardViolations: 0 }).reasons[0]).toMatch(/kundbehov återstår/);
+    expect(balansKanGodkannas({ tacktBehovPct: 99.74, hardViolations: 0 }).reasons[0]).toMatch(/kundbehov återstår/);
     expect(balansKanGodkannas({ tacktBehovPct: 100, hardViolations: 0, saknadeKompetenskrav: 1 }).ok).toBe(false);
     expect(raknaSaknadeKompetenskrav([{ message: "Insatsen kräver kompetens som saknas" }])).toBe(1);
   });

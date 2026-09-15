@@ -10,8 +10,10 @@ import * as XLSX_STATIC from "xlsx";
 export type MedvindPass = {
   id: string;
   namn: string;
+  /** Ursprunglig schemarad i Medvind, t.ex. "6, Vakanta jourer". */
+  rad: string;
   vakant: boolean;
-  /** Sant när passet kommer från en obemannad schemarad (blir Vikarie N). */
+  /** Sant när passet saknar placerad person. Det är ett öppet pass, inte en medarbetare. */
   vikarie: boolean;
   vecka: number;
   dag: number; // 0 = måndag vecka 1 … 27
@@ -27,7 +29,7 @@ export type MedvindMedarbetare = {
   namn: string;
   grad: number;
   vakant: boolean;
-  /** Sant för rader som saknade placerad person – hanteras som vikarie. */
+  /** Sant bara för explicit namngiven vikarie, aldrig för raden Ingen placerad. */
   vikarie: boolean;
   rad: string;
 };
@@ -99,7 +101,6 @@ export function parseMedvind(wb: any, filnamn = ""): MedvindSchema | null {
     let timmarTot = 0;
     let jourTimmarTot = 0;
     let vakantaPass = 0;
-    let vikarieNr = 0;
 
 
     const forstaDag = Math.min(...dagKol);
@@ -120,12 +121,8 @@ export function parseMedvind(wb: any, filnamn = ""): MedvindSchema | null {
       if (!radtext && !placerad) continue;
       const vakant = !placerad || /ingen placerad|vakant/i.test(placerad);
       const gradM = radtext.match(/(\d{1,3})\s*%/);
-      // Obemannade rader ("Ingen placerad", "Vakant dag", "Schemarad 1") blir
-      // vikarier: riktiga medarbetare i modellen, men märkta som vikarie.
-      const namnRad = vakant ? `Vikarie ${vikarieNr + 1}` : placerad;
-
-
-      let harPass = false;
+      // Obemannad rad är öppna pass, inte en påhittad person "Vikarie N".
+      const namnRad = vakant ? (radtext || "Obemannad") : placerad;
 
       dagKol.forEach((c, i) => {
         const cell = String(row[c] ?? "").trim();
@@ -139,13 +136,13 @@ export function parseMedvind(wb: any, filnamn = ""): MedvindSchema | null {
           const kod = (m[5] || "Ar").trim();
           const jour = /^jo/i.test(kod);
           const timmar = (e - s) / 60;
-          harPass = true;
           if (jour) jourTimmarTot += timmar;
           else timmarTot += timmar;
           if (vakant) vakantaPass += 1;
           pass.push({
             id: `p${r}-${i}-${pass.length}`,
             namn: namnRad,
+            rad: radtext,
             vakant,
             vikarie: vakant,
             vecka: Math.floor(i / 7),
@@ -160,18 +157,14 @@ export function parseMedvind(wb: any, filnamn = ""): MedvindSchema | null {
         }
       });
 
-      // Vakanta schemarader räknas med även utan utlagda pass: de är
-      // kapacitet som kan bemannas av vikarie.
-      if (harPass || !vakant || radtext) {
-        if (vakant) vikarieNr += 1;
-        medarbetare.push({
-          namn: namnRad,
-          grad: gradM ? Number(gradM[1]) : 100,
-          vakant,
-          vikarie: vakant,
-          rad: radtext,
-        });
-      }
+      if (vakant) continue;
+      medarbetare.push({
+        namn: placerad,
+        grad: gradM ? Number(gradM[1]) : 100,
+        vakant: false,
+        vikarie: false,
+        rad: radtext,
+      });
     }
 
 

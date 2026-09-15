@@ -57,6 +57,23 @@ export function ssgForDay(e: WorkTimeEmployee, day: string) {
   return ssg;
 }
 
+/** Datumstyrd individuell modell → personmodell → verksamhetsdefault. */
+export function giltigVerksamhetsDefault(workplace?: WorkTimeWorkplace) {
+  const id = String(workplace?.defaultWorkTimeModelId || "").trim();
+  if (!id) return undefined;
+  return (workplace?.workTimeModels || []).some((m) => m.id === id) ? id : undefined;
+}
+
+export function harTillrackligArbetstidsmodell(
+  e: { workTimeModelId?: string; workTimeWindows?: WorkTimeWindow[] },
+  workplace?: WorkTimeWorkplace,
+) {
+  const fonster = e.workTimeWindows || [];
+  if (fonster.some((w) => String(w.modelId || "").trim() || (w.weeklyMinutes != null && w.weeklyMinutes > 0))) return true;
+  if (String(e.workTimeModelId || "").trim()) return true;
+  return Boolean(giltigVerksamhetsDefault(workplace));
+}
+
 export function weeklyMinutesForDay(
   e: WorkTimeEmployee,
   day: string,

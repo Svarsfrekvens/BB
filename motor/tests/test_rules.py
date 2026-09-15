@@ -49,7 +49,7 @@ class Rules(unittest.TestCase):
         for day in ['2026-03-29','2026-10-25']:
             with self.assertRaises(ValueError): instant(day,'02:30')
     def test_night_eligibility_and_floor(self):
-        d,s=fixture();s['shifts'][0].update(start='22:00',end='06:00');d['employees'][0]['night']=False;d['rules']['nightFloor']=1
+        d,s=fixture();s['shifts'][0].update(start='22:00',end='06:00',type='night');d['employees'][0]['night']=False;d['rules']['nightFloor']=1
         self.assertIn('NIGHT',self.codes(d,s));self.assertIn('NIGHT_FLOOR',self.codes(d,s))
     def test_duplicate_ids(self):
         d,s=fixture();s['shifts'].append(deepcopy(s['shifts'][0]));self.assertIn('DUPLICATE_SHIFT',self.codes(d,s))

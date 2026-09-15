@@ -1,3 +1,11 @@
+import {
+  DEFAULT_WORK_TIME_MODEL_ID,
+  STANDARD_WORK_TIME_MODELS,
+  harTillrackligArbetstidsmodell,
+  type WorkTimeModel,
+  type WorkTimeWindow,
+} from "./arbetstid";
+
 /** Presentationsadapter för VC-flödet. Ingen ny beräkning av täckning, kostnad eller regler. */
 
 export type ProcessStegLage = "ej" | "pa" | "klar" | "varning" | "blockerad";
@@ -93,8 +101,11 @@ const TOM_SUMMARY: MotorUiSummary = {
 };
 
 /** VC-svenska för motorstatus. Tekniska koder visas inte som rubrik. */
-export function vcStatusText(status: string | null | undefined) {
+export function vcStatusText(status: string | null | undefined, opts?: { jourResursbrist?: boolean }) {
   const s = String(status || "").toUpperCase();
+  if (opts?.jourResursbrist || s === "JOUR_CAPACITY_SHORTFALL") {
+    return "Bemanningsbalans kan inte skapas fullt ut med registrerade resurser";
+  }
   if (s === "OPTIMAL") return "Förslaget är beräknat och bevisat så långt tidsgränsen räckte";
   if (s === "FEASIBLE") return "Ett giltigt förslag finns";
   if (s === "INFEASIBLE") return "Ingen giltig bemanning kunde skapas med nuvarande underlag";
@@ -142,6 +153,7 @@ export type ReadinessMedarbetare = {
   namn: string;
   vakant?: boolean;
   workTimeModelId?: string;
+  workTimeWindows?: WorkTimeWindow[];
   nattbehorig?: boolean | null;
   jour?: boolean | null;
 };
@@ -155,6 +167,9 @@ export type BemanningsbalansReadinessIndata = {
   schemaGodkand: boolean;
   medarbetareAndradSedanGodkannande?: boolean;
   medarbetare: ReadinessMedarbetare[];
+  /** Verksamhetens standardmodell. Tom sträng = ingen default. */
+  defaultWorkTimeModelId?: string;
+  workTimeModels?: WorkTimeModel[];
 };
 
 export type BemanningsbalansReadiness = {
@@ -183,7 +198,11 @@ export function getBemanningsbalansReadiness(d: BemanningsbalansReadinessIndata)
   const aktiva = (d.medarbetare || []).filter((m) => !m.vakant);
   const harMedarbetare = aktiva.length > 0;
   const harKunddata = !!d.harKundrader;
-  const saknarModell = aktiva.filter((m) => !String(m.workTimeModelId || "").trim());
+  const workplace = {
+    workTimeModels: d.workTimeModels || [],
+    defaultWorkTimeModelId: d.defaultWorkTimeModelId,
+  };
+  const saknarModell = aktiva.filter((m) => (m as { resourceType?: string }).resourceType !== "temporary" && !harTillrackligArbetstidsmodell(m, workplace));
 
   let kund: DelStatus = "ej";
   if (!harKunddata) kund = "ej";
@@ -241,6 +260,8 @@ export function skapaBalansHinder(d: {
   medarbetareAndradSedanGodkannande?: boolean;
   harKundrader?: boolean;
   harSchema?: boolean;
+  defaultWorkTimeModelId?: string;
+  workTimeModels?: WorkTimeModel[];
 }) {
   const r = getBemanningsbalansReadiness({
     harKundrader: d.harKundrader ?? d.harUnderlag,
@@ -250,6 +271,8 @@ export function skapaBalansHinder(d: {
     schemaGodkand: !!d.schemaGodkand,
     medarbetareAndradSedanGodkannande: d.medarbetareAndradSedanGodkannande,
     medarbetare: d.medarbetare,
+    defaultWorkTimeModelId: d.defaultWorkTimeModelId,
+    workTimeModels: d.workTimeModels,
   });
   const skal = [...r.blockingReasons, ...(d.blockerande || []).filter(Boolean)];
   return { aktiv: skal.length === 0, skal, warnings: r.warnings, delar: r.delar };
@@ -373,6 +396,8 @@ export function readinessFranApi(api: {
     schemaGodkand: u.godkand.schema,
     medarbetareAndradSedanGodkannande: !!a.medarbetare,
     medarbetare: api.medarbetare(),
+    defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID,
+    workTimeModels: STANDARD_WORK_TIME_MODELS,
   });
 }
 
@@ -449,13 +474,19 @@ export function balansKanGodkannas(d: {
   tacktBehovPct: number | null | undefined;
   hardViolations: number;
   saknadeKompetenskrav?: number;
+  jourResursbrist?: boolean;
 }) {
   const reasons: string[] = [];
-  const tackt = d.tacktBehovPct;
-  if (tackt == null || !(tackt >= 100 - 1e-6)) {
-    reasons.push("Balans kan inte godkännas – kundbehov återstår att bemanna.");
+  if (d.jourResursbrist) {
+    reasons.push("Schemat kan inte färdigställas utan ytterligare resurs.");
   }
-  if ((d.hardViolations || 0) > 0) {
+  const tackt = d.tacktBehovPct;
+  if (!d.jourResursbrist && (tackt == null || !(tackt >= 100 - 1e-6))) {
+    reasons.push("Balans kan inte godkännas – kundbehov återstår att bemanna.");
+  } else if (d.jourResursbrist && tackt != null && !(tackt >= 100 - 1e-6)) {
+    reasons.push("Vissa kundinsatser är ännu inte bemannade.");
+  }
+  if (!d.jourResursbrist && (d.hardViolations || 0) > 0) {
     reasons.push("Balans kan inte godkännas – hårda regelbrott finns.");
   }
   if ((d.saknadeKompetenskrav || 0) > 0) {
@@ -469,7 +500,9 @@ export function hemHuvudCta(d: {
   ready: boolean;
   godkannbar: boolean;
   balansGodkand?: boolean;
+  pagaende?: boolean;
 }) {
+  if (d.pagaende) return { id: "status" as const, label: "Visa status", disabled: false };
   if (d.lage === "utfall") return { id: "utfall" as const, label: "Följ upp utfall", disabled: false };
   if (d.lage === "balans") {
     if (d.balansGodkand) return { id: "godkand" as const, label: "Balans godkänd", disabled: true };
@@ -486,7 +519,11 @@ export function hemStatusText(d: {
   godkannbar: boolean;
   balansGodkand?: boolean;
   tacktBehovPct?: number | null;
+  pagaende?: boolean;
+  klarForGranskning?: boolean;
 }) {
+  if (d.pagaende) return "Balans skapas";
+  if (d.klarForGranskning && !d.godkannbar && !d.balansGodkand) return "Balans klar för granskning";
   if (d.lage === "utfall") return "Utfall kan följas upp";
   if (d.lage === "fore") return d.ready ? "Redo att skapa balans" : d.blockingReasons[0] || "Underlaget behöver kompletteras";
   if (d.balansGodkand) return "Balans godkänd";

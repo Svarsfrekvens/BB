@@ -254,8 +254,9 @@ class KvalitetDagarOchFridagar(unittest.TestCase):
             _shift('e1', f'b{i}', day) for i, day in enumerate(_days('2026-09-07', 20))
         ]
         res = validate(self.d, self.s)
-        self.assertFalse(res['valid'])
-        self.assertIn('REST_DAYS', self.codes())
+        self.assertTrue(res['valid'])
+        self.assertNotIn('REST_DAYS', self.codes())
+        self.assertIn('REST_DAYS', {w.get('sourceRule') for w in res['warnings'] if w.get('rule') == 'BOUNDARY_HISTORY'})
 
     def test_boundary_27_days_after_affects_f01(self):
         self.d['workplace']['start'] = '2026-09-07'

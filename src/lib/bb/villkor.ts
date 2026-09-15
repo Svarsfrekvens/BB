@@ -109,6 +109,11 @@ export function hårdaMotorvillkor(
     senastSlut?: string;
     maxDagarIFoljd?: number;
     villkor?: MedarbetarVillkor[];
+    resourceType?: string;
+    tillgangligaDatum?: string[];
+    jour?: boolean | null;
+    nattbehorig?: boolean | null;
+    maxTimmar?: number | null;
   },
   fran: string,
   till: string,
@@ -143,6 +148,22 @@ export function hårdaMotorvillkor(
   if (forbud.length) hard.forbiddenCustomerIds = forbud;
   const maste = kunderMedStyrka(villkor, "kundmaste", "maste", fran, till).map(kundId);
   if (maste.length) hard.requiredCustomerIds = maste;
+  if (m.resourceType === "temporary") {
+    const datum = Array.isArray(m.tillgangligaDatum) ? m.tillgangligaDatum.filter(Boolean) : [];
+    hard.dates = datum;
+    const helgIDatum = datum.some((d) => {
+      const wd = new Date(`${d}T12:00:00Z`).getUTCDay();
+      return wd === 0 || wd === 6;
+    });
+    hard.weekendMode = helgIDatum ? "all" : "none";
+    delete hard.weekendOffset;
+    if (m.jour === true && m.nattbehorig !== true && !String(m.tidigastStart || "").trim() && !String(m.senastSlut || "").trim()) {
+      hard.allowedTypes = ["jour"];
+    }
+    if (m.maxTimmar != null && Number.isFinite(Number(m.maxTimmar)) && Number(m.maxTimmar) >= 0) {
+      hard.maxPaidMinutes = Math.round(Number(m.maxTimmar) * 60);
+    }
+  }
   return hard;
 }
 

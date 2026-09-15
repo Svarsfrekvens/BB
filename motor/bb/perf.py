@@ -89,14 +89,18 @@ def planning_summary(data, schedule, validation=None, performance=None):
         cost = performance.get('scheduleCostOre') or 0
     errors = list(validation.get('errors') or [])
     hard = [e for e in errors if e.get('rule') != 'BOUNDARY_INCOMPLETE']
-    if (schedule or {}).get('solverStatus') == 'INFEASIBLE':
-        hard = hard or [{'rule': 'INFEASIBLE', 'message': (schedule.get('explanation') or '')[:180]}]
     warns = list(validation.get('warnings') or [])
     for note in schedule.get('feasibilityNotes') or []:
         warns.append({'rule': 'NOTE', 'message': note})
     for d in schedule.get('preCheck') or []:
-        if d.get('severity') != 'critical':
-            warns.append({'rule': d.get('code') or 'PRECHECK', 'message': d.get('message') or ''})
+        sev = d.get('severity')
+        row = {'rule': d.get('code') or 'PRECHECK', 'message': d.get('message') or ''}
+        if sev == 'critical':
+            hard.append(row)
+        elif sev == 'warning' or sev is None:
+            warns.append(row)
+    if (schedule or {}).get('solverStatus') == 'INFEASIBLE':
+        hard = hard or [{'rule': 'INFEASIBLE', 'message': (schedule.get('explanation') or '')[:180]}]
     old = ((data.get('existingSchedule') or data.get('current') or {}).get('shifts') if isinstance(data.get('existingSchedule') or data.get('current'), dict) else None) or []
     old_by = {s.get('id'): _shift_fingerprint(s) for s in old if s.get('id')}
     changed = 0

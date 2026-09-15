@@ -4,6 +4,7 @@ from collections import defaultdict
 from copy import deepcopy
 from test_rules import fixture, cover_f01
 from bb.domain import check_input, instant, jour_intervals, paid, span
+from bb.precheck import feasibility_precheck
 from bb.validate import validate
 from bb.solver import solve
 
@@ -40,6 +41,29 @@ class SovandeJour(unittest.TestCase):
         s['assignments'] = []
         codes = {e['rule'] for e in validate(d, s)['errors']}
         self.assertIn('NIGHT_FLOOR', codes)
+
+    def test_precheck_jour_does_not_satisfy_night_floor(self):
+        d, _ = fixture()
+        d['templates'].append(jour_mall())
+        d['employees'][0]['night'] = False
+        d['employees'][0]['jour'] = True
+        d['employees'][0]['profiles'] = ['D', 'J']
+        d['rules']['nightFloor'] = 1
+        d['rules']['jourFloor'] = 0
+        codes = {x['code'] for x in feasibility_precheck(d)}
+        self.assertIn('NIGHT_STAFF_SHORT', codes)
+
+    def test_precheck_jour_floor_uses_jour_not_night(self):
+        d, _ = fixture()
+        d['templates'].append(jour_mall())
+        d['employees'][0]['night'] = False
+        d['employees'][0]['jour'] = True
+        d['employees'][0]['profiles'] = ['D', 'J']
+        d['rules']['nightFloor'] = 0
+        d['rules']['jourFloor'] = 1
+        codes = {x['code'] for x in feasibility_precheck(d)}
+        self.assertNotIn('NIGHT_STAFF_SHORT', codes)
+        self.assertNotIn('JOUR_STAFF_SHORT', codes)
 
     def test_jour_requires_jour_eligibility(self):
         d, s = fixture()

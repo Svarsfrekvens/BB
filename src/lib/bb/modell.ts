@@ -131,6 +131,8 @@ export function analysera(opts: {
   extraInomPassEjKundnaraH?: number;
   extraInomPassPerPassKundnaraH?: number;
   extraInomPassPerPassEjKundnaraH?: number;
+  /** Tillfällig extra resurs faktureras även för jourpass. Ordinarie jour är fortfarande obetald. */
+  raknaJourKostnadFor?: (namn: string) => boolean;
 }): Lage {
   const { rader, pass, fran, till, timkostnad } = opts;
   const lista = dagar(fran, till);
@@ -210,7 +212,8 @@ export function analysera(opts: {
     bemannatKundbehovH,
   });
   const kpi = { ...kpiRaw, modellFel: kpiRaw.modellFel || rymd.platsBrist };
-  const kostnad = arbetspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0);
+  const kostnadspass = pass.filter((p) => !p.jour || Boolean(opts.raknaJourKostnadFor?.(p.namn)));
+  const kostnad = kostnadspass.reduce((s, p) => s + p.timmar * (opts.timkostnadFor ? opts.timkostnadFor(p.namn) : timkostnad), 0);
   const intakt = (opts.antalKunder || 0) * (opts.dygnsErsattning || 0) * lista.length;
   const delare = lista.length * 2; // två intervall per timme och dag
   return {
@@ -689,11 +692,11 @@ export const STYRANDE_VILLKOR: { grupp: string; villkor: [string, string, string
     ["Max jourtid per fyra veckor", "48", "h", "Arbetstidslagen – egen regel för sovande jour", "krav"],
     ["Max jourtid per kalendermånad", "50", "h", "Arbetstidslagen – alternativ gräns", "krav"],
     ["Jourtid räknas separat", "Ja", "regel", "Ingår inte i arbetstid, dygnsvila eller SSG-tak", "info"],
-    ["Vaken natt – grundbemanning", "1", "medarbetare", "Nattgolv", "krav"],
+    ["Vaken natt – grundbemanning", "0", "medarbetare", "Vaken natt – bara när verksamheten har ett verifierat krav. Inte samma sak som sovande jour", "krav"],
     ["Önskat max nattpass i följd", "2", "nätter", "Planeringsmål", "mål"],
     ["Nattserie – gul varning", "3", "nätter", "Kräver bedömning", "gul"],
     ["Nattserie – röd varning", "4", "nätter", "Undviks", "krav"],
-    ["Nattbehörighet", "Krävs", "behörighet", "För jour och nattpass", "krav"],
+    ["Nattbehörighet", "Krävs", "behörighet", "För vaken nattpass, inte för sovande jour", "krav"],
   ] },
   { grupp: "Raster", villkor: [
     ["Standardrast", "30", "minuter", "Antagen obetald", "info"],

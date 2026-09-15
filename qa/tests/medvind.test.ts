@@ -19,7 +19,7 @@ describe("Medvind-celler", () => {
     expect(sk!.pass.map((p) => p.kod)).toEqual(["Ar", "Jo", "Ar"]);
   });
 
-  it("rad 'Vakanta jourer / Ingen placerad' blir vikarie", () => {
+  it("rad 'Vakanta jourer / Ingen placerad' blir öppet pass, inte medarbetare", () => {
     const wb = XLSX.utils.book_new();
     const grid = [
       ["Schemarad", "Avtalsområde", "Placerad", "Övrigt", "Mån"],
@@ -29,9 +29,11 @@ describe("Medvind-celler", () => {
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(grid), "Medvind");
     const sk = parseMedvind(wb);
     expect(sk).toBeTruthy();
-    expect(sk!.medarbetare.length).toBeGreaterThanOrEqual(1);
-    expect(sk!.medarbetare.every((m) => m.vikarie)).toBe(true);
-    expect(sk!.pass.every((p) => p.vikarie)).toBe(true);
+    expect(sk!.medarbetare).toEqual([]);
+    expect(sk!.pass).toHaveLength(1);
+    expect(sk!.pass[0]!.vakant).toBe(true);
+    expect(sk!.pass[0]!.vikarie).toBe(true);
+    expect(sk!.vakantaPass).toBe(1);
   });
 
   it("grad läses ur 'Topas 70% tillsv'", () => {

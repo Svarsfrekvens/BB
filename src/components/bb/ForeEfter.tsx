@@ -6,6 +6,8 @@ import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
 import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt } from "@/lib/bb/vcFlode";
+import { lasJourDiagnos, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
+import { ResursbristPanel, resursbristProps } from "./ResursbristPanel";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -58,8 +60,9 @@ export function ForeEfter({ api }: VyProps) {
     );
   }
 
-  const { fore, efter, tabell, punkter, flyttade, vikarie, varningar, obemannade } = m;
+  const { fore, efter, tabell, punkter, flyttade, vikarie, varningar, obemannade, ofullstandig } = m;
   const summary = lasMotorSummary(api.motorResultat());
+  const jour = lasJourDiagnos((api.motorResultat() as { resourceDiagnostics?: unknown } | null)?.resourceDiagnostics);
   const tackningSank = !!(efter && efter.tackningPct + 0.05 < fore.tackningPct);
   const visade = efter ? filtreraJamforRader(tabell) : [];
   const extra = efter
@@ -103,11 +106,11 @@ export function ForeEfter({ api }: VyProps) {
               Före är det inlästa underlaget. Balans är hur vi planerar schemaperioden. Pilarna följer om värdet ökar
               eller minskar.
             </p>
-            {efter ? (
+            {efter || ofullstandig ? (
               <p className="mt-2 text-xs font-semibold text-muted-foreground">{berakningsKallaText(api.berakningsKalla())}</p>
             ) : null}
           </div>
-          {efter ? (
+          {efter || ofullstandig ? (
             <Button variant="outline" onClick={() => api.aterstallBalans()}>
               Tillbaka till originaldata
             </Button>
@@ -118,6 +121,16 @@ export function ForeEfter({ api }: VyProps) {
           )}
         </div>
       </Card>
+
+      <ResursbristPanel
+        diagnos={jour}
+        visaKundbrist={harMjukKundbrist({
+          tacktBehovPct: efter?.tackningPct,
+          obemannadeAntal: obemannade.length,
+          ofullstandigUtanSchema: Boolean(ofullstandig),
+        })}
+        {...resursbristProps(api)}
+      />
 
       {efter ? (
         <Card className="gap-0 overflow-hidden rounded-2xl p-0 shadow-lift">
@@ -169,12 +182,13 @@ export function ForeEfter({ api }: VyProps) {
 
       {obemannade.length ? (
         <Card className="gap-0 rounded-2xl border-destructive/40 bg-destructive/5 p-6 shadow-lift">
-          <Eyebrow>Obemannat i förslaget</Eyebrow>
+          <Eyebrow>Otäckt kundbehov</Eyebrow>
           <h3 className="mt-1 text-lg font-extrabold text-destructive">
-            {obemannade.reduce((s, u) => s + (u.antal || 1), 0)} insatser kunde inte bemannas
+            Vissa kundinsatser är ännu inte bemannade
           </h3>
           <p className="mt-1 text-sm text-muted-foreground">
-            De kommer från motorns redovisning av insatser som inte kunde bemannas. Hårda regler har inte lättats.
+            {obemannade.reduce((s, u) => s + (u.antal || 1), 0)} insatser saknar bemanning i förslaget. Detta är inte
+            samma sak som att obligatorisk jour saknar resurs. Hårda regler har inte lättats.
           </p>
           <ul className="mt-4 space-y-2">
             {obemannade.map((u, i) => (

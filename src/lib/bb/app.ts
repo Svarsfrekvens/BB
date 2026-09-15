@@ -12,9 +12,12 @@ import { parseSekoiaRapport } from "./sekoia";
 export { parseSekoiaRapport } from "./sekoia";
 import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt, STANDARD_AKTIVITETER } from "./aktiviteter";
 import { beraknaKpi } from "./kpi";
-import { defaultWeeklyHours } from "./arbetstid";
+import { defaultWeeklyHours, DEFAULT_WORK_TIME_MODEL_ID, STANDARD_WORK_TIME_MODELS } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
+import { kompletteraBehorighet, harHärleddJour, jourNamnFranSchema } from "./nattJour";
 import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, aktivProcessId, raknaSaknadeKompetenskrav, getTidslage, tidslageText, konfigureratKundnaraMalPct } from "./vcFlode";
+import { lasJourDiagnos, visaJourResursbrist } from "./jourDiagnos";
+import { extraTillMedarbetare, valideraExtraResurs } from "./extraResurs";
 
 declare global {
   interface Window {
@@ -137,6 +140,8 @@ const DEFAULT_VERKS = () => ({
   kundGodkand: false, schemaGodkand: false, kundAndrad: false, medarbetareAndrad: false, balansGodkand: false,
   planAktiviteter: standardKatalog(),
   kontaktpersoner: {},
+  extraResurser: [],
+  motorJobb: null,
 });
 const MAX_VERKS = 4;
 
@@ -157,6 +162,8 @@ function migrate(old) {
       }));
     }
     if (!v.kontaktpersoner || typeof v.kontaktpersoner !== "object") v.kontaktpersoner = {};
+    if (!Array.isArray(v.extraResurser)) v.extraResurser = [];
+    if (!v.motorJobb) v.motorJobb = null;
     // Ett kundbehovsblad kunde i en äldre version feltolkas som personalschema.
     // Ett riktigt schema kan inte rimligen ha långt fler personer än pass.
     const schema = v.schemaOriginal;
@@ -825,7 +832,13 @@ function timkostnadFor(namn) {
   return m && m.timkostnad ? Number(m.timkostnad) : (state.hourlyCost || 270);
 }
 function ekonomiBas() {
-  return { timkostnad: state.hourlyCost || 270, timkostnadFor, antalKunder: antalIntaktKunder(), dygnsErsattning: state.dygnKr || 2500 };
+  return {
+    timkostnad: state.hourlyCost || 270,
+    timkostnadFor,
+    antalKunder: antalIntaktKunder(),
+    dygnsErsattning: state.dygnKr || 2500,
+    raknaJourKostnadFor: (namn) => extraResursLista().some((r) => r.namn === namn),
+  };
 }
 /** Villkoren i medarbetarvyn i den form schemaoptimeringen använder. */
 function optimeringsVillkor() {
@@ -903,6 +916,11 @@ function foreEfterModell() {
     extraInomPassPerPassEjKundnaraH: extraFore.perPassEjKundnaraH,
   });
   if (!state.balans) return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar: [], obemannade: [] };
+  if (state.balans.ofullstandig) {
+    const schemaVarningar = (state.balans.schemaVarningar || []).map((v) => v.text);
+    const varningar = [...new Set([...villkorsVarningar(), ...schemaVarningar])];
+    return { fore, efter: null, tabell: [], punkter: [], flyttade: [], minska: [], forstark: [], vikarie: null, varningar, obemannade: [], ofullstandig: true };
+  }
   const extraEfter = aktivitetTillägg(efterPass());
   const efter = MODELL.analysera({
     ...bas,
@@ -933,8 +951,8 @@ function underlagInfo() {
       allt: !!state.kundGodkand && !!state.schemaGodkand && !state.kundAndrad && !state.medarbetareAndrad,
     },
     schema: sk
-      ? { filnamn: sk.filnamn, blad: sk.blad, medarbetare: sk.medarbetare.filter((m) => !m.vikarie).length,
-          vakanta: sk.medarbetare.filter((m) => m.vikarie).length, vikarier: sk.medarbetare.filter((m) => m.vikarie).length,
+      ? { filnamn: sk.filnamn, blad: sk.blad, medarbetare: sk.medarbetare.length,
+          vakanta: sk.vakantaPass, vikarier: sk.medarbetare.filter((m) => m.vikarie).length,
           pass: sk.pass.length,
           veckor: sk.veckor, timmar: sk.timmarTot, jour: sk.jourTimmarTot, vakantaPass: sk.vakantaPass }
       : null,
@@ -1034,9 +1052,11 @@ function medarbetarLista() {
   const extra = Object.keys(info).filter((n) => info[n] && info[n].extra && !fran.some((m) => m.namn === n));
   const bas = fran.map((m) => ({ namn: m.namn, grad: m.grad, vikarie: !!m.vikarie }))
     .concat(extra.map((n) => ({ namn: n, grad: 100, vikarie: false })));
+  const joNamn = jourNamnFranSchema(schemaPass());
   return bas.map((m) => {
     const i = info[m.namn] || {};
     const v = (falt, standard) => (i[falt] != null && i[falt] !== "" ? i[falt] : standard);
+    const explicitJour = i.jour != null ? !!i.jour : null;
     return {
       namn: m.namn,
       // Vikarier är riktiga medarbetare i modellen, men märkta så de kan visas gult.
@@ -1045,7 +1065,8 @@ function medarbetarLista() {
       grad: i.grad != null ? Number(i.grad) : m.grad,
       samordnare: i.samordnare != null ? !!i.samordnare : /topas/i.test(m.namn),
       delegering: i.delegering != null ? !!i.delegering : null,
-      jour: i.jour != null ? !!i.jour : null,
+      // Jo i Före-schemat ger härledd jourkapacitet, inte formell certifiering och inte vaken natt.
+      jour: explicitJour != null ? explicitJour : (harHärleddJour(null, m.namn, joNamn) ? true : null),
       nattbehorig: i.nattbehorig != null ? !!i.nattbehorig : null,
       passprofil: v("passprofil", MEDARB_STANDARD.passprofil),
       helg: v("helg", MEDARB_STANDARD.helg),
@@ -1058,12 +1079,41 @@ function medarbetarLista() {
       workTimeModelId: i.workTimeModelId || undefined,
       villkor: Array.isArray(i.villkor) ? i.villkor : [],
     };
+  }).concat(extraResursLista().map((r) => extraTillMedarbetare(r)));
+}
+function extraResursLista() {
+  if (!Array.isArray(state.extraResurser)) state.extraResurser = [];
+  return state.extraResurser;
+}
+function sparaExtraResurs(rad) {
+  const lista = extraResursLista();
+  const andraNamn = medarbetarLista()
+    .filter((m) => m.resourceType !== "temporary")
+    .map((m) => m.namn)
+    .concat(lista.filter((x) => x.id !== rad.id).map((x) => x.namn));
+  const kolla = valideraExtraResurs(rad, andraNamn);
+  if (!kolla.ok) return kolla;
+  const sparad = { ...rad, namn: String(rad.namn || "").trim() };
+  const i = lista.findIndex((x) => x.id === sparad.id);
+  if (i >= 0) lista[i] = sparad;
+  else lista.push(sparad);
+  persist();
+  notera(`${sparad.namn} sparad som extra resurs`, "ok", {
+    detalj: "Skapa balans igen för att räkna med den registrerade tillgängligheten.",
   });
+  render();
+  return { ok: true, fel: [] };
+}
+function taBortExtraResurs(id) {
+  state.extraResurser = extraResursLista().filter((x) => x.id !== id);
+  persist();
+  notera("Extra resurs borttagen", "info", { detalj: "Skapa balans igen för att räkna om resursbehovet." });
+  render();
 }
 function medarbetareSet(namn, falt, varde) {
   const info = medarbetarInfoKarta();
   const nuvarande = medarbetarLista().find((m) => m.namn === namn) || {};
-  info[namn] = { ...nuvarande, ...(info[namn] || {}), [falt]: varde };
+  info[namn] = kompletteraBehorighet(falt, varde, { ...nuvarande, ...(info[namn] || {}) });
   const planeringsfalt = [
     "workTimeModelId", "nattbehorig", "jour", "delegering", "villkor", "franvaro",
     "tidigastStart", "senastSlut", "maxDagarIFoljd", "helg", "passprofil", "grad", "samordnare",
@@ -1074,9 +1124,6 @@ function medarbetareSet(namn, falt, varde) {
       detalj: `${namn}: ${falt} påverkar planeringsunderlaget.`,
     });
   }
-  if (falt === "jour" && varde === true) info[namn].nattbehorig = true;
-  if (falt === "nattbehorig" && varde === false) info[namn].jour = false;
-  if (falt === "passprofil" && String(varde) === "natt") info[namn].nattbehorig = true;
 
   if (state.balans) {
     state.balans = null; state.optimerat = false;
@@ -1106,6 +1153,8 @@ function readinessNu() {
     schemaGodkand: !!state.schemaGodkand,
     medarbetareAndradSedanGodkannande: !!state.medarbetareAndrad,
     medarbetare: medarbetarLista(),
+    defaultWorkTimeModelId: DEFAULT_WORK_TIME_MODEL_ID,
+    workTimeModels: STANDARD_WORK_TIME_MODELS,
   });
 }
 
@@ -1199,7 +1248,7 @@ function motorRegler() {
     maxShiftHours: tal("Långpass – röd varning", 12),
     maxConsecutiveDays: Math.round(tal("Max arbetsdagar i följd", 5)),
     minRestDaysInFourWeeks: Math.round(tal("Minsta fridagar", 9)),
-    nightFloor: Math.round(tal("Vaken natt – grundbemanning", 1)),
+    nightFloor: Math.round(tal("Vaken natt – grundbemanning", 0)),
     flexibilityStep: 15,
     jour: {
       start: MODELL.REGLER.jourStart,
@@ -1215,29 +1264,34 @@ function motorRegler() {
  * Originalschemat och kundbehovet ändras inte.
  */
 function anvandMotorResultat(res) {
-  if (!res || !Array.isArray(res.pass)) return false;
+  const jour = lasJourDiagnos(res?.resourceDiagnostics);
+  const resursbrist = visaJourResursbrist(jour);
+  if (!res || (!Array.isArray(res.pass) && !resursbrist)) return false;
+  const pass = Array.isArray(res.pass) ? res.pass : [];
+  const ofullstandig = Boolean(res.ofullstandig) || (resursbrist && (!pass.length || String(res.solverStatus || "").toUpperCase() === "INFEASIBLE"));
   const skapad = new Date().toISOString();
   const varningar = (res.varningar || []).map((v) => (typeof v === "string" ? { text: v } : v));
   state.balans = {
     flyttade: res.flyttade || [],
-    schemaPass: res.pass,
+    schemaPass: pass,
     schemaForandringar: res.forandringar || [],
     schemaVarningar: varningar,
     borttagnaPass: [],
-    vikarieBeslut: res.pass
+    vikarieBeslut: pass
       .filter((p) => p.vikarie)
       .map((p) => ({ id: p.id, namn: p.namn, datum: p.datum, start: p.start, slut: p.slut, timmar: p.timmar, behovs: true })),
-    vikarie: { antalBorttagna: 0, antalBehalls: res.pass.filter((p) => p.vikarie).length },
+    vikarie: { antalBorttagna: 0, antalBehalls: pass.filter((p) => p.vikarie).length },
     skapad,
     kalla: "motor",
+    ofullstandig,
   };
-  state.motorResultat = { ...res, summary: res.summary || null, kalla: "motor", skapad };
-  state.optimerat = true;
+  state.motorResultat = { ...res, summary: res.summary || null, resourceDiagnostics: res.resourceDiagnostics || null, kalla: "motor", skapad, ofullstandig };
+  state.optimerat = !ofullstandig;
   state.balansGodkand = false;
   tab = "resultat";
   persist();
-  notera("Bemanningsbalans skapad med motor", "ok", {
-    detalj: res.explanation || "Granska resultatet innan du öppnar schemat.",
+  notera(ofullstandig ? "Balans behöver kompletteras" : "Bemanningsbalans skapad med motor", ofullstandig ? "info" : "ok", {
+    detalj: res.explanation || (ofullstandig ? "Registrerad personal räcker inte för obligatorisk jour." : "Granska resultatet innan du öppnar schemat."),
   });
   render();
   return true;
@@ -1270,8 +1324,8 @@ function handleSchemaFil(file) {
     state.schemaOriginal = sk; state.schemaGodkand = false; state.balans = null; state.optimerat = false;
     persist();
     tab = "uppladdning";
-    notera(`${sk.pass.length} pass och ${sk.medarbetare.length} schemarader inlästa`, "ok",
-      { detalj: "Nu kan du skapa bemanningsbalans." });
+    notera(`${sk.pass.length} pass och ${sk.medarbetare.length} medarbetare inlästa`, "ok",
+      { detalj: sk.vakantaPass ? `${sk.vakantaPass} öppna pass i Före-schemat. De är inte extra personal.` : "Nu kan du skapa bemanningsbalans." });
     render();
   };
   reader.readAsArrayBuffer(file);
@@ -2949,6 +3003,9 @@ function render() {
         return C.perKund(C.filtreraPeriod(state.rows || [], from, to)).filter((k) => !/^gemensam/i.test(k.kund)).map((k) => k.kund);
       },
       medarbetareLaggTill: (namn) => medarbetareLaggTill(namn),
+      extraResurser: () => extraResursLista(),
+      sparaExtraResurs: (r) => sparaExtraResurs(r),
+      taBortExtraResurs: (id) => taBortExtraResurs(id),
       godkannSchema: () => {
         if (!state.schemaOriginal) return;
         state.schemaGodkand = true;
@@ -2976,6 +3033,17 @@ function render() {
       // Bemanningsberäkning: regler, mottagning av förslaget och vilken källa som gäller
       motorRegler: () => motorRegler(),
       motorResultat: () => state.motorResultat || null,
+      motorJobb: () => state.motorJobb || null,
+      sattMotorJobb: (j) => { state.motorJobb = j; persist(); render(); },
+      underlagFingeravtryck: () => {
+        const extra = JSON.stringify(state.extraResurser || []);
+        const med = JSON.stringify((state.schemaOriginal && state.schemaOriginal.medarbetare) || []);
+        const n = (state.rows || []).length;
+        const s = `${n}|${extra}|${med}|${state.hourlyCost}|${state.analysisDays}`;
+        let h = 2166136261;
+        for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
+        return (h >>> 0).toString(16);
+      },
       berakningsKalla: () => (state.balans ? state.balans.kalla || "lokal" : null),
       anvandMotorResultat: (res) => anvandMotorResultat(res),
       schemaPassOriginal: () => schemaPass(),

@@ -55,7 +55,11 @@ class SolverTests(unittest.TestCase):
         self.assertIn('actualCoverageSolveMs', perf)
         self.assertIn('actualCostSolveMs', perf)
         self.assertIn('actualQualitySolveMs', perf)
-        self.assertEqual(len(perf['remainingBudgetBeforeEachPhaseMs']), 3)
+        names=[row['phase'] for row in perf['remainingBudgetBeforeEachPhaseMs']]
+        self.assertIn('zeroGap', names)
+        self.assertIn('cost', names)
+        self.assertIn('quality', names)
+        self.assertGreaterEqual(len(perf['remainingBudgetBeforeEachPhaseMs']), 3)
         self.assertGreaterEqual(perf['remainingBudgetBeforeEachPhaseMs'][0]['remainingBudgetBeforePhaseMs'], 4000)
         self.assertGreaterEqual(perf['totalSolverMs'], 0)
         self.assertNotEqual(perf.get('timeoutReason'), 'budget_exhausted_before_phase')

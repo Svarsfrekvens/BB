@@ -1,10 +1,10 @@
 """Strukturell feasibility före CP-SAT. Ändrar inte krav eller golv."""
 from datetime import date
 from .domain import (
-    add_days, candidate_as_shift, days, hard_constraints, instant, is_night,
+    active_employees, add_days, candidate_as_shift, days, dates_allowed, hard_constraints, instant,
     jour_eligible, jour_intervals, night_eligible, night_intervals, occurrences,
-    overlap, parts, shift_allowed, shifts_mergeable, skills_on_day, span,
-    ssg_cap_minutes, weekend_allowed,
+    overlap, parts, pass_requires_night_eligibility, shift_allowed, shifts_mergeable,
+    skills_on_day, span, ssg_cap_minutes, weekend_allowed,
 )
 from .generate import (
     customer_need_interval_count, demand_blocks_for_day, need_intervals,
@@ -28,16 +28,25 @@ def _absent(windows, a, b):
 def employee_available(e, day, a, b, data, for_night=False, for_jour=False):
     if e.get('status') != 'active':
         return False
+    if not dates_allowed(e, day):
+        return False
     if not weekend_allowed(e, day):
         return False
     if _absent(_absences(data, e['id']), a, b):
         return False
     hard = hard_constraints(e)
     types = hard.get('allowedTypes')
-    if for_night and types and 'night' not in types and 'jour' not in types:
-        return False
-    if for_jour and types and 'jour' not in types:
-        return False
+    if types:
+        allowed = set(types)
+        if for_jour:
+            if 'jour' not in allowed:
+                return False
+        elif for_night:
+            if 'night' not in allowed and 'jour' not in allowed:
+                return False
+        elif not (allowed & {'day', 'evening', 'night'}):
+            # Enbart sovande jour är inte aktiv dag-/kvällskapacitet.
+            return False
     if for_night and not night_eligible(e):
         return False
     if for_jour and not jour_eligible(e):
@@ -52,7 +61,7 @@ def slot_eligible(e, template, day, a, b, data, rules, absences, boundary):
     """Pre-filter: uppenbart omöjliga person/pass-kombinationer."""
     if template.get('type') == 'jour' and not jour_eligible(e):
         return False
-    if template.get('type') != 'jour' and is_night(a, b) and not night_eligible(e):
+    if pass_requires_night_eligibility(template) and not night_eligible(e):
         return False
     if not shift_allowed(e, template, day, a, b, rules):
         return False
@@ -86,7 +95,7 @@ def enumerate_person_shift_slots(data, templates=None):
     mode = planning_mode(data)
     templates = templates if templates is not None else shift_templates_for_solve(data)
     start, end = planning_day_bounds(data)
-    employees = [e for e in data['employees'] if e['status'] == 'active']
+    employees = active_employees(data)
     boundary = []
     for s in data['boundaryShifts']:
         a, b = span(s)
@@ -135,10 +144,10 @@ def _diag(code, message, severity='warning', **extra):
     return row
 
 
-def feasibility_precheck(data):
+def feasibility_precheck(data, jour_payload=None):
     """Snabb strukturell kontroll. Sänker inte golv, behov, SSG eller villkor."""
     diagnoses = []
-    employees = [e for e in data['employees'] if e['status'] == 'active']
+    employees = active_employees(data)
     wp, rules = data['workplace'], data['rules']
     start, end = planning_day_bounds(data)
     occ = occurrences(data)
@@ -219,6 +228,12 @@ def feasibility_precheck(data):
                 'critical', date=day, need=jour_floor, available=len(available),
             ))
 
+    if jour_floor:
+        from .jour_capacity import analyze_jour_capacity, jour_capacity_diagnoses
+        if jour_payload is None:
+            jour_payload = analyze_jour_capacity(data)
+        diagnoses.extend(jour_capacity_diagnoses(data, jour_payload))
+
     for o in occ:
         skills = set(o['task'].get('skills') or [])
         krav = o['task'].get('requiredEmployeeId')
@@ -295,8 +310,22 @@ def explain_with_precheck(solver_status, diagnoses, fallback, locked=False):
     if solver_status != 'INFEASIBLE':
         return fallback
     critical = [d for d in diagnoses if d.get('severity') == 'critical']
+    order = {
+        'JOUR_CAPACITY_SHORTFALL': 0,
+        'JOUR_STAFF_SHORT': 1,
+        'NIGHT_STAFF_SHORT': 2,
+        'NO_EMPLOYEES': 3,
+        'LOCKED_CONFLICT': 4,
+    }
+    critical.sort(key=lambda d: order.get(d.get('code'), 50))
     useful = critical or diagnoses
     prefix = 'Full bemanning kan inte skapas med nuvarande förutsättningar.'
+    jour = next((d for d in useful if d.get('code') == 'JOUR_CAPACITY_SHORTFALL'), None)
+    if jour:
+        useful = [jour]
+    prefix_hard_jour = 'Giltigt Balans-schema kan inte skapas.'
+    if jour:
+        prefix = prefix_hard_jour
     if locked:
         prefix = prefix + ' Låsta pass gör omplaneringen omöjlig och har inte hävts.'
     if not useful:
@@ -309,7 +338,7 @@ def explain_with_precheck(solver_status, diagnoses, fallback, locked=False):
 
 def planning_diagnostics(data, extra=None):
     extra = extra or {}
-    employees = [e for e in data['employees'] if e['status'] == 'active']
+    employees = active_employees(data)
     start, end = planning_day_bounds(data)
     before = int(extra.get('before') or 0)
     after = int(extra.get('after') or 0)
@@ -332,6 +361,8 @@ def planning_diagnostics(data, extra=None):
         generateTimeMs=extra.get('generateTimeMs', 0),
         solveTimeMs=extra.get('solveTimeMs', 0),
         coveragePhaseMs=extra.get('coveragePhaseMs', 0),
+        zeroGapPhaseMs=extra.get('zeroGapPhaseMs', 0),
+        zeroGapBPhaseMs=extra.get('zeroGapBPhaseMs', 0),
         costPhaseMs=extra.get('costPhaseMs', 0),
         qualityPhaseMs=extra.get('qualityPhaseMs', 0),
         validateTimeMs=extra.get('validateTimeMs', 0),
@@ -376,5 +407,6 @@ def planning_diagnostics(data, extra=None):
         totalSolverMs=extra.get('totalSolverMs', extra.get('solveTimeMs', 0)),
         timeoutReason=extra.get('timeoutReason'),
         deadlineReason=extra.get('deadlineReason'),
+        lnsFreeze=extra.get('lnsFreeze') or {},
         targets=dict(typical28dMs=30000, pilotMs=60000, stressMs=180000),
     )

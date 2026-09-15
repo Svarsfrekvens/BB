@@ -55,6 +55,12 @@ export type Medarbetare = {
   timkostnad: number;
   anstallning: string;
   workTimeModelId?: string;
+  /** employee = ordinarie. temporary = explicit extra resurs. temp_pool = aldrig solverpersonal. */
+  resourceType?: "employee" | "temp_pool" | "temporary";
+  tillgangligaDatum?: string[];
+  kompetenser?: string[];
+  maxTimmar?: number | null;
+  extraSlag?: "vikarie" | "extern" | "tillfallig";
   villkor?: { id: string; typ: string; styrka: string; from?: string; till?: string; aktiv: boolean; payload?: Record<string, unknown> }[];
 };
 
@@ -73,6 +79,7 @@ export type ForeEfter = {
   vikarie: { antalBorttagna: number; antalBehalls: number } | null;
   varningar: string[];
   obemannade: { insats: string; datum: string; minuter: number; antal: number }[];
+  ofullstandig?: boolean;
 };
 
 
@@ -92,6 +99,8 @@ import type {
   VyData,
   VyTillstand,
 } from "./typer";
+
+export type { VyTillstand };
 
 export type VyApi = {
   h1: (x: number) => string;
@@ -126,6 +135,9 @@ export type VyApi = {
     jour: { start: string; end: string; weekdays: number[] };
   };
   motorResultat: () => Record<string, unknown> | null;
+  motorJobb?: () => import("./motorJobb").SparatMotorJobb | null;
+  sattMotorJobb?: (j: import("./motorJobb").SparatMotorJobb | null) => void;
+  underlagFingeravtryck?: () => string;
   berakningsKalla: () => "motor" | "lokal" | null;
   anvandMotorResultat: (res: unknown) => boolean;
   schemaPassOriginal: () => DatumPass[];
@@ -134,6 +146,9 @@ export type VyApi = {
   underlagAndringar?: () => { kund?: boolean; medarbetare?: boolean };
   medarbetareSet: (namn: string, falt: string, varde: unknown) => void;
   medarbetareLaggTill: (namn: string) => void;
+  extraResurser: () => import("./extraResurs").ExtraResurs[];
+  sparaExtraResurs: (r: import("./extraResurs").ExtraResurs) => { ok: boolean; fel: string[] };
+  taBortExtraResurs: (id: string) => void;
   planAktiviteter: () => import("./aktiviteter").PlanAktivitet[];
   setPlanAktivitet: (id: string, falt: string, varde: unknown) => void;
   kontaktpersoner: () => Record<string, string>;

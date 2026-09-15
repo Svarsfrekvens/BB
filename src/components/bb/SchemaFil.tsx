@@ -58,7 +58,7 @@ export function SchemaFil({ api }: VyProps) {
             <div className="mt-4">
               <Rad etikett="Filnamn" varde={schema.filnamn || schema.blad} />
               <Rad etikett="Medarbetare med schema" varde={String(schema.medarbetare)} />
-              <Rad etikett="Vakanta schemarader" varde={String(schema.vakanta)} />
+              <Rad etikett="Vakanta/öppna pass" varde={String(schema.vakantaPass)} />
               <Rad etikett="Pass i schemarullen" varde={String(schema.pass)} />
               <Rad etikett="Veckor i rullen" varde={String(schema.veckor)} />
               <Rad etikett="Arbetad tid i rullen" varde={fmtH(schema.timmar)} />

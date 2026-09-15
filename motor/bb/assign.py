@@ -3,7 +3,7 @@
 Skapar inte variabler för kombinationer som hårda regler redan utesluter.
 Dominans: bara identiska täckningsfönster för samma person och insats.
 """
-from .domain import add_days, hard_constraints, is_night, skills_on_day
+from .domain import add_days, hard_constraints, pass_requires_night_eligibility, skills_on_day
 from .generate import occurrence_window
 from .precheck import employee_available
 
@@ -23,8 +23,12 @@ def shrink_work(intervals, take):
     return out
 
 
-def occurrence_employee_ok(e, o, data):
-    """Kompetens, kundlänk, frånvaro, helg, natt, status. Samma hårda logik som pre-check."""
+def occurrence_employee_ok(e, o, data, shift=None):
+    """Kompetens, kundlänk, frånvaro, helg, status. Nattbehörighet följer passtyp.
+
+    Insatsfönstrets överlapp med 22:00–06:00 är inte krav på employee.night.
+    Vaken natt krävs bara när det bärande passet är type=night.
+    """
     if e.get('status') != 'active':
         return False
     skills = set(o['task'].get('skills') or [])
@@ -37,24 +41,34 @@ def occurrence_employee_ok(e, o, data):
     if o['task']['customerId'] in set(hard.get('forbiddenCustomerIds') or []):
         return False
     wa, wb = occurrence_window(o)[:2]
-    nightish = is_night(wa, wb)
     types = hard.get('allowedTypes')
-    if types:
-        if nightish and not ({'night', 'jour'} & set(types)):
-            return False
-        if not nightish and set(types) <= {'night', 'jour'}:
-            return False
-    return employee_available(e, o['date'], wa, wb, data, for_night=nightish)
+    if shift and types and shift.get('type') not in types:
+        return False
+    needs_night = pass_requires_night_eligibility(shift) if shift else False
+    needs_jour = bool(shift) and shift.get('type') == 'jour'
+    return employee_available(e, o['date'], wa, wb, data, for_night=needs_night, for_jour=needs_jour)
 
 
-def covering_windows(candidate, o, reserve):
+def covering_windows(candidate, o, reserve, step=1):
     duration = o['task']['minutes']
+    step = max(1, int(step or 1))
     windows = []
     for a, b in shrink_work(candidate.get('work') or [], reserve):
         if b - a < duration or b < o['earliest'] + duration or a > o['latest']:
             continue
+        if not _window_has_grid_start(o, a, b, step):
+            continue
         windows.append((a, b))
     return windows
+
+
+def _window_has_grid_start(o, a, b, step):
+    """Samma startdomän som CP-SAT: range(earliest, latest+1, flexibilityStep)."""
+    duration = o['task']['minutes']
+    for s in range(o['earliest'], o['latest'] + 1, step):
+        if s >= a and s + duration <= b:
+            return True
+    return False
 
 
 def prune_duplicate_cover_windows(pairs):
@@ -111,14 +125,19 @@ def support_options_for_occurrence(o, employees, by_emp, data, reserve, by_emp_d
             rows.sort(key=lambda c: c['a'])
         else:
             rows = by_emp.get(e['id']) or []
+        step = int((data.get('rules') or {}).get('flexibilityStep') or 1)
         raw = []
         for c in overlapping_candidates(rows, o['earliest'], o['latest'], duration):
-            for a, b in covering_windows(c, o, reserve):
+            for a, b in covering_windows(c, o, reserve, step):
                 raw.append((c, a, b))
         before += len(raw)
         if not occurrence_employee_ok(e, o, data):
             continue
-        pruned = prune_duplicate_cover_windows(raw)
+        pruned = []
+        for cand, a, b in prune_duplicate_cover_windows(raw):
+            if not occurrence_employee_ok(e, o, data, shift=cand.get('shift')):
+                continue
+            pruned.append((cand, a, b))
         after += len(pruned)
         if pruned:
             per_emp.append((e, pruned))
@@ -144,7 +163,7 @@ def _keep_generated_template(template):
     return False
 
 
-def template_covers_occurrence(template, day, o, reserve):
+def template_covers_occurrence(template, day, o, reserve, step=1):
     from .domain import paid, span
     sample = dict(
         id='probe', employeeId='probe', date=day, start=template['start'], end=template['end'],
@@ -158,10 +177,12 @@ def template_covers_occurrence(template, day, o, reserve):
     except (ValueError, KeyError, TypeError):
         return False
     duration = o['task']['minutes']
+    step = max(1, int(step or 1))
     for a, b in shrink_work(paid(sample), reserve):
         if b - a < duration or b < o['earliest'] + duration or a > o['latest']:
             continue
-        return True
+        if _window_has_grid_start(o, a, b, step):
+            return True
     return False
 
 
@@ -173,6 +194,7 @@ def prune_unusable_generated_templates(data, templates):
     """
     from .domain import occurrences
     reserve = int((data.get('rules') or {}).get('withinPassMinutesPerShift') or 0)
+    step = int((data.get('rules') or {}).get('flexibilityStep') or 1)
     occ_by_day = {}
     for o in occurrences(data):
         occ_by_day.setdefault(o['date'], []).append(o)
@@ -186,7 +208,7 @@ def prune_unusable_generated_templates(data, templates):
         if not dates:
             out.append(t)
             continue
-        keep = [d for d in dates if any(template_covers_occurrence(t, d, o, reserve) for o in occ_by_day.get(d) or [])]
+        keep = [d for d in dates if any(template_covers_occurrence(t, d, o, reserve, step) for o in occ_by_day.get(d) or [])]
         if not keep:
             continue
         if keep == dates:

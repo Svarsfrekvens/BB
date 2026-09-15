@@ -27,6 +27,9 @@ import {
 } from "@/lib/bb/vcFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { fmtH, fmtPct } from "@/lib/bb/vy";
+import { lasJourDiagnos, visaJourResursbrist, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
+import { ResursbristPanel, resursbristProps } from "./ResursbristPanel";
+import { BalansPagar } from "./BalansPagar";
 
 export function Hem(props: VyProps) {
   const { api, state, d } = props;
@@ -39,26 +42,34 @@ export function Hem(props: VyProps) {
   const summary = lasMotorSummary(api.motorResultat());
   const fe = api.foreEfter();
   const harBalans = api.harBalans();
+  const ofull = Boolean(fe?.ofullstandig);
+  const jour = lasJourDiagnos((api.motorResultat() as { resourceDiagnostics?: unknown } | null)?.resourceDiagnostics);
+  const jourBrist = visaJourResursbrist(jour);
+  const jobb = api.motorJobb?.();
+  const pagaende = Boolean(jobb?.id && jobb.phase !== "completed" && jobb.phase !== "failed");
   const lageId = getTidslage({ harBalans, harUtfall: false });
   const lageInfo = tidslageText(lageId);
-  const lage = harBalans ? fe?.efter ?? api.foreLage() : api.foreLage() ?? fe?.fore;
+  const lage = harBalans && !ofull ? fe?.efter ?? api.foreLage() : api.foreLage() ?? fe?.fore;
   const hard = api.regelbrott();
   const godkannbar = balansKanGodkannas({
-    tacktBehovPct: harBalans ? lage?.tackningPct : null,
-    hardViolations: harBalans ? hard : 0,
+    tacktBehovPct: harBalans && !ofull ? lage?.tackningPct : null,
+    hardViolations: harBalans && !jourBrist ? hard : 0,
     saknadeKompetenskrav: harBalans
       ? raknaSaknadeKompetenskrav([...(summary?.hardViolations || []), ...(summary?.warnings || [])])
       : 0,
+    jourResursbrist: jourBrist,
   });
   const balansGodkand = Boolean(state && (state as { balansGodkand?: boolean }).balansGodkand);
-  const cta = hemHuvudCta({ lage: lageId, ready: readiness.ready, godkannbar: godkannbar.ok, balansGodkand });
+  const cta = hemHuvudCta({ lage: lageId, ready: readiness.ready, godkannbar: godkannbar.ok, balansGodkand, pagaende });
   const status = hemStatusText({
     lage: lageId,
     ready: readiness.ready,
     blockingReasons: readiness.blockingReasons,
     godkannbar: godkannbar.ok,
     balansGodkand,
-    tacktBehovPct: lage?.tackningPct,
+    tacktBehovPct: lage?.tackningPct ?? null,
+    pagaende,
+    klarForGranskning: harBalans && !pagaende && !ofull && !jourBrist,
   });
   const ssgSnitt = genomsnittligSsgPct(api.medarbetare());
   const ssgUtnytt = ssgUtnyttjandePct(null, null);
@@ -93,7 +104,7 @@ export function Hem(props: VyProps) {
 
   const mapped = lage
     ? {
-        status: harBalans ? "FEASIBLE" : "NOT_RUN",
+        status: harBalans && !ofull ? "FEASIBLE" : "NOT_RUN",
         coveragePercent: lage.tackningPct,
         customerNearPercent: lage.kundnaraPct,
         cost: Math.round(lage.kostnad * 100),
@@ -121,6 +132,10 @@ export function Hem(props: VyProps) {
       : [];
 
   const klick = () => {
+    if (cta.id === "status") {
+      document.querySelector("[data-balans-jobb]")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     if (cta.id === "skapa") void korBemanningsbalans({ api, state });
     else if (cta.id === "granska") api.setTab("resultat");
     else if (cta.id === "godkann") api.godkannBalans?.();
@@ -190,6 +205,19 @@ export function Hem(props: VyProps) {
         </dl>
       </Card>
 
+      <BalansPagar job={jobb} />
+
+      <ResursbristPanel
+        diagnos={jour}
+        visaKundbrist={harMjukKundbrist({
+          tacktBehovPct: ofull ? null : lage?.tackningPct,
+          obemannadeAntal: fe?.obemannade?.length,
+          ofullstandigUtanSchema: ofull,
+        })}
+        {...resursbristProps(api)}
+      />
+
+      {ofull ? null : (
       <TreOmraden
         summary={mapped}
         hardCount={hard}
@@ -207,6 +235,7 @@ export function Hem(props: VyProps) {
             : undefined
         }
       />
+      )}
 
       {d ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-nulagekort="4">
@@ -301,7 +330,7 @@ export function Hem(props: VyProps) {
             ))}
           </ul>
         ) : null}
-        {lage && lage.tackningPct < 100 && lageId === "balans" ? (
+        {lage && lage.tackningPct < 100 && lageId === "balans" && !ofull && !jourBrist ? (
           <p className="mt-3 text-sm font-semibold text-warning" data-ej-godkannbar="true">
             Balans kan inte godkännas
             {lage.obemannatKundbehovH > 0

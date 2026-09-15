@@ -14,6 +14,7 @@ export const REGEL_RUBRIK: Record<string, string> = {
   CONSECUTIVE_SOFT: "Arbetsdagar i följd (mjukt)",
   REST_DAYS: "Fridagar 28 dagar",
   BOUNDARY_INCOMPLETE: "Ofullständig periodgräns (F-01)",
+  BOUNDARY_HISTORY: "Avvikelser i befintligt/låst schema",
   PAIR_OFF_SOFT: "Sammanhängande ledighet (mjukt)",
   MIN_OFF: "Sammanhängande ledighet",
   MIN_OFF_SOFT: "Sammanhängande ledighet (mjukt)",
@@ -38,9 +39,11 @@ export const REGEL_RUBRIK: Record<string, string> = {
   WEEKDAY: "Veckodag",
   PROFILE: "Passprofil",
   CUSTOMER: "Kundvillkor",
-  MIN_OFF: "Sammanhängande ledighet",
   WINDOW_EMP: "Arbetstidsfönster",
   JOUR: "Jourbehörighet",
+  JOUR_STAFF_SHORT: "För få jourbehöriga",
+  JOUR_CAPACITY_SHORTFALL: "Obligatorisk jour saknar registrerad resurs",
+  INSUFFICIENT_TOTAL_CAPACITY: "Kundbehov överstiger tillgänglig personal (mjuk täckning)",
   NIGHT_SERIES: "Nattpass i följd",
   NIGHT_SERIES_SOFT: "Nattpass i följd (gul)",
   NIGHT_SERIES_STRONG: "Nattpass i följd (röd, mjuk)",
@@ -85,6 +88,7 @@ export type MotorObemannad = { insats: string; datum: string; minuter: number; a
 export type MotorSchema = {
   solverStatus: string;
   explanation: string;
+  resourceDiagnostics?: Record<string, unknown> | null;
   pass: MotorPass[];
   tilldelningar: MotorTilldelning[];
   flyttade: MotorFlytt[];
@@ -191,9 +195,15 @@ export function tolkaMotorSchema(schemaJson: string, upp: Uppslag): MotorSchema 
     antal: Number(u?.count) || 0,
   }));
 
+  const resourceDiagnostics =
+    schema.resourceDiagnostics && typeof schema.resourceDiagnostics === "object"
+      ? (schema.resourceDiagnostics as Record<string, unknown>)
+      : null;
+
   return {
     solverStatus: String(schema.solverStatus || "UNKNOWN"),
     explanation: String(schema.explanation || ""),
+    resourceDiagnostics,
     pass,
     tilldelningar,
     flyttade,
@@ -224,9 +234,15 @@ export function tolkaMotorSchema(schemaJson: string, upp: Uppslag): MotorSchema 
 export function slaSamman(delar: MotorSchema[]): MotorSchema | null {
   if (!delar.length) return null;
   const forsta = delar[0]!;
+  const infeasible = delar.find((d) => d.solverStatus === "INFEASIBLE");
   return {
-    solverStatus: delar.every((d) => d.solverStatus === "OPTIMAL") ? "OPTIMAL" : "FEASIBLE",
-    explanation: forsta.explanation,
+    solverStatus: infeasible
+      ? "INFEASIBLE"
+      : delar.every((d) => d.solverStatus === "OPTIMAL")
+        ? "OPTIMAL"
+        : "FEASIBLE",
+    explanation: infeasible?.explanation || forsta.explanation,
+    resourceDiagnostics: infeasible?.resourceDiagnostics || forsta.resourceDiagnostics || null,
     pass: delar.flatMap((d) => d.pass),
     tilldelningar: delar.flatMap((d) => d.tilldelningar),
     flyttade: delar.flatMap((d) => d.flyttade),

@@ -79,11 +79,10 @@ describe("motorPayload ur Galaxen", () => {
     for (const c of customers) expect(c.code).toMatch(KOD_KUND);
   });
 
-  it("vikarier har status active", () => {
-    const employees = (payload(7).payload.employees as { code: string; status: string }[]) || [];
-    const vikarier = employees.filter((e) => e.code.startsWith("V"));
-    expect(vikarier.length).toBeGreaterThan(0);
-    for (const v of vikarier) expect(v.status).toBe("active");
+  it("Galaxen skapar inga V-koder från Ingen placerad", () => {
+    const employees = (payload(7).payload.employees as { code: string; name: string; status: string }[]) || [];
+    const vikarier = employees.filter((e) => e.code.startsWith("V") || /^Vikarie \d+$/i.test(e.name));
+    expect(vikarier).toEqual([]);
   });
 
   it("maxShiftHours och maxConsecutiveDays läses ur STYRANDE_VILLKOR, inte 16/7", () => {
@@ -128,7 +127,7 @@ describe("motorPayload ur Galaxen", () => {
     });
     const mallar = (r.payload.templates as { type: string; start: string; end: string }[]) || [];
     expect(mallar.some((m) => m.type === "jour" && m.start === "23:00" && m.end === "06:30")).toBe(false);
-    expect(r.info.regler.nightFloor).toBe(1);
+    expect(r.info.regler.nightFloor).toBe(0);
     expect(r.info.regler.jourFloor).toBe(0);
   });
 
@@ -245,5 +244,56 @@ describe("motorPayload ur Galaxen", () => {
     expect(generera.payload.existingSchedule).toBeNull();
     expect(generera.payload.templates).toEqual([]);
     expect((generera.payload.rules as { preferredMinShiftMinutes: number }).preferredMinShiftMinutes).toBe(240);
+  });
+});
+
+describe("STAFF – ingen syntetisk personal", () => {
+  type Emp = { id: string; code: string; name: string; ssg: number; status: string };
+
+  function employeesOf(dagar: number) {
+    return (payload(dagar).payload.employees as Emp[]) || [];
+  }
+
+  it("STAFF-A: 5 namngivna personer ger exakt 5 i payload", () => {
+    expect(tillMedarbetare().length).toBe(5);
+    const employees = employeesOf(7);
+    expect(employees.length).toBe(5);
+    expect(employees.map((e) => e.id)).toEqual(["e1", "e2", "e3", "e4", "e5"]);
+    expect(employees.map((e) => e.name)).toEqual(["Topas", "Turmalin", "Jade", "Bärnsten", "Ametist"]);
+  });
+
+  it("STAFF-B: stort kundbehov skapar inga extra personer", () => {
+    const employees = employeesOf(28);
+    expect(employees.length).toBe(5);
+    expect(employees.some((e) => /^x\d+$/.test(e.id) || /^Extra vikarie/i.test(e.name))).toBe(false);
+    expect(payload(28).varningar.some((v) => /extra vikarie/i.test(v))).toBe(false);
+  });
+
+  it("STAFF-C: otillräcklig bemanning ger inte syntetiska employees", () => {
+    const r = byggMotorPayload({
+      rader: sekoia.rows as Insats[],
+      medarbetare: tillMedarbetare().slice(0, 1),
+      from: "2026-08-03",
+      dagar: 28,
+      timkostnad: 270,
+      regler: reglerFranVillkor(),
+    });
+    const employees = (r.payload.employees as Emp[]) || [];
+    expect(employees.length).toBe(1);
+    expect(employees[0]?.id).toBe("e1");
+    expect(employees.some((e) => /^x\d+$/.test(e.id))).toBe(false);
+  });
+
+  it("STAFF-D: payload klonar inte första personen till nya resurser", () => {
+    const importerade = tillMedarbetare().map((m) => m.namn);
+    const employees = employeesOf(28);
+    expect(employees.map((e) => e.name)).toEqual(importerade);
+    expect(new Set(employees.map((e) => e.id)).size).toBe(employees.length);
+  });
+
+  it("STAFF-E: Ingen placerad blir inte Vikarie 1–6", () => {
+    const employees = employeesOf(7);
+    expect(employees.filter((e) => e.code.startsWith("V"))).toEqual([]);
+    expect(employees.some((e) => /^Vikarie \d+$/i.test(e.name))).toBe(false);
   });
 });

@@ -34,16 +34,35 @@ class SupportPruning(unittest.TestCase):
 
     def test_night_requires_eligibility(self):
         d, _ = fixture()
-        d['interventions'][0].update(start='22:00', latestEnd='06:00', minutes=480)
+        d['interventions'][0].update(start='22:00', latestEnd='06:00', minutes=480, type='fixed')
         d['employees'][0]['night'] = False
         o = occurrences(d)[0]
-        self.assertFalse(occurrence_employee_ok(d['employees'][0], o, d))
+        self.assertTrue(occurrence_employee_ok(d['employees'][0], o, d))
+        night = _cand('n1', 'e1', o['date'], '21:00', '07:30', 'night')
+        self.assertFalse(occurrence_employee_ok(d['employees'][0], o, d, shift=night['shift']))
 
     def test_hard_allowed_types(self):
         d, _ = fixture()
         d['employees'][0]['constraints'] = dict(hard=dict(allowedTypes=['night']))
         o = occurrences(d)[0]
+        day = _cand('d1', 'e1', o['date'], '06:00', '14:00', 'day')
+        self.assertFalse(occurrence_employee_ok(d['employees'][0], o, d, shift=day['shift']))
+
+    def test_jour_only_is_not_daytime_capacity_or_ar_support(self):
+        d, _ = fixture()
+        d['employees'][0].update(jour=True, night=False)
+        d['employees'][0]['constraints'] = dict(hard=dict(allowedTypes=['jour']))
+        o = occurrences(d)[0]
+        wa, wb = o['earliest'], o['latest'] + o['task']['minutes']
+        self.assertFalse(employee_available(d['employees'][0], o['date'], wa, wb, d))
+        self.assertTrue(employee_available(d['employees'][0], o['date'], wa, wb, d, for_jour=True))
         self.assertFalse(occurrence_employee_ok(d['employees'][0], o, d))
+        day = _cand('d1', 'e1', o['date'], '06:00', '14:00', 'day')
+        packed = support_options_for_occurrence(o, d['employees'], {'e1': [day]}, d, 0)
+        self.assertEqual(packed['after'], 0)
+        self.assertEqual(packed['per_emp'], [])
+        jour = _cand('j1', 'e1', o['date'], '23:00', '06:30', 'jour')
+        self.assertTrue(occurrence_employee_ok(d['employees'][0], o, d, shift=jour['shift']))
 
     def test_no_variable_for_blocked_employee(self):
         d, _ = fixture()
@@ -105,3 +124,88 @@ class GeneratedShiftPruning(unittest.TestCase):
         self.assertTrue(any(t['type'] == 'night' for t in raw))
         pruned, _ = prune_unusable_generated_templates(d, raw)
         self.assertTrue(any(t['type'] == 'night' for t in pruned))
+
+
+def _occ(d, start, latest, minutes, typ='flexible'):
+    d['interventions'][0].update(start=start, latestEnd=latest, minutes=minutes, type=typ)
+    d['employees'][0]['night'] = False
+    d['rules']['nightFloor'] = 0
+    return occurrences(d)[0]
+
+
+class AssignNightSemantics(unittest.TestCase):
+    def packed(self, o, d, cands):
+        by = {}
+        for c in cands:
+            by.setdefault(c['shift']['employeeId'], []).append(c)
+        return support_options_for_occurrence(o, d['employees'], by, d, 0)
+
+    def test_assign_night_a_evening_after_22_without_night_flag(self):
+        d, _ = fixture()
+        o = _occ(d, '22:15', '22:30', 15, 'fixed')
+        eve = _cand('e1s', 'e1', o['date'], '15:00', '23:00', 'evening')
+        packed = self.packed(o, d, [eve])
+        self.assertGreater(packed['after'], 0)
+        self.assertEqual([e['id'] for e, _ in packed['per_emp']], ['e1'])
+
+    def test_assign_night_b_night_type_requires_flag(self):
+        d, _ = fixture()
+        o = _occ(d, '22:15', '22:30', 15, 'fixed')
+        night = _cand('n1', 'e1', o['date'], '21:00', '07:30', 'night')
+        packed = self.packed(o, d, [night])
+        self.assertEqual(packed['after'], 0)
+        self.assertEqual(packed['per_emp'], [])
+        d['employees'][0]['night'] = True
+        packed_ok = self.packed(o, d, [night])
+        self.assertGreater(packed_ok['after'], 0)
+
+    def test_grid_infeasible_cover_window_is_dropped(self):
+        d, _ = fixture()
+        d['rules']['flexibilityStep'] = 15
+        o = _occ(d, '08:07', '08:22', 15, 'flexible')
+        short = _cand('s', 'e1', o['date'], '08:00', '08:20')
+        packed = self.packed(o, d, [short])
+        self.assertEqual(packed['after'], 0)
+        long = _cand('l', 'e1', o['date'], '08:00', '09:00')
+        packed_ok = self.packed(o, d, [long])
+        self.assertGreater(packed_ok['after'], 0)
+
+    def test_assign_night_c_flexible_window_crossing_22(self):
+        d, _ = fixture()
+        o = _occ(d, '21:30', '22:30', 5, 'flexible')
+        eve = _cand('e1s', 'e1', o['date'], '15:00', '23:00', 'evening')
+        packed = self.packed(o, d, [eve])
+        self.assertGreater(packed['before'], 0)
+        self.assertGreater(packed['after'], 0)
+        self.assertTrue(occurrence_employee_ok(d['employees'][0], o, d, shift=eve['shift']))
+
+    def test_assign_night_d_jour_is_not_awake_night_or_paid_cover(self):
+        d, _ = fixture()
+        d['employees'][0]['jour'] = True
+        o = _occ(d, '23:00', '06:30', 30, 'fixed')
+        jour = _cand('j1', 'e1', o['date'], '23:00', '06:30', 'jour')
+        self.assertTrue(occurrence_employee_ok(d['employees'][0], o, d, shift=jour['shift']))
+        packed = self.packed(o, d, [jour])
+        self.assertEqual(packed['after'], 0)
+        self.assertEqual(jour['work'], [])
+
+    def test_assign_night_e_night_false_still_no_night_support(self):
+        d, _ = fixture()
+        o = _occ(d, '21:00', '07:30', 60, 'fixed')
+        night = _cand('n1', 'e1', o['date'], '21:00', '07:30', 'night')
+        self.assertFalse(occurrence_employee_ok(d['employees'][0], o, d, shift=night['shift']))
+        packed = self.packed(o, d, [night])
+        self.assertEqual(packed['after'], 0)
+
+    def test_assign_night_f_window_edges_do_not_change_evening_rule(self):
+        d, _ = fixture()
+        o = _occ(d, '21:30', '22:30', 5, 'flexible')
+        eve = _cand('e1s', 'e1', o['date'], '15:00', '23:00', 'evening')
+        a = self.packed(o, d, [eve])
+        o2 = _occ(d, '22:00', '22:30', 5, 'flexible')
+        b = self.packed(o2, d, [eve])
+        self.assertGreater(a['after'], 0)
+        self.assertGreater(b['after'], 0)
+        rev = self.packed(o, d, list(reversed([eve, eve])))
+        self.assertEqual(a['after'] > 0, rev['after'] > 0)
+
