@@ -3,14 +3,22 @@ services:
     name: bemanningsbalans-motor
     runtime: python
     region: frankfurt
-    plan: free
-    branch: main
+    plan: 4c-8g
+    branch: pilot-snapshot-2026-09-15
+    rootDir: motor
+    autoDeployTrigger: off
     buildCommand: pip install -r requirements.txt
     startCommand: python -m uvicorn bb.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
+    disk:
+      name: bb-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
+      - key: BB_ASYNC_JOBS
+        value: "1"
       - key: BB_MAX_OCCURRENCES
         value: "4000"
       - key: BB_MAX_SUPPORT_COMBINATIONS
