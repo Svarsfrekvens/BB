@@ -33,6 +33,18 @@ class OccurrenceLimitConfig(unittest.TestCase):
         check_input(d)
         self.assertEqual(effective_max_occurrences(d), 2800)
 
+    def test_support_ceiling_is_250000_fail_closed_above(self):
+        d, _ = fixture()
+        d['limits'] = dict(maxSupportCombinations=250000)
+        check_input(d)
+        d2 = deepcopy(d)
+        d2['limits'] = dict(maxSupportCombinations=250001)
+        with self.assertRaises(ValueError):
+            check_input(d2)
+        from bb.limits import CEILING_MAX_OCCURRENCES, CEILING_MAX_SUPPORT_COMBINATIONS
+        self.assertEqual(CEILING_MAX_OCCURRENCES, 4000)
+        self.assertEqual(CEILING_MAX_SUPPORT_COMBINATIONS, 250000)
+
     def test_invalid_limit_is_fail_closed(self):
         d, _ = fixture()
         for bad in (0, -1, 4001, 1.5, 'abc', True):

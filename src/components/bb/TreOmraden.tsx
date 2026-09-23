@@ -78,23 +78,42 @@ export function TreOmraden({
   };
   const natt = allaRegler.some((w) => /natt|jour/i.test(`${w.rule || ""} ${w.message || ""}`));
 
-  const kort = (ikon: ReactNode, rubrik: string, rader: { etikett: string; varde: string; title?: string; indent?: boolean }[], fot?: string) => (
-    <Card className="gap-0 rounded-2xl p-6 shadow-lift" data-omrade={rubrik}>
+  const kort = (ikon: ReactNode, rubrik: string, rader: { etikett: string; varde: string; title?: string; indent?: boolean }[], fot?: string) => {
+    const [huvud, ...rest] = rader;
+    return (
+    <Card className="card-lift gap-0 rounded-[28px] p-10 shadow-lift" data-omrade={rubrik}>
       <div className="flex items-center gap-3">
-        <span className="grid size-10 place-items-center rounded-xl bg-primary-soft text-primary">{ikon}</span>
-        <h3 className="text-lg font-extrabold text-deep">{rubrik}</h3>
+        <span className="grid size-12 place-items-center rounded-2xl bg-primary-soft text-primary">{ikon}</span>
+        <h3 className="text-[20px] font-extrabold text-deep">{rubrik}</h3>
       </div>
-      <dl className="mt-5 space-y-3">
-        {rader.map((r) => (
-          <div key={r.etikett} className={cn("flex items-baseline justify-between gap-3", r.indent && "pl-4")} title={r.title}>
-            <dt className="text-sm text-muted-foreground">{r.indent ? `↳ ${r.etikett}` : r.etikett}</dt>
-            <dd className="text-base font-bold tabular-nums text-deep">{r.varde}</dd>
-          </div>
-        ))}
-      </dl>
-      {fot ? <p className="mt-4 text-xs leading-relaxed text-muted-foreground">{fot}</p> : null}
+      {huvud ? (
+        <div className="mt-7" title={huvud.title}>
+          <p className="text-[36px] font-extrabold leading-none tracking-tight text-deep tabular-nums">{huvud.varde}</p>
+          <p className="mt-3 text-[16px] text-muted-foreground">{huvud.etikett}</p>
+        </div>
+      ) : null}
+      {rest.length ? (
+        <details className="mt-6 group">
+          <summary className="cursor-pointer list-none text-[14px] font-semibold text-deep/70 hover:text-deep">
+            <span className="group-open:hidden">Visa detaljer</span>
+            <span className="hidden group-open:inline">Dölj detaljer</span>
+          </summary>
+          <dl className="mt-4 space-y-3">
+            {rest.map((r) => (
+              <div key={r.etikett} className={cn("flex items-baseline justify-between gap-3", r.indent && "pl-4")} title={r.title}>
+                <dt className="text-[16px] text-muted-foreground">{r.indent ? `↳ ${r.etikett}` : r.etikett}</dt>
+                <dd className="text-[16px] font-bold tabular-nums text-deep">{r.varde}</dd>
+              </div>
+            ))}
+          </dl>
+          {fot ? <p className="mt-4 text-[14px] leading-relaxed text-muted-foreground">{fot}</p> : null}
+        </details>
+      ) : fot ? (
+        <p className="mt-5 text-[14px] leading-relaxed text-muted-foreground">{fot}</p>
+      ) : null}
     </Card>
-  );
+    );
+  };
 
   const resursRader = [
     { etikett: "Matchning mot behov", varde: resurs?.matchning || "–", title: MATCHNING_FORKLARING },
@@ -108,18 +127,18 @@ export function TreOmraden({
     {
       etikett: "Vakanta timmar",
       varde: resurs?.vakantaSaknas ? "–" : resurs?.vakanta || "–",
-      title: resurs?.vakantaSaknas ? "Vakanta timmar saknas i underlaget" : undefined,
+      ...(resurs?.vakantaSaknas ? { title: "Vakanta timmar saknas i underlaget" } : {}),
     },
     {
       etikett: "Vikarietimmar",
       varde: resurs?.vikarieSaknas ? "–" : resurs?.vikarie || "–",
-      title: resurs?.vikarieSaknas ? "Vikarietimmar saknas i underlaget" : undefined,
+      ...(resurs?.vikarieSaknas ? { title: "Vikarietimmar saknas i underlaget" } : {}),
     },
     ...(resurs?.overtids ? [{ etikett: "Övertid/mertid", varde: resurs.overtids }] : []),
   ];
 
   return (
-    <div className={cn("grid gap-4 lg:grid-cols-3", tom && "opacity-90")} data-huvudomraden="3">
+    <div className={cn("grid gap-6 lg:grid-cols-3", tom && "opacity-90")} data-huvudomraden="3">
       {kort(<HeartHandshake className="size-5" />, TRE_OMRADEN_RUBRIKER[0], [
         { etikett: "Täckt behov", varde: tom ? "–" : pct(s?.coveragePercent), title: TACKT_BEHOV_FORKLARING },
         { etikett: "Kundnära tid", varde: tom ? "–" : pct(s?.customerNearPercent), title: KUNDNARA_FORKLARING },

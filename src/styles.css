@@ -110,18 +110,18 @@
   --radius: 1.15rem;
 
   /* Frösunda – befintlig palett */
-  --background: #ffffff;
-  --foreground: #004691;
+  --background: #f6f5f2;
+  --foreground: #1c2333;
   --card: #ffffff;
-  --card-foreground: #004691;
+  --card-foreground: #1c2333;
   --popover: #ffffff;
   --popover-foreground: #004691;
   --primary: #004691;
   --primary-foreground: #ffffff;
-  --secondary: #d3d7ee;
+  --secondary: #eceaf7;
   --secondary-foreground: #004691;
-  --muted: #d3d7ee;
-  --muted-foreground: #004691;
+  --muted: #eceaf7;
+  --muted-foreground: #5c6578;
   --accent: #ef8304;
   --accent-foreground: #ffffff;
   --destructive: #004691;
@@ -154,16 +154,16 @@
   --chart-5: #e6efd8;
 
   --sidebar: #ffffff;
-  --sidebar-foreground: #1f3a34;
-  --sidebar-primary: #1f4a40;
+  --sidebar-foreground: #1c2333;
+  --sidebar-primary: #004691;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #f2f5f4;
-  --sidebar-accent-foreground: #1f3a34;
-  --sidebar-border: #e6ecea;
-  --sidebar-ring: #7c5cd6;
+  --sidebar-accent: #eceaf7;
+  --sidebar-accent-foreground: #004691;
+  --sidebar-border: #ccd6ea;
+  --sidebar-ring: #004691;
 
-  --shadow-lift: 0 6px 18px rgba(20, 50, 45, 0.08);
-  --shadow-lift-lg: 0 14px 34px rgba(20, 50, 45, 0.12);
+  --shadow-lift: 0 12px 32px rgba(16, 32, 72, 0.09);
+  --shadow-lift-lg: 0 22px 48px rgba(16, 32, 72, 0.13);
 
 
   /* Statusfärger (ikon + färg + text), passtyper i schemat och grafernas
@@ -246,8 +246,8 @@
     -webkit-font-smoothing: antialiased;
   }
   body {
-    font-size: 16px;
-    line-height: 1.5;
+    font-size: 16.5px;
+    line-height: 1.55;
   }
   h1, h2, h3 {
     color: var(--deep);
@@ -257,10 +257,14 @@
 
 @utility card-lift {
   background: var(--card);
-  border-radius: 20px;
-  border: 1px solid var(--border);
+  border-radius: 28px;
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
   box-shadow: var(--shadow-lift);
-  transition: transform 180ms ease, box-shadow 180ms ease;
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+.card-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lift-lg);
 }
 
 @utility num-xl {
@@ -295,13 +299,20 @@
   border-radius: 0.5rem;
 }
 
-/* Lätt lyft på klickbara ytor. */
-:where(button, [role="button"], a.bb-lyft):not(:disabled):hover {
-  transform: translateY(-1px);
-  transition: transform 150ms ease, box-shadow 150ms ease;
+details > summary {
+  list-style: none;
 }
-:where(button, [role="button"]):not(:disabled) {
-  transition: transform 150ms ease, box-shadow 150ms ease, background-color 150ms ease, color 150ms ease;
+details > summary::-webkit-details-marker {
+  display: none;
+}
+
+/* Lätt lyft på klickbara ytor. Processstegen har egen elevation. */
+:where(button, [role="button"], a.bb-lyft):not(:disabled):not(.bb-process-steg):hover {
+  transform: translateY(-2px);
+  transition: transform 200ms ease, box-shadow 200ms ease;
+}
+:where(button, [role="button"]):not(:disabled):not(.bb-process-steg) {
+  transition: transform 200ms ease, box-shadow 200ms ease, background-color 200ms ease, color 200ms ease;
 }
 
 /* Samma streckvikt på alla lucide-ikoner. */
@@ -320,6 +331,18 @@ table :where(td, th),
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
 }
-.animated.fadeInUp {
-  animation: bb-fade-up 320ms ease-out both;
+@media (prefers-reduced-motion: reduce) {
+  .bb-rise,
+  .animated.fadeInUp {
+    animation: none !important;
+  }
+  :where(button, [role="button"], a.bb-lyft):not(:disabled):hover {
+    transform: none;
+  }
+  .bb-process-steg {
+    transform: none !important;
+  }
+  .card-lift:hover {
+    transform: none;
+  }
 }

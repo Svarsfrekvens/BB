@@ -2,7 +2,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VyProps } from "@/lib/bb/vy";
-import { berakningsKallaText, balansKanGodkannas, lasMotorSummary, raknaSaknadeKompetenskrav, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
+import { berakningsKallaText, godkannBeslutFranVy, lasMotorSummary, raknaSaknadeKompetenskrav, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { fmtPct } from "@/lib/bb/vy";
 import { lasJourDiagnos, visaJourResursbrist, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
@@ -20,7 +20,9 @@ export function Resultat(props: VyProps) {
   const jourBrist = visaJourResursbrist(jour);
   const readiness = readinessFranApi(api);
 
-  const godkannbar = balansKanGodkannas({
+  const godkannbar = godkannBeslutFranVy({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
     tacktBehovPct: ofull ? null : efter?.tackningPct,
     hardViolations: jourBrist ? 0 : api.regelbrott(),
     saknadeKompetenskrav: raknaSaknadeKompetenskrav([
@@ -86,7 +88,7 @@ export function Resultat(props: VyProps) {
           obemannadeAntal: fe?.obemannade?.length,
           ofullstandigUtanSchema: ofull,
         })}
-        {...resursbristProps(api)}
+        {...resursbristProps(api, state)}
       />
       {ofull ? null : (
       <TreOmraden
@@ -106,7 +108,7 @@ export function Resultat(props: VyProps) {
                 warnings: (fe?.varningar || []).map((m) => ({ message: m })),
                 changedShiftCount: api.schemaForandringar().length,
                 lockedShiftCount: api.schemaPass().filter((p) => p.last).length,
-                explanationSummary: summary?.explanationSummary || "",
+                explanationSummary: "",
                 performanceSummary: "",
               }
         }

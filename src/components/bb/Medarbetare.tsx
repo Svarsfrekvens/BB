@@ -474,7 +474,7 @@ export function Medarbetare({ api }: VyProps) {
               : "Godkänn när uppgifter och arbetstidsmodeller stämmer."}
         </span>
         <Button onClick={() => api.godkannSchema()}>
-          {api.underlag().godkand.schema && !andrad ? "Godkänt ✓" : andrad ? "Godkänn ändringar" : "Godkänn personalschemat"}
+          {api.underlag().godkand.schema && !andrad ? "Godkänt ✓" : andrad ? "Godkänn ändringar" : "Godkänn medarbetare & villkor"}
         </Button>
       </Card>
     </div>

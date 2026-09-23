@@ -2,15 +2,18 @@ import { useState } from "react";
 import { AlertTriangle, Users } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { jourPanelModell, type JourDiagnos } from "@/lib/bb/jourDiagnos";
+import { jourPanelModell, lasPrecheck, lasSamtidighetsbrist, vakantaPassText, type JourDiagnos, type Samtidighetsbrist } from "@/lib/bb/jourDiagnos";
 import type { ExtraResurs } from "@/lib/bb/extraResurs";
-import type { VyApi } from "@/lib/bb/vy";
+import type { VyApi, VyTillstand } from "@/lib/bb/vy";
+import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { KompletteraResursDialog, extraResursSammanfattning } from "./KompletteraResursDialog";
 
 export function ResursbristPanel({
   diagnos,
   visaKundbrist,
   extraResurser = [],
+  samtidig = [],
+  vakantaPass,
   onSparaExtra,
   onTaBortExtra,
   onSkapaBalansIgen,
@@ -18,6 +21,8 @@ export function ResursbristPanel({
   diagnos: JourDiagnos | null;
   visaKundbrist?: boolean;
   extraResurser?: ExtraResurs[];
+  samtidig?: Samtidighetsbrist[];
+  vakantaPass?: number | undefined;
   onSparaExtra?: (r: ExtraResurs) => { ok: boolean; fel: string[] };
   onTaBortExtra?: (id: string) => void;
   onSkapaBalansIgen?: () => void;
@@ -33,6 +38,11 @@ export function ResursbristPanel({
           <p className="text-[11px] font-bold tracking-widest text-warning uppercase">Resursbrist identifierad</p>
           <h3 className="mt-1 text-xl font-extrabold text-deep">{m.rubrik}</h3>
           <p className="mt-1 text-sm font-semibold text-deep">{m.ingress}</p>
+          {m.jourBristRad ? (
+            <p className="mt-2 text-sm font-semibold text-deep" data-jour-brist-rad="">
+              {m.jourBristRad}
+            </p>
+          ) : null}
           <p className="mt-3 text-sm leading-relaxed text-deep" data-jour-huvudtext="">
             {m.huvud}
           </p>
@@ -66,6 +76,23 @@ export function ResursbristPanel({
             <p className="mt-3 text-sm text-deep" data-open-jour-fore="">
               <span className="font-semibold">Saknar namngiven resurs i Före-schema. </span>
               {m.openFore}
+            </p>
+          ) : null}
+          {samtidig.length ? (
+            <div className="mt-3" data-samtidighetsbrist="">
+              <p className="text-sm font-semibold text-deep">{m.samtidighetIngress}</p>
+              <ul className="mt-1 list-disc pl-5 text-sm text-deep">
+                {samtidig.slice(0, 8).map((rad) => (
+                  <li key={`${rad.date}-${rad.tidstext}`}>
+                    {rad.tidstext}: behov {rad.need}, registrerade {rad.available}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {vakantaPassText(vakantaPass) ? (
+            <p className="mt-3 text-sm text-deep" data-vakanta-pass-ej-personal="">
+              {vakantaPassText(vakantaPass)}
             </p>
           ) : null}
           {m.datumVarning ? (
@@ -122,11 +149,16 @@ export function ResursbristPanel({
   );
 }
 
-export function resursbristProps(api: VyApi) {
+export function resursbristProps(api: VyApi, state?: VyTillstand | Record<string, unknown> | null) {
+  const diag = (api.motorResultat() as { resourceDiagnostics?: unknown } | null)?.resourceDiagnostics;
   return {
     extraResurser: api.extraResurser?.() || [],
+    samtidig: lasSamtidighetsbrist(lasPrecheck(diag)),
+    vakantaPass: api.underlag()?.schema?.vakantaPass,
     onSparaExtra: (r: ExtraResurs) => api.sparaExtraResurs?.(r) || { ok: false, fel: ["Kan inte spara."] },
     onTaBortExtra: (id: string) => api.taBortExtraResurs?.(id),
-    onSkapaBalansIgen: () => api.skapaBalans(),
+    onSkapaBalansIgen: () => {
+      void korBemanningsbalans({ api, state: state ?? null });
+    },
   };
 }

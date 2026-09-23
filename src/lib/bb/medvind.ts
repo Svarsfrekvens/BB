@@ -46,7 +46,7 @@ export type MedvindSchema = {
 };
 
 
-export type DatumPass = MedvindPass & { datum: string };
+export type DatumPass = MedvindPass & { datum: string; last?: boolean };
 
 const KLOCKA = /(\d{1,2})[:.](\d{2})\s*[-–]\s*(\d{1,2})[:.](\d{2})\s*(\S*)/;
 

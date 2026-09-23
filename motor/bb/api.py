@@ -10,7 +10,12 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from .domain import check_input
 from .jobs import async_jobs_enabled, create_job, execute, find_active, get_job, public_view
-from .limits import reported_limits
+from .limits import (
+    ASYNC_MAX_SOLVE_SECONDS,
+    SYNC_MAX_SOLVE_SECONDS,
+    clamp_solve_seconds,
+    reported_limits,
+)
 from .validate import validate
 
 app=FastAPI(title='Bemanningsbalans optimeringsmotor',version='1.0.0')
@@ -77,7 +82,9 @@ async def optimize(request:Request):
     try:
         from .solver import solve
         async with gate:
-            return await asyncio.to_thread(solve,body['data'],body.get('seconds',30))
+            return await asyncio.to_thread(
+                solve, body['data'], clamp_solve_seconds(body.get('seconds', 30), SYNC_MAX_SOLVE_SECONDS),
+            )
     except ImportError as exc:
         raise HTTPException(503,'OR-Tools är inte installerat. Följ startinstruktionerna.') from exc
     except (ValueError,TypeError,OverflowError) as exc:
@@ -97,7 +104,7 @@ async def start_optimize_job(request:Request):
         return public_view(existing)
     if gate.locked():
         raise HTTPException(429,'En beräkning pågår. Försök igen när den är klar.')
-    seconds=body.get('seconds',30)
+    seconds=clamp_solve_seconds(body.get('seconds',30), ASYNC_MAX_SOLVE_SECONDS)
     job=create_job(body['data'], seconds)
     async def runner():
         try:

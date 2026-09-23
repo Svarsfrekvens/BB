@@ -200,7 +200,7 @@ export function Kundbehov({ d, state, api }: VyProps) {
   const ofull = d.rows.some((r) => !r.start || !(r.minuter > 0));
   const status = kundUnderlagStatus({
     godkand: api.underlag().godkand.kund,
-    redigerad: !!api.underlagAndringar?.().kund || d.redigerad,
+    redigerad: !!(api.underlagAndringar?.().kund || d.redigerad),
     ofullstandig: ofull,
   });
 
@@ -224,20 +224,20 @@ export function Kundbehov({ d, state, api }: VyProps) {
           </Badge>
         </div>
         <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-          Se kunder, behov per dygn, fasta och flyttbara insatser, dubbelbemanning och kompetenskrav. Godkänn när
-          underlaget stämmer.
+          Se kunder, behov per dygn, fasta och flyttbara insatser, dubbelbemanning och kompetenskrav.
+          {status.kod === "klar"
+            ? " Underlaget är godkänt."
+            : status.kod === "forandrad"
+              ? " Godkänn ändringarna när de stämmer."
+              : " Godkänn underlaget i granskningsdialogen när du läser in filen."}
         </p>
-        <Button
-          className="mt-4"
-          onClick={() => api.godkannKund()}
-          disabled={!d.rows.length || ofull || status.kod === "klar"}
-        >
-          <CheckCircle2 />{" "}
-          {status.kod === "klar" ? "Godkänt ✓" : status.kod === "forandrad" ? "Granska ändringar" : "Godkänn kundunderlaget"}
-        </Button>
-        {status.kod === "forandrad" ? (
-          <Button className="mt-4 ml-2" variant="outline" onClick={() => api.godkannKund()}>
-            Godkänn igen
+        {status.kod === "klar" ? (
+          <Button className="mt-4" variant="outline" onClick={() => api.setTab("uppladdning")}>
+            Fortsätt till schema
+          </Button>
+        ) : status.kod === "forandrad" ? (
+          <Button className="mt-4" onClick={() => api.godkannKund()} disabled={!d.rows.length || ofull}>
+            <CheckCircle2 /> Godkänn ändringar
           </Button>
         ) : null}
       </Card>

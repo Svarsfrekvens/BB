@@ -101,7 +101,8 @@ describe("explicit extra resurs", () => {
       .find((e) => e.resourceType === "temporary");
     expect(extra?.code).toMatch(/^T/);
     expect(extra?.ssg).toBe(0);
-    expect(extra?.skills).toEqual([]);
+    expect(extra?.skills.every((s) => s.startsWith("kund:"))).toBe(true);
+    expect(extra?.skills.length).toBeGreaterThan(0);
     expect(extra?.skills).not.toContain("undersköterska");
   });
 

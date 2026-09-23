@@ -103,6 +103,7 @@ export function lasJourDiagnos(raw: unknown): JourDiagnos | null {
 export function lasJourDiagnosFranMotorSvar(svar: {
   resourceDiagnostics?: unknown;
   schemaJson?: string | null;
+  preCheck?: unknown;
 }): JourDiagnos | null {
   const direkt = lasJourDiagnos(svar.resourceDiagnostics);
   if (direkt) return direkt;
@@ -113,6 +114,104 @@ export function lasJourDiagnosFranMotorSvar(svar: {
   } catch {
     return null;
   }
+}
+
+export type PrecheckRad = {
+  code: string;
+  severity?: string;
+  message: string;
+  date?: string;
+  need?: number;
+  available?: number;
+};
+
+export type Samtidighetsbrist = {
+  date: string;
+  need: number;
+  available: number;
+  tidstext: string;
+  message: string;
+};
+
+function lasPrecheckLista(v: unknown): PrecheckRad[] {
+  if (!Array.isArray(v)) return [];
+  const ut: PrecheckRad[] = [];
+  for (const rad of v) {
+    const o = somObjekt(rad);
+    if (!o) continue;
+    const code = String(falt(o, "code") || "");
+    if (!code) continue;
+    const need = tal(falt(o, "need"));
+    const available = tal(falt(o, "available"));
+    const date = falt(o, "date") != null ? String(falt(o, "date")) : undefined;
+    const row: PrecheckRad = {
+      code,
+      message: String(falt(o, "message") || ""),
+    };
+    if (falt(o, "severity") != null) row.severity = String(falt(o, "severity"));
+    if (date) row.date = date;
+    if (need != null) row.need = need;
+    if (available != null) row.available = available;
+    ut.push(row);
+  }
+  return ut;
+}
+
+export function lasPrecheck(raw: unknown): PrecheckRad[] {
+  const rot = somObjekt(raw);
+  if (!rot) return [];
+  const direkt = lasPrecheckLista(falt(rot, "preCheck"));
+  if (direkt.length) return direkt;
+  const nestlad = somObjekt(falt(rot, "resourceDiagnostics"));
+  if (nestlad) return lasPrecheckLista(falt(nestlad, "preCheck"));
+  return [];
+}
+
+export function lasPrecheckFranMotorSvar(svar: {
+  preCheck?: unknown;
+  resourceDiagnostics?: unknown;
+  schemaJson?: string | null;
+}): PrecheckRad[] {
+  const franFalt = lasPrecheckLista(svar.preCheck);
+  if (franFalt.length) return franFalt;
+  const franDiag = lasPrecheck(svar.resourceDiagnostics);
+  if (franDiag.length) return franDiag;
+  if (!svar.schemaJson) return [];
+  try {
+    const schema = JSON.parse(svar.schemaJson) as Record<string, unknown>;
+    const franSchema = lasPrecheckLista(schema["preCheck"]);
+    if (franSchema.length) return franSchema;
+    return lasPrecheck(schema["resourceDiagnostics"]);
+  } catch {
+    return [];
+  }
+}
+
+export function lasSamtidighetsbrist(rader: PrecheckRad[]): Samtidighetsbrist[] {
+  const ut: Samtidighetsbrist[] = [];
+  for (const r of rader) {
+    if (r.code !== "INSUFFICIENT_TOTAL_CAPACITY") continue;
+    const m = r.message.match(/(\d{4}-\d{2}-\d{2}).*?kl\.\s*([0-9:]+)–([0-9:]+).*?behov\s*=\s*(\d+).*?tillgängliga\s*=\s*(\d+)/i);
+    const date = r.date || m?.[1] || "";
+    const need = r.need ?? (m ? Number(m[4]) : null);
+    const available = r.available ?? (m ? Number(m[5]) : null);
+    if (!date || need == null || available == null) continue;
+    const start = m?.[2];
+    const end = m?.[3];
+    ut.push({
+      date,
+      need,
+      available,
+      tidstext: start && end ? `${date} kl. ${start}–${end}` : date,
+      message: r.message,
+    });
+  }
+  return ut;
+}
+
+export function vakantaPassText(antal: number | null | undefined): string | null {
+  if (antal == null || antal <= 0) return null;
+  return `${antal} öppna Medvind-pass (Ingen placerad) räknas inte som personal. De skapar inte medarbetare och kan inte täcka jour eller kundbehov.`;
 }
 
 export function visaJourResursbrist(d: JourDiagnos | null | undefined): boolean {
@@ -167,6 +266,8 @@ export type JourPanelModell = {
   kundbristText: string;
   kompletteraCta: string;
   kompletteraHjalp: string;
+  jourBristRad: string;
+  samtidighetIngress: string;
 };
 
 export function jourPanelModell(d: JourDiagnos | null | undefined): JourPanelModell {
@@ -188,22 +289,26 @@ export function jourPanelModell(d: JourDiagnos | null | undefined): JourPanelMod
     kompletteraCta: "Komplettera resurs",
     kompletteraHjalp:
       "BB har identifierat behovet. Du anger vilken faktisk resurs som finns tillgänglig.",
+    jourBristRad: "",
+    samtidighetIngress: "Samtidigt kundbehov överstiger tillgänglig bemanning vissa tider",
   };
   if (!visa || !d) return tom;
   const unika = d.externalDatesAreProvenUnique;
+  const ext = d.minimumExternalJourSlots;
   return {
     ...tom,
     visa: true,
     huvud: jourHuvudtext(d),
     jourpassBehov: d.requiredJourSlots,
     mojligaMedRegistrerad: d.coverableWithRegisteredStaff,
-    ytterligareJourpass: d.minimumExternalJourSlots,
+    ytterligareJourpass: ext,
     bindandeRegler: jourBindandeRegler(d),
     openFore: jourOpenForeText(d),
     datumOsakra: !unika,
     datumVarning: unika
       ? null
       : "Vilka jourpass som behöver extern resurs beror på hur resterande jour fördelas.",
+    jourBristRad: ext != null && ext > 0 ? `Jour: minst ${ext} pass saknar möjlig resurs` : tom.jourBristRad,
   };
 }
 

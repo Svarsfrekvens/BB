@@ -9,6 +9,7 @@ import {
   STANDARD_WORK_TIME_MODELS,
   listPeriodDays,
   periodCapacityMinutes,
+  type WorkTimeModel,
 } from "@/lib/bb/arbetstid";
 import { delaPeriod, payloadForFonster, svansPass, type Fonster } from "@/lib/bb/motorPeriod";
 import { REGEL_RUBRIK, betaldTid, passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "@/lib/bb/motorResultat";
@@ -115,7 +116,7 @@ export function Motor({ state, api }: VyProps) {
       (s, e) =>
         s +
         periodCapacityMinutes(e as { ssg: number }, days, rules, {
-          workTimeModels: wp?.workTimeModels?.length ? wp.workTimeModels : STANDARD_WORK_TIME_MODELS,
+          workTimeModels: wp?.workTimeModels?.length ? (wp.workTimeModels as WorkTimeModel[]) : STANDARD_WORK_TIME_MODELS,
           defaultWorkTimeModelId: wp?.defaultWorkTimeModelId || DEFAULT_WORK_TIME_MODEL_ID,
         }) /
           60,

@@ -99,6 +99,18 @@ describe("motorPayload ur Galaxen", () => {
     expect(payload(7).info.overTak).toBe(false);
   });
 
+  it("begär motorns verifierade occurrence-tak 4000 så Galaxen 28d släpps in", () => {
+    const r = payload(28);
+    const limits = r.payload.limits as { maxOccurrences: number; maxSupportCombinations: number };
+    expect(limits.maxOccurrences).toBe(4000);
+    expect(limits.maxSupportCombinations).toBe(250000);
+    expect(limits.maxOccurrences).toBeLessThanOrEqual(4000);
+    expect(limits.maxSupportCombinations).toBeLessThanOrEqual(250000);
+    expect(r.info.insatser).toBeGreaterThan(1600);
+    expect(r.info.insatser).toBeLessThanOrEqual(4000);
+    expect(r.info.occurrenceLimitRequest).toBe(4000);
+  });
+
   it("skickar objectiveWeights med standard 50, 2,5 och 500", () => {
     const w = payload(7).payload.objectiveWeights as {
       continuitySek: number;

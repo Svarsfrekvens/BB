@@ -120,28 +120,28 @@ export function vcStatusText(status: string | null | undefined, opts?: { jourRes
 export function lasMotorSummary(raw: unknown): MotorUiSummary | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
-  const s = o.summary;
+  const s = o["summary"];
   if (s && typeof s === "object") {
     const x = s as Record<string, unknown>;
     return {
-      status: String(x.status || o.solverStatus || "NOT_RUN"),
-      coveragePercent: typeof x.coveragePercent === "number" ? x.coveragePercent : null,
-      customerNearPercent: typeof x.customerNearPercent === "number" ? x.customerNearPercent : null,
-      cost: Number(x.cost || 0),
-      hardViolations: Array.isArray(x.hardViolations) ? (x.hardViolations as MotorUiSummary["hardViolations"]) : [],
-      warnings: Array.isArray(x.warnings) ? (x.warnings as MotorUiSummary["warnings"]) : [],
-      changedShiftCount: Number(x.changedShiftCount || 0),
-      lockedShiftCount: Number(x.lockedShiftCount || 0),
-      explanationSummary: String(x.explanationSummary || ""),
-      performanceSummary: String(x.performanceSummary || ""),
+      status: String(x["status"] || o["solverStatus"] || "NOT_RUN"),
+      coveragePercent: typeof x["coveragePercent"] === "number" ? x["coveragePercent"] : null,
+      customerNearPercent: typeof x["customerNearPercent"] === "number" ? x["customerNearPercent"] : null,
+      cost: Number(x["cost"] || 0),
+      hardViolations: Array.isArray(x["hardViolations"]) ? (x["hardViolations"] as MotorUiSummary["hardViolations"]) : [],
+      warnings: Array.isArray(x["warnings"]) ? (x["warnings"] as MotorUiSummary["warnings"]) : [],
+      changedShiftCount: Number(x["changedShiftCount"] || 0),
+      lockedShiftCount: Number(x["lockedShiftCount"] || 0),
+      explanationSummary: String(x["explanationSummary"] || ""),
+      performanceSummary: String(x["performanceSummary"] || ""),
     };
   }
-  if (typeof o.solverStatus === "string" || typeof o.explanation === "string") {
+  if (typeof o["solverStatus"] === "string" || typeof o["explanation"] === "string") {
     return {
       ...TOM_SUMMARY,
-      status: String(o.solverStatus || "NOT_RUN"),
-      explanationSummary: String(o.explanation || "").split(".")[0],
-      changedShiftCount: Array.isArray(o.forandringar) ? o.forandringar.length : 0,
+      status: String(o["solverStatus"] || "NOT_RUN"),
+      explanationSummary: String(o["explanation"] || "").split(".")[0] ?? "",
+      changedShiftCount: Array.isArray(o["forandringar"]) ? o["forandringar"].length : 0,
     };
   }
   return null;
@@ -198,10 +198,10 @@ export function getBemanningsbalansReadiness(d: BemanningsbalansReadinessIndata)
   const aktiva = (d.medarbetare || []).filter((m) => !m.vakant);
   const harMedarbetare = aktiva.length > 0;
   const harKunddata = !!d.harKundrader;
-  const workplace = {
+  const workplace: { workTimeModels: WorkTimeModel[]; defaultWorkTimeModelId?: string } = {
     workTimeModels: d.workTimeModels || [],
-    defaultWorkTimeModelId: d.defaultWorkTimeModelId,
   };
+  if (d.defaultWorkTimeModelId !== undefined) workplace.defaultWorkTimeModelId = d.defaultWorkTimeModelId;
   const saknarModell = aktiva.filter((m) => (m as { resourceType?: string }).resourceType !== "temporary" && !harTillrackligArbetstidsmodell(m, workplace));
 
   let kund: DelStatus = "ej";
@@ -263,17 +263,18 @@ export function skapaBalansHinder(d: {
   defaultWorkTimeModelId?: string;
   workTimeModels?: WorkTimeModel[];
 }) {
-  const r = getBemanningsbalansReadiness({
+  const indata: BemanningsbalansReadinessIndata = {
     harKundrader: d.harKundrader ?? d.harUnderlag,
     harSchema: d.harSchema ?? d.harUnderlag,
     kundGodkand: d.kundGodkand,
-    kundAndradSedanGodkannande: d.kundAndradSedanGodkannande,
     schemaGodkand: !!d.schemaGodkand,
-    medarbetareAndradSedanGodkannande: d.medarbetareAndradSedanGodkannande,
     medarbetare: d.medarbetare,
-    defaultWorkTimeModelId: d.defaultWorkTimeModelId,
-    workTimeModels: d.workTimeModels,
-  });
+  };
+  if (d.kundAndradSedanGodkannande !== undefined) indata.kundAndradSedanGodkannande = d.kundAndradSedanGodkannande;
+  if (d.medarbetareAndradSedanGodkannande !== undefined) indata.medarbetareAndradSedanGodkannande = d.medarbetareAndradSedanGodkannande;
+  if (d.defaultWorkTimeModelId !== undefined) indata.defaultWorkTimeModelId = d.defaultWorkTimeModelId;
+  if (d.workTimeModels !== undefined) indata.workTimeModels = d.workTimeModels;
+  const r = getBemanningsbalansReadiness(indata);
   const skal = [...r.blockingReasons, ...(d.blockerande || []).filter(Boolean)];
   return { aktiv: skal.length === 0, skal, warnings: r.warnings, delar: r.delar };
 }
@@ -410,13 +411,14 @@ export function processStegFranApi(
   extra?: { schemaForslagGodkant?: boolean },
 ) {
   const readiness = readinessFranApi(api);
-  return processStegLagen({
+  const lagenArg: Parameters<typeof processStegLagen>[0] = {
     aktivTab,
     readiness,
     harResultat: api.harBalans(),
     harVarning: (api.regelbrott?.() || 0) > 0,
-    schemaForslagGodkant: extra?.schemaForslagGodkant,
-  });
+  };
+  if (extra?.schemaForslagGodkant !== undefined) lagenArg.schemaForslagGodkant = extra.schemaForslagGodkant;
+  return processStegLagen(lagenArg);
 }
 
 /** Grönt bara när förändringen är bra för verksamheten – inte för allt som sjunker. */
@@ -493,6 +495,64 @@ export function balansKanGodkannas(d: {
     reasons.push("Balans kan inte godkännas – kompetens- eller behörighetskrav saknas.");
   }
   return { ok: reasons.length === 0, reasons };
+}
+
+export type GodkannVyIndata = {
+  motorJobb?: { outcome?: string | null | undefined; stale?: boolean | undefined } | null | undefined;
+  motorResultat?: unknown;
+  tacktBehovPct?: number | null | undefined;
+  hardViolations: number;
+  saknadeKompetenskrav?: number;
+  jourResursbrist?: boolean;
+};
+
+function motorGodkannKalla(d: GodkannVyIndata) {
+  const summary = lasMotorSummary(d.motorResultat);
+  const job = d.motorJobb;
+  if (!summary || !job?.outcome) return null;
+  const skillPoster = [...(summary.hardViolations || []), ...(summary.warnings || [])];
+  return {
+    outcome: String(job.outcome),
+    stale: Boolean(job.stale),
+    coveragePercent: summary.coveragePercent,
+    hardViolations: (summary.hardViolations || []).length,
+    saknadeKompetenskrav: raknaSaknadeKompetenskrav(skillPoster),
+  };
+}
+
+/** Aktuellt motorresultat är canonical för Godkänn. Annars lokal gate. */
+export function godkannBeslutFranVy(d: GodkannVyIndata) {
+  const motor = motorGodkannKalla(d);
+  if (motor) {
+    const reasons: string[] = [];
+    if (motor.stale) {
+      reasons.push("Balansen bygger på ett tidigare underlag – skapa om Balans.");
+    }
+    if (motor.outcome === "kompletteras") {
+      reasons.push("Schemat kan inte färdigställas utan ytterligare resurs.");
+    } else if (motor.outcome !== "balans_klar") {
+      reasons.push("Balans kan inte godkännas – beräkningen är inte klar.");
+    }
+    if (motor.outcome === "balans_klar" && !motor.stale) {
+      if (motor.coveragePercent == null || !(motor.coveragePercent >= 100 - 1e-6)) {
+        reasons.push("Balans kan inte godkännas – kundbehov återstår att bemanna.");
+      }
+      if ((motor.hardViolations || 0) > 0) {
+        reasons.push("Balans kan inte godkännas – hårda regelbrott finns.");
+      }
+      if ((motor.saknadeKompetenskrav || 0) > 0) {
+        reasons.push("Balans kan inte godkännas – kompetens- eller behörighetskrav saknas.");
+      }
+    }
+    return { ok: reasons.length === 0, reasons, kalla: "motor" as const };
+  }
+  const lokal = balansKanGodkannas({
+    tacktBehovPct: d.tacktBehovPct,
+    hardViolations: d.hardViolations,
+    ...(d.saknadeKompetenskrav != null ? { saknadeKompetenskrav: d.saknadeKompetenskrav } : {}),
+    ...(d.jourResursbrist != null ? { jourResursbrist: d.jourResursbrist } : {}),
+  });
+  return { ...lokal, kalla: "lokal" as const };
 }
 
 export function hemHuvudCta(d: {

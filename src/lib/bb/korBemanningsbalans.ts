@@ -5,14 +5,20 @@ import {
   STANDARD_WORK_TIME_MODELS,
   listPeriodDays,
   periodCapacityMinutes,
+  type WorkTimeModel,
 } from "./arbetstid";
-import { delaPeriod, payloadForFonster, svansPass } from "./motorPeriod";
+import { delaPeriod, payloadForFonster, svansPass, HELPERIOD_MAX_DAGAR } from "./motorPeriod";
+
+/** 28d async: 240 s per försök. Kortare perioder behåller 180 s. */
+export function asyncSekunderForFonster(dagar: number) {
+  return dagar >= HELPERIOD_MAX_DAGAR ? 240 : 180;
+}
 import { passForandringar, slaSamman, tolkaMotorSchema, type MotorSchema } from "./motorResultat";
 import { motorStatus, optimeraMedMotor, type MotorSvar } from "./motor.functions";
 import { byggMotorPayload, type PayloadResultat } from "./motorPayload";
-import { startaAsynkBalans, startaMotorJobbPoll, balansUtfallText } from "./motorJobb";
+import { startaAsynkBalans, startaMotorJobbPoll, balansUtfallText, AVBRUTEN_JOBB_TEXT, skaAtterupptaSparatJobb, pollarMotorJobb } from "./motorJobb";
 import { readinessFranApi } from "./vcFlode";
-import { lasJourDiagnosFranMotorSvar, visaJourResursbrist } from "./jourDiagnos";
+import { lasJourDiagnosFranMotorSvar, lasPrecheckFranMotorSvar, visaJourResursbrist } from "./jourDiagnos";
 import type { VyApi, VyTillstand } from "./vy";
 
 export function byggUnderlagForBerakning(api: VyApi, state: VyTillstand | Record<string, unknown> | null) {
@@ -61,9 +67,29 @@ export function underlagFingeravtryckFranPayload(payload: Record<string, unknown
   return (h >>> 0).toString(16);
 }
 
+/** Samma källa som poll/resume: vy-fingeravtryck, inte payload-hash. */
+export function underlagHashVidStart(
+  api: { underlagFingeravtryck?: () => string },
+  payload?: Record<string, unknown>,
+) {
+  const franVy = api.underlagFingeravtryck?.();
+  if (franVy) return franVy;
+  return payload ? underlagFingeravtryckFranPayload(payload) : "";
+}
+
 export function sparaJourResursbrist(api: VyApi, svar: MotorSvar, extraVarningar: string[] = []) {
   const diagnos = lasJourDiagnosFranMotorSvar(svar);
   if (!visaJourResursbrist(diagnos)) return false;
+  const preCheck = lasPrecheckFranMotorSvar(svar);
+  const base =
+    svar.resourceDiagnostics && typeof svar.resourceDiagnostics === "object"
+      ? { ...(svar.resourceDiagnostics as Record<string, unknown>) }
+      : diagnos
+        ? { jour: diagnos }
+        : {};
+  const resourceDiagnostics = preCheck.length
+    ? { ...base, preCheck }
+    : svar.resourceDiagnostics || (diagnos ? { jour: diagnos } : null);
   return api.anvandMotorResultat({
     pass: [],
     flyttade: [],
@@ -72,7 +98,7 @@ export function sparaJourResursbrist(api: VyApi, svar: MotorSvar, extraVarningar
     solverStatus: svar.status || "INFEASIBLE",
     explanation: svar.forklaring || diagnos?.userMessage || "",
     summary: svar.summary,
-    resourceDiagnostics: svar.resourceDiagnostics || (diagnos ? { jour: diagnos } : null),
+    resourceDiagnostics,
     obemannade: [],
     ofullstandig: true,
   });
@@ -122,14 +148,18 @@ function infordMotorSvar(opts: {
 
 export function atterupptaMotorJobb(api: VyApi, state: VyTillstand | Record<string, unknown> | null) {
   const job = api.motorJobb?.();
-  if (!job?.id) return;
-  const underlagMotor = byggUnderlagForBerakning(api, state);
+  if (!skaAtterupptaSparatJobb(job)) return;
+  if (pollarMotorJobb()) return;
   startaMotorJobbPoll(api, (svar, klartJobb) => {
     if (!svar.result) {
-      api.skapa();
-      api.sattMotorJobb?.(null);
+      api.sattMotorJobb?.({
+        ...klartJobb,
+        phase: "failed",
+        phaseText: klartJobb.phaseText || AVBRUTEN_JOBB_TEXT,
+      });
       return;
     }
+    const underlagMotor = byggUnderlagForBerakning(api, state);
     infordMotorSvar({ api, underlagMotor, svar: svar.result, stale: Boolean(klartJobb.stale) });
     api.sattMotorJobb?.({
       ...klartJobb,
@@ -166,7 +196,7 @@ export async function korBemanningsbalans(opts: {
   }
 
   const underlagMotor = byggUnderlagForBerakning(opts.api, opts.state);
-  const underlagHash = underlagFingeravtryckFranPayload(underlagMotor.payload as Record<string, unknown>);
+  const underlagHash = underlagHashVidStart(opts.api, underlagMotor.payload as Record<string, unknown>);
   const pagaende = opts.api.motorJobb?.();
   if (pagaende?.id && pagaende.phase !== "completed" && pagaende.phase !== "failed") {
     steg("Balans skapas redan");
@@ -181,7 +211,7 @@ export async function korBemanningsbalans(opts: {
   };
   if (asyncJobs && fonster.length === 1) {
     const del = payloadForFonster(underlagMotor.payload, fonster[0]!, []);
-    const jobbTid = opts.sekunder ?? 180;
+    const jobbTid = opts.sekunder ?? asyncSekunderForFonster(fonster[0]!.dagar);
     const start = await startaAsynkBalans({
       api: opts.api,
       del,
@@ -189,8 +219,11 @@ export async function korBemanningsbalans(opts: {
       sekunder: jobbTid,
       onKlart: (svar, klartJobb) => {
         if (!svar.result) {
-          opts.api.skapa();
-          opts.api.sattMotorJobb?.(null);
+          opts.api.sattMotorJobb?.({
+            ...klartJobb,
+            phase: "failed",
+            phaseText: klartJobb.phaseText || AVBRUTEN_JOBB_TEXT,
+          });
           return;
         }
         infordMotorSvar({ api: opts.api, underlagMotor, svar: svar.result, stale: Boolean(klartJobb.stale) });
@@ -284,7 +317,7 @@ export function byggDiagnos(p: PayloadResultat) {
     (s, e) =>
       s +
       periodCapacityMinutes(e as { ssg: number }, days, rules, {
-        workTimeModels: wp?.workTimeModels?.length ? wp.workTimeModels : STANDARD_WORK_TIME_MODELS,
+        workTimeModels: wp?.workTimeModels?.length ? (wp.workTimeModels as WorkTimeModel[]) : STANDARD_WORK_TIME_MODELS,
         defaultWorkTimeModelId: wp?.defaultWorkTimeModelId || DEFAULT_WORK_TIME_MODEL_ID,
       }) /
         60,

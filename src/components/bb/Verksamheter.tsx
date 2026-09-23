@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { BekraftaDialog } from "./Bekrafta";
 import { notera } from "@/lib/bb/notis";
+import { hamtaStartlage, lyssnaStartlage } from "@/lib/bb/startlage";
 
 /** Verksamhetsväxlare: upp till fyra verksamheter, en aktiv i taget. */
 export function Verksamheter() {
+  const startlage = useSyncExternalStore(lyssnaStartlage, hamtaStartlage, hamtaStartlage);
   const v = useSyncExternalStore(
     (f) => bbVy.subscribe(f),
     () => bbVy.get(),
@@ -15,6 +17,7 @@ export function Verksamheter() {
   );
   const [taBort, setTaBort] = useState<{ id: string; org: string } | null>(null);
   const api = v.api;
+  if (startlage !== "app") return null;
   if (!api || !v.verks.length) return null;
   const kanLagga = v.verks.length < v.maxVerks;
 

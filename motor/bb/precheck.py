@@ -182,7 +182,11 @@ def feasibility_precheck(data, jour_payload=None):
 
     period_days = list(days(wp['start'], wp['end']))
     need_min = sum(o['task']['minutes'] * o['count'] for o in occ)
-    cap_min = sum(ssg_cap_minutes(e, period_days, rules, wp) for e in employees)
+    cap_min = sum(
+        ssg_cap_minutes(e, period_days, rules, wp)
+        for e in employees
+        if e.get('resourceType') != 'temporary'
+    )
     if need_min > cap_min + 0.01:
         diagnoses.append(_diag(
             'SSG_CAPACITY_SHORT',

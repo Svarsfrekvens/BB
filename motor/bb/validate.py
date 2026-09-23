@@ -1,7 +1,7 @@
 """Independent validator. It never imports solver.py or trusts solver status."""
 from .domain import (check_input, occurrences, span, paid, overlap, intersect, instant,
                      add_days, days, parts, night_intervals, jour_intervals, monday,
-                     ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
+                     period_paid_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      clock_minutes, longest_rest_minutes, duty_week_windows, soft_constraints,
                      calendar_work_days, consecutive_six_seven_counts, longest_work_run,
                      has_consecutive_off, rest_days_target, f01_known_span, f01_window_known,
@@ -153,9 +153,12 @@ def validate(data, schedule):
             bound_shifts = [s for s in shifts if s.get('id') in boundaries]
             used = sum(intersect(a,b,lo,hi) for s in shifts for a,b in s['work'])
             used_b = sum(intersect(a,b,lo,hi) for s in bound_shifts for a,b in s['work'])
-            cap = ssg_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
-            if used > cap+0.01:
-                msg=f"{e['code']}: fler timmar än periodkapaciteten enligt SSG."
+            cap = period_paid_cap_minutes(e, list(days(wp['start'], wp['end'])), r, wp)
+            if cap is not None and used > cap+0.01:
+                if e.get('resourceType') == 'temporary':
+                    msg=f"{e['code']}: fler timmar än registrerat maxtak ({cap/60:g} h)."
+                else:
+                    msg=f"{e['code']}: fler timmar än periodkapaciteten enligt SSG."
                 if used_b > cap+0.01:
                     _history(warnings,'CONTRACT',msg,employeeId=e['id'])
                     if used > used_b+0.01:

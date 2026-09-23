@@ -7,6 +7,9 @@ import {
   jourPanelModell,
   lasJourDiagnos,
   lasJourDiagnosFranMotorSvar,
+  lasPrecheck,
+  lasSamtidighetsbrist,
+  vakantaPassText,
   visaJourResursbrist,
 } from "@/lib/bb/jourDiagnos";
 import { vcStatusText, balansKanGodkannas } from "@/lib/bb/vcFlode";
@@ -126,6 +129,49 @@ describe("UI-JOUR resursbristpanel", () => {
     expect(res.ofullstandig).toBe(true);
     expect(res.pass).toEqual([]);
     expect(res.resourceDiagnostics).toEqual(galaxenLiknande);
+  });
+
+  it("visar minst antal saknade jourpass, samtidiga toppar och att vakanta pass inte är personal", () => {
+    const d = lasJourDiagnos(galaxenLiknande);
+    const m = jourPanelModell(d);
+    expect(m.jourBristRad).toBe("Jour: minst 3 pass saknar möjlig resurs");
+    const pre = lasPrecheck({
+      preCheck: [
+        {
+          code: "INSUFFICIENT_TOTAL_CAPACITY",
+          severity: "warning",
+          message: "2026-08-24 kl. 08:00–08:05: behov = 10, maximalt tillgängliga = 5.",
+          date: "2026-08-24",
+          need: 10,
+          available: 5,
+        },
+      ],
+    });
+    const sam = lasSamtidighetsbrist(pre);
+    expect(sam).toHaveLength(1);
+    expect(sam[0]?.need).toBe(10);
+    expect(sam[0]?.available).toBe(5);
+    expect(sam[0]?.tidstext).toMatch(/2026-08-24/);
+    expect(m.samtidighetIngress).toBe("Samtidigt kundbehov överstiger tillgänglig bemanning vissa tider");
+    expect(vakantaPassText(40)).toMatch(/40 öppna Medvind-pass/);
+    expect(vakantaPassText(40)).toMatch(/räknas inte som personal/);
+  });
+
+  it("behåller preCheck från motorsvar vid jourbrist", () => {
+    const sparade: unknown[] = [];
+    const api = { anvandMotorResultat: (res: unknown) => { sparade.push(res); return true; } };
+    sparaJourResursbrist(api as never, {
+      ok: true,
+      status: "INFEASIBLE",
+      resourceDiagnostics: galaxenLiknande,
+      schemaJson: JSON.stringify({
+        solverStatus: "INFEASIBLE",
+        preCheck: [{ code: "INSUFFICIENT_TOTAL_CAPACITY", date: "2026-08-24", need: 10, available: 5, message: "x" }],
+        resourceDiagnostics: galaxenLiknande,
+      }),
+    });
+    const res = sparade[0] as { resourceDiagnostics: Record<string, unknown> };
+    expect(lasSamtidighetsbrist(lasPrecheck(res.resourceDiagnostics))[0]?.need).toBe(10);
   });
 
   it("föreslår fält för framtida explicit extern resurs utan att skapa pool", () => {

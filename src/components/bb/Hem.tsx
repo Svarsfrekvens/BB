@@ -1,22 +1,21 @@
-import { useState } from "react";
-import { Sparkles, ArrowRight, CheckCircle2, Heart, User, TrendingUp, Clock } from "lucide-react";
+import { useSyncExternalStore } from "react";
+import { ArrowRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import { TreOmraden } from "./TreOmraden";
 import { Uppladdning } from "./Uppladdning";
+import { Startsida } from "./Startsida";
+import { hamtaStartlage, lyssnaStartlage, sattStartlage } from "@/lib/bb/startlage";
+import { hemAteruppta } from "@/lib/bb/linjartFlode";
 import {
-  KAPACITET_FORKLARING,
-  KUNDNARA_FORKLARING,
-  TACKT_BEHOV_FORKLARING,
-  balansKanGodkannas,
+  godkannBeslutFranVy,
   behoverUppmarksamhet,
   konfigureratKundnaraMalPct,
   raknaSaknadeKompetenskrav,
   genomsnittligSsgPct,
   getTidslage,
-  hemHuvudCta,
   hemStatusText,
   lasMotorSummary,
   readinessFranApi,
@@ -25,7 +24,6 @@ import {
   timmarEllerTomt,
   visningsNamnVerksamhet,
 } from "@/lib/bb/vcFlode";
-import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { fmtH, fmtPct } from "@/lib/bb/vy";
 import { lasJourDiagnos, visaJourResursbrist, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
 import { ResursbristPanel, resursbristProps } from "./ResursbristPanel";
@@ -33,9 +31,51 @@ import { BalansPagar } from "./BalansPagar";
 
 export function Hem(props: VyProps) {
   const { api, state, d } = props;
-  const [visaBerakning, setVisaBerakning] = useState(false);
-  if (!api.underlag().godkand.kund) {
+  const startlage = useSyncExternalStore(lyssnaStartlage, hamtaStartlage, hamtaStartlage);
+  const sparatInfo = api.sparadInfo();
+  if (startlage === "start") {
+    return (
+      <Startsida
+        onKundFil={api.hanteraFil}
+        onSchemaFil={api.hanteraSchemaFil}
+        onFortsatt={() => {
+          sattStartlage("app");
+          const u = api.underlag();
+          api.setTab(
+            hemAteruppta({
+              harKundrader: !!u.sekoia,
+              kundGodkand: u.godkand.kund,
+              harSchema: !!u.schema,
+              schemaGodkand: u.godkand.schema,
+              harBalans: api.harBalans(),
+              balansGodkand: Boolean((props.state as { balansGodkand?: boolean } | null)?.balansGodkand),
+            }).tab,
+          );
+        }}
+      />
+    );
+  }
+  if (startlage === "upload") {
     return <Uppladdning {...props} />;
+  }
+
+  if (!api.underlag().godkand.kund) {
+    const tillUnderlag = () => sattStartlage("upload");
+    return (
+      <div className="space-y-10">
+        <p className="max-w-2xl text-[17px] leading-relaxed text-muted-foreground">
+          Inget underlag är inläst ännu. Första steget i processen är Underlag.
+        </p>
+        <TreOmraden summary={null} tom />
+        <Card className="card-lift rounded-[28px] border-transparent bg-gradient-to-br from-white to-primary-soft/35 p-10 shadow-lift-lg">
+          <h2 className="text-[28px] font-extrabold text-deep">Nästa steg</h2>
+          <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-muted-foreground">Ladda upp underlag för att komma vidare.</p>
+          <Button className="mt-7 h-14 rounded-2xl px-8 text-[16px]" size="lg" onClick={tillUnderlag}>
+            <ArrowRight /> Fortsätt →
+          </Button>
+        </Card>
+      </div>
+    );
   }
 
   const readiness = readinessFranApi(api);
@@ -51,7 +91,9 @@ export function Hem(props: VyProps) {
   const lageInfo = tidslageText(lageId);
   const lage = harBalans && !ofull ? fe?.efter ?? api.foreLage() : api.foreLage() ?? fe?.fore;
   const hard = api.regelbrott();
-  const godkannbar = balansKanGodkannas({
+  const godkannbar = godkannBeslutFranVy({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
     tacktBehovPct: harBalans && !ofull ? lage?.tackningPct : null,
     hardViolations: harBalans && !jourBrist ? hard : 0,
     saknadeKompetenskrav: harBalans
@@ -60,7 +102,6 @@ export function Hem(props: VyProps) {
     jourResursbrist: jourBrist,
   });
   const balansGodkand = Boolean(state && (state as { balansGodkand?: boolean }).balansGodkand);
-  const cta = hemHuvudCta({ lage: lageId, ready: readiness.ready, godkannbar: godkannbar.ok, balansGodkand, pagaende });
   const status = hemStatusText({
     lage: lageId,
     ready: readiness.ready,
@@ -76,7 +117,7 @@ export function Hem(props: VyProps) {
   const vakanta = timmarEllerTomt(null);
   const vikarie = timmarEllerTomt(null);
   const period = api.underlag().period;
-  const sparat = api.sparadInfo();
+  const sparat = sparatInfo;
   const org = visningsNamnVerksamhet(String((state as { org?: string } | null)?.org || ""));
 
   const blockerare = [
@@ -95,10 +136,10 @@ export function Hem(props: VyProps) {
         personaltimmar: fmtH(lage.schematidH),
         vakanta: vakanta.text,
         vakantaSaknas: vakanta.saknas,
-        genomsnittligSsg: ssgSnitt != null ? `${Math.round(ssgSnitt)} %` : undefined,
-        ssgUtnyttjande: ssgUtnytt == null ? undefined : `${ssgUtnytt.toFixed(1)} %`,
         vikarie: vikarie.text,
         vikarieSaknas: vikarie.saknas,
+        ...(ssgSnitt != null ? { genomsnittligSsg: `${Math.round(ssgSnitt)} %` } : {}),
+        ...(ssgUtnytt == null ? {} : { ssgUtnyttjande: `${ssgUtnytt.toFixed(1)} %` }),
       }
     : undefined;
 
@@ -131,23 +172,26 @@ export function Hem(props: VyProps) {
         })
       : [];
 
+  const ateruppta = hemAteruppta({
+    harKundrader: !!(api.underlag().sekoia || (Array.isArray(state["rows"]) && (state["rows"] as unknown[]).length)),
+    kundGodkand: api.underlag().godkand.kund,
+    harSchema: !!api.underlag().schema,
+    schemaGodkand: api.underlag().godkand.schema,
+    harBalans,
+    balansGodkand,
+  });
   const klick = () => {
-    if (cta.id === "status") {
+    if (pagaende) {
       document.querySelector("[data-balans-jobb]")?.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
     }
-    if (cta.id === "skapa") void korBemanningsbalans({ api, state });
-    else if (cta.id === "granska") api.setTab("resultat");
-    else if (cta.id === "godkann") api.godkannBalans?.();
-    else if (cta.id === "utfall") api.setTab("nyckeltal");
+    api.setTab(ateruppta.tab);
   };
 
   return (
     <div className="space-y-8">
       <div>
-        <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{lageInfo.label}</div>
-        <h1 className="mt-1 text-3xl font-extrabold tracking-tight text-deep sm:text-4xl">Bemanningsbalans</h1>
-        <p className="mt-2 max-w-2xl text-base leading-relaxed text-muted-foreground">{lageInfo.text}</p>
+        <p className="max-w-2xl text-[17px] leading-relaxed text-muted-foreground">{lageInfo.text}</p>
       </div>
 
       {state.importDays > state.planDays ? (
@@ -174,29 +218,29 @@ export function Hem(props: VyProps) {
         </Card>
       ) : null}
 
-      <Card className="rounded-2xl p-4 shadow-lift" data-statusrad="tidslage">
-        <dl className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5 text-sm">
+      <Card className="card-lift rounded-[28px] p-7" data-statusrad="tidslage" data-nulagekort="oversikt">
+        <dl className="grid gap-5 sm:grid-cols-2 lg:grid-cols-5">
           <div>
-            <dt className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Verksamhet</dt>
-            <dd className="font-semibold text-deep">{org}</dd>
+            <dt className="text-[13px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Verksamhet</dt>
+            <dd className="mt-1.5 text-[16px] font-semibold text-deep">{org}</dd>
           </div>
           <div>
-            <dt className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Schemaperiod</dt>
-            <dd className="font-semibold text-deep">
+            <dt className="text-[13px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Schemaperiod</dt>
+            <dd className="mt-1.5 text-[16px] font-semibold text-deep">
               {period?.from ? `${period.from} – ${period.to}` : "–"}
             </dd>
           </div>
           <div>
-            <dt className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Aktuellt läge</dt>
-            <dd className="font-semibold text-deep">{lageInfo.label}</dd>
+            <dt className="text-[13px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Aktuellt läge</dt>
+            <dd className="mt-1.5 text-[16px] font-semibold text-deep">{lageInfo.label}</dd>
           </div>
           <div>
-            <dt className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Status</dt>
-            <dd className="font-semibold text-deep">{status}</dd>
+            <dt className="text-[13px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Status</dt>
+            <dd className="mt-1.5 text-[16px] font-semibold text-deep">{status}</dd>
           </div>
           <div>
-            <dt className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">Senast uppdaterad</dt>
-            <dd className="font-semibold text-deep">
+            <dt className="text-[13px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">Senast uppdaterad</dt>
+            <dd className="mt-1.5 text-[16px] font-semibold text-deep">
               {sparat?.uppdaterad
                 ? new Date(sparat.uppdaterad).toLocaleString("sv-SE", { dateStyle: "short", timeStyle: "short" })
                 : "–"}
@@ -214,88 +258,29 @@ export function Hem(props: VyProps) {
           obemannadeAntal: fe?.obemannade?.length,
           ofullstandigUtanSchema: ofull,
         })}
-        {...resursbristProps(api)}
+        {...resursbristProps(api, state)}
       />
 
       {ofull ? null : (
       <TreOmraden
+        /* KUNDNARA_FORKLARING och TACKT_BEHOV_FORKLARING visas i TreOmraden. */
         summary={mapped}
         hardCount={hard}
-        resurs={resurs}
         tom={!lage}
-        kundnaraExtra={
-          lage
-            ? {
+        {...(resurs ? { resurs } : {})}
+        {...(lage
+          ? {
+              kundnaraExtra: {
                 kundbehov: d ? fmtH(d.n.kundbehovH) : fmtH(lage.kundbehovH),
-                insatser: d ? String(d.n.antalInsatser) : undefined,
+                ...(d ? { insatser: String(d.n.antalInsatser) } : {}),
                 forklaring: malPct
                   ? `Mål ${fmtPct(malPct)} enligt verksamhetens konfiguration.`
                   : `${fmtH(lage.kundnaraH)} av ${fmtH(lage.schematidH)} schemalagda timmar är klassificerade som kundnära.`,
-              }
-            : undefined
-        }
+              },
+            }
+          : {})}
       />
       )}
-
-      {d ? (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" data-nulagekort="4">
-          {[
-            {
-              lab: "Kundbehov",
-              val: fmtH(d.n.kundbehovH),
-              txt: "Kundernas planerade behov under perioden.",
-              Ikon: Heart,
-            },
-            {
-              lab: "Personalbehov inklusive dubbelbemanning",
-              val: fmtH(d.n.personalbehovH),
-              txt:
-                d.n.extraDubbelH > 0
-                  ? `Inklusive ${fmtH(d.n.extraDubbelH)} h dubbelbemanning.`
-                  : "Ingen dubbelbemanning i underlaget.",
-              Ikon: User,
-            },
-            {
-              lab: "Dimensionerande resursbehov",
-              val: fmtH(d.resursH),
-              txt: "Bemanning som behöver finnas på rätt tider utifrån samtidighet och dimensionering.",
-              Ikon: TrendingUp,
-              extra: true,
-            },
-            {
-              lab: "Planerad schematid",
-              val: fmtH(lage?.schematidH ?? 0),
-              txt: "Totalt antal timmar i det inlästa schemat.",
-              Ikon: Clock,
-            },
-          ].map((k) => (
-            <Card key={k.lab} className="gap-0 rounded-2xl p-6 shadow-lift">
-              <k.Ikon className="size-5 text-primary" />
-              <div className="mt-4 text-[11px] font-bold tracking-widest text-muted-foreground uppercase">{k.lab}</div>
-              <div className="mt-2 text-3xl font-extrabold tabular-nums text-deep">{k.val}</div>
-              <p className="mt-2 text-sm text-muted-foreground">{k.txt}</p>
-              {"extra" in k && k.extra ? (
-                <div className="mt-3">
-                  <button
-                    type="button"
-                    className="text-xs font-semibold text-primary underline-offset-2 hover:underline"
-                    onClick={() => setVisaBerakning((v) => !v)}
-                  >
-                    {visaBerakning ? "Dölj beräkning" : "Visa beräkning"}
-                  </button>
-                  {visaBerakning ? (
-                    <p className="mt-2 text-xs text-muted-foreground">
-                      {d.fil
-                        ? `Samtidighet per 15 min · topp ${d.fil.peak.value} kl. ${d.fil.peak.tid} ${d.fil.peak.datum}`
-                        : `30-minutersintervall · topp ${api.h1(d.curve.topp.rabehov)} (dim. ${d.curve.topp.dimensionerat}) ${d.curve.topp.datum} kl. ${d.curve.topp.klockan}`}
-                    </p>
-                  ) : null}
-                </div>
-              ) : null}
-            </Card>
-          ))}
-        </div>
-      ) : null}
 
       {lageId === "fore" && uppmarksamhet.length ? (
         <Card className="rounded-2xl p-6 shadow-lift">
@@ -311,17 +296,18 @@ export function Hem(props: VyProps) {
         </Card>
       ) : null}
 
-      <Card className="rounded-2xl p-6 shadow-lift">
-        <h2 className="text-xl font-extrabold text-deep">Nästa steg</h2>
+      <Card className="card-lift rounded-[28px] border-transparent bg-gradient-to-br from-white to-primary-soft/35 p-10 shadow-lift-lg">
+        <h2 className="text-[28px] font-extrabold text-deep">Nästa steg</h2>
+        <p className="mt-4 max-w-xl text-[16px] leading-relaxed text-muted-foreground">
+          {ateruppta.label}. {status}
+        </p>
         <Button
-          className="mt-4"
+          className="mt-7 h-14 rounded-2xl px-8 text-[16px]"
           size="lg"
-          data-cta={cta.id}
-          disabled={cta.disabled}
-          aria-disabled={cta.disabled}
+          data-cta={ateruppta.tab}
           onClick={klick}
         >
-          {cta.id === "skapa" ? <Sparkles /> : cta.id === "godkann" ? <CheckCircle2 /> : <ArrowRight />} {cta.label}
+          <ArrowRight /> {ateruppta.label}
         </Button>
         {blockerare.length ? (
           <ul className="mt-3 space-y-1 text-sm text-warning" aria-live="polite">
@@ -338,13 +324,6 @@ export function Hem(props: VyProps) {
               : " – kundbehov återstår att bemanna."}
           </p>
         ) : null}
-        <p className="mt-4 text-xs text-muted-foreground" title={TACKT_BEHOV_FORKLARING}>
-          {TACKT_BEHOV_FORKLARING}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground" title={KUNDNARA_FORKLARING}>
-          {KUNDNARA_FORKLARING}
-        </p>
-        <p className="mt-1 text-xs text-muted-foreground">{KAPACITET_FORKLARING}</p>
       </Card>
     </div>
   );

@@ -20,6 +20,12 @@ dist-ssr
 .nitro
 *.local
 
+# Regenererbart / lokalt (inte källkod)
+motor/.venv/
+desktop.ini
+qa/scripts/_*.json
+qa/e2e/walkthrough/
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

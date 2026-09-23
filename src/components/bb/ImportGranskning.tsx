@@ -173,7 +173,7 @@ export function ImportGranskning() {
             </Button>
           ) : null}
           <Button disabled={blockerad} onClick={() => api.godkannImport()}>
-            <CheckCircle2 /> {ersatter ? "Ersätt och läs in" : "Godkänn och läs in"}
+            <CheckCircle2 /> {ersatter ? "Ersätt och godkänn kundunderlag" : "Godkänn kundunderlag"}
           </Button>
         </div>
       </DialogContent>

@@ -100,6 +100,27 @@ function tal(v: MedarbetarVillkor, key: string) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+type MotorConstraintBag = {
+  allowedTypes?: string[];
+  weekdays?: number[];
+  weekendMode?: string;
+  weekendOffset?: number;
+  earliestStart?: string;
+  latestEnd?: string;
+  maxShiftHours?: number;
+  minShiftHours?: number;
+  maxNightConsecutive?: number;
+  maxJourConsecutive?: number;
+  minConsecutiveOffDays?: number;
+  maxConsecutiveDays?: number;
+  forbiddenCustomerIds?: string[];
+  requiredCustomerIds?: string[];
+  dates?: string[];
+  maxPaidMinutes?: number;
+  preferredTypes?: string[];
+  preferredCustomerIds?: string[];
+};
+
 /** Hårda motorvillkor ur personfält och datumstyrda villkor. Önskemål hamnar inte här. */
 export function hårdaMotorvillkor(
   m: {
@@ -121,7 +142,7 @@ export function hårdaMotorvillkor(
   offset = 0,
 ) {
   const villkor = m.villkor || [];
-  const hard: Record<string, unknown> = {};
+  const hard: MotorConstraintBag = {};
   const p = String(m.passprofil || "").toLowerCase();
   if (harHårt(villkor, "endast_dag", fran, till) || (/dag/.test(p) && !/kväll|kvall|natt/.test(p))) hard.allowedTypes = ["day"];
   else if (harHårt(villkor, "endast_kvall", fran, till) || /kväll|kvall/.test(p)) hard.allowedTypes = ["evening"];
@@ -137,12 +158,14 @@ export function hårdaMotorvillkor(
   if (/^\d{1,2}:\d{2}$/.test(sen)) hard.latestEnd = sen.length === 4 ? `0${sen}` : sen;
   for (const v of villkor) {
     if (v.styrka !== "maste" || !gallerIPeriod(v, fran, till)) continue;
-    if (v.typ === "max_pass" && tal(v, "timmar") != null) hard.maxShiftHours = tal(v, "timmar");
-    if (v.typ === "min_pass" && tal(v, "timmar") != null) hard.minShiftHours = tal(v, "timmar");
-    if (v.typ === "max_natt_foljd" && tal(v, "dagar") != null) hard.maxNightConsecutive = Math.round(tal(v, "dagar")!);
-    if (v.typ === "max_jour_foljd" && tal(v, "dagar") != null) hard.maxJourConsecutive = Math.round(tal(v, "dagar")!);
-    if (v.typ === "min_ledighet" && tal(v, "dagar") != null) hard.minConsecutiveOffDays = Math.round(tal(v, "dagar")!);
-    if (v.typ === "max_dagar_foljd" && tal(v, "dagar") != null) hard.maxConsecutiveDays = Math.round(tal(v, "dagar")!);
+    const timmar = tal(v, "timmar");
+    const dagar = tal(v, "dagar");
+    if (v.typ === "max_pass" && timmar != null) hard.maxShiftHours = timmar;
+    if (v.typ === "min_pass" && timmar != null) hard.minShiftHours = timmar;
+    if (v.typ === "max_natt_foljd" && dagar != null) hard.maxNightConsecutive = Math.round(dagar);
+    if (v.typ === "max_jour_foljd" && dagar != null) hard.maxJourConsecutive = Math.round(dagar);
+    if (v.typ === "min_ledighet" && dagar != null) hard.minConsecutiveOffDays = Math.round(dagar);
+    if (v.typ === "max_dagar_foljd" && dagar != null) hard.maxConsecutiveDays = Math.round(dagar);
   }
   const forbud = forbudnaKunder(villkor, fran, till).map(kundId);
   if (forbud.length) hard.forbiddenCustomerIds = forbud;
@@ -168,7 +191,7 @@ export function hårdaMotorvillkor(
 }
 
 export function mjukaMotorvillkor(villkor: MedarbetarVillkor[], fran: string, till: string, kundId: (namn: string) => string) {
-  const soft: Record<string, unknown> = {};
+  const soft: MotorConstraintBag = {};
   const types: string[] = [];
   if (villkor.some((v) => v.typ === "endast_dag" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till))) types.push("day");
   if (villkor.some((v) => v.typ === "endast_kvall" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till))) types.push("evening");
@@ -179,8 +202,10 @@ export function mjukaMotorvillkor(villkor: MedarbetarVillkor[], fran: string, ti
   const pref = [...bor, ...masteOnskemal];
   if (pref.length) soft.preferredCustomerIds = pref;
   const minLedig = villkor.find((v) => v.typ === "min_ledighet" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till));
-  if (minLedig && tal(minLedig, "dagar") != null) soft.minConsecutiveOffDays = Math.round(tal(minLedig, "dagar")!);
+  const minLedigDagar = minLedig ? tal(minLedig, "dagar") : undefined;
+  if (minLedigDagar != null) soft.minConsecutiveOffDays = Math.round(minLedigDagar);
   const maxFoljd = villkor.find((v) => v.typ === "max_dagar_foljd" && v.styrka === "onskemal" && gallerIPeriod(v, fran, till));
-  if (maxFoljd && tal(maxFoljd, "dagar") != null) soft.maxConsecutiveDays = Math.round(tal(maxFoljd, "dagar")!);
+  const maxFoljdDagar = maxFoljd ? tal(maxFoljd, "dagar") : undefined;
+  if (maxFoljdDagar != null) soft.maxConsecutiveDays = Math.round(maxFoljdDagar);
   return soft;
 }

@@ -20,6 +20,7 @@ import {
   hemHuvudCta,
   hemStatusText,
   balansKanGodkannas,
+  godkannBeslutFranVy,
   effektPilFranForandring,
   MATCHNING_FORMEL,
   UNDERKAPACITET_FORMEL,
@@ -135,11 +136,11 @@ describe("processsteg", () => {
 });
 
 describe("en enda readiness-selector", () => {
-  it("Hem-CTA och motoranrop använder samma funktion", () => {
-    const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
+  it("Granska-förutsättningar och motoranrop använder samma readiness", () => {
+    const vy = readFileSync(join(rot, "src/components/bb/Forutsattningar.tsx"), "utf8");
     const kor = readFileSync(join(rot, "src/lib/bb/korBemanningsbalans.ts"), "utf8");
-    expect(hem).toContain("readinessFranApi");
-    expect(hem).toContain("korBemanningsbalans");
+    expect(vy).toContain("readinessFranApi");
+    expect(vy).toContain("korBemanningsbalans");
     expect(kor).toContain("readinessFranApi");
     expect(kor).toContain("if (!r.ready) return \"blockerad\"");
   });
@@ -248,13 +249,22 @@ describe("en enda readiness-selector", () => {
 });
 
 describe("godkännanden", () => {
-  it("import godkänner inte kundunderlag automatiskt", () => {
+  it("importdialogen är det enda kundgodkännandet", () => {
     const src = readFileSync(join(rot, "src/lib/bb/app.ts"), "utf8");
     const start = src.indexOf("function approveImport()");
     const end = src.indexOf("function ", start + 10);
     const fn = src.slice(start, end);
-    expect(fn).toMatch(/kundGodkand = false/);
-    expect(fn).not.toMatch(/kundGodkand = true/);
+    expect(fn).toMatch(/kundGodkand = true/);
+    expect(fn).not.toMatch(/kundGodkand = false/);
+  });
+
+  it("schemaimport godkänner inte medarbetarvillkor", () => {
+    const src = readFileSync(join(rot, "src/lib/bb/app.ts"), "utf8");
+    const start = src.indexOf("function importeraSchemaFranSk");
+    const end = src.indexOf("function ", start + 10);
+    const fn = src.slice(start, end);
+    expect(fn).toMatch(/schemaGodkand = false/);
+    expect(fn).not.toMatch(/schemaGodkand = true/);
   });
 });
 
@@ -517,6 +527,85 @@ describe("Före / Balans / Utfall", () => {
     expect(raknaSaknadeKompetenskrav([{ message: "Insatsen kräver kompetens som saknas" }])).toBe(1);
   });
 
+  it("A–H: motorresultat är canonical för Godkänn, lokal gate bara utan motor", () => {
+    const motorResultat = (s: Record<string, unknown>) => ({ summary: { status: "FEASIBLE", cost: 1, warnings: [], hardViolations: [], ...s } });
+    const klarJobb = { outcome: "balans_klar" as const, stale: false };
+    const a = godkannBeslutFranVy({
+      motorJobb: klarJobb,
+      motorResultat: motorResultat({ coveragePercent: 100 }),
+      tacktBehovPct: 81.14,
+      hardViolations: 4,
+    });
+    expect(a.ok).toBe(true);
+    expect(a.kalla).toBe("motor");
+    expect(a.reasons).toEqual([]);
+
+    const b = godkannBeslutFranVy({
+      motorJobb: klarJobb,
+      motorResultat: motorResultat({ coveragePercent: 81.14 }),
+      tacktBehovPct: 100,
+      hardViolations: 0,
+    });
+    expect(b.ok).toBe(false);
+    expect(b.reasons.join(" ")).toMatch(/kundbehov återstår/);
+
+    const c = godkannBeslutFranVy({
+      motorJobb: klarJobb,
+      motorResultat: motorResultat({ coveragePercent: 100, hardViolations: [{ rule: "WEEKLY_REST", message: "vila" }] }),
+      tacktBehovPct: 100,
+      hardViolations: 0,
+    });
+    expect(c.ok).toBe(false);
+    expect(c.reasons.join(" ")).toMatch(/hårda regelbrott/);
+
+    const d = godkannBeslutFranVy({
+      motorJobb: klarJobb,
+      motorResultat: motorResultat({
+        coveragePercent: 100,
+        warnings: [{ rule: "TASK_SKILL", message: "Insatsen kräver kompetens som saknas" }],
+      }),
+      tacktBehovPct: 100,
+      hardViolations: 0,
+    });
+    expect(d.ok).toBe(false);
+    expect(d.reasons.join(" ")).toMatch(/kompetens/);
+
+    const e = godkannBeslutFranVy({
+      motorJobb: { outcome: "balans_klar", stale: true },
+      motorResultat: motorResultat({ coveragePercent: 100 }),
+      tacktBehovPct: 100,
+      hardViolations: 0,
+    });
+    expect(e.ok).toBe(false);
+    expect(e.reasons.join(" ")).toMatch(/tidigare underlag/);
+
+    const f = godkannBeslutFranVy({
+      motorJobb: { outcome: "kompletteras", stale: false },
+      motorResultat: motorResultat({ coveragePercent: null }),
+      tacktBehovPct: 100,
+      hardViolations: 0,
+    });
+    expect(f.ok).toBe(false);
+    expect(f.reasons.join(" ")).toMatch(/ytterligare resurs/);
+
+    const g = godkannBeslutFranVy({
+      motorJobb: klarJobb,
+      motorResultat: motorResultat({ coveragePercent: 100 }),
+      tacktBehovPct: 69.6,
+      hardViolations: 9,
+    });
+    expect(g.ok).toBe(true);
+    expect(g.kalla).toBe("motor");
+
+    const hOk = godkannBeslutFranVy({ tacktBehovPct: 100, hardViolations: 0 });
+    expect(hOk.ok).toBe(true);
+    expect(hOk.kalla).toBe("lokal");
+    const hNej = godkannBeslutFranVy({ tacktBehovPct: 88.7, hardViolations: 0 });
+    expect(hNej.ok).toBe(false);
+    expect(hNej.kalla).toBe("lokal");
+    expect(hNej.reasons[0]).toMatch(/kundbehov återstår/);
+  });
+
   it("håller Täckt behov och Kundnära tid isär", () => {
     expect(TACKT_BEHOV_FORKLARING).not.toBe(KUNDNARA_FORKLARING);
     expect(TACKT_BEHOV_FORKLARING).toMatch(/bemannat kundbehov/);
@@ -535,7 +624,7 @@ describe("Före / Balans / Utfall", () => {
   it("Hem har tre huvudområden och CTA, inte underbemanning som etikett för dimensionerande gap", () => {
     const hem = readFileSync(join(rot, "src/components/bb/Hem.tsx"), "utf8");
     const tre = readFileSync(join(rot, "src/components/bb/TreOmraden.tsx"), "utf8");
-    expect(hem).toContain("data-cta={cta.id}");
+    expect(hem).toContain("data-cta={ateruppta.tab}");
     expect(hem).toContain("data-statusrad");
     expect(tre).toContain("Matchning mot behov");
     expect(tre).toContain("↳");

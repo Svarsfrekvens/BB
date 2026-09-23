@@ -1,13 +1,14 @@
-import { ArrowDown, ArrowUp, Minus, Sparkles, Upload } from "lucide-react";
+import { ArrowDown, ArrowUp, Minus, Sparkles, Upload, CheckCircle2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
-import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt } from "@/lib/bb/vcFlode";
+import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt, godkannBeslutFranVy, raknaSaknadeKompetenskrav } from "@/lib/bb/vcFlode";
 import { lasJourDiagnos, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
 import { ResursbristPanel, resursbristProps } from "./ResursbristPanel";
+import { BalansPagar } from "./BalansPagar";
 
 function Eyebrow({ children }: { children: React.ReactNode }) {
   return <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{children}</div>;
@@ -46,7 +47,7 @@ function Kurva({ lage, rubrik, text }: { lage: Lage; rubrik: string; text: strin
   );
 }
 
-export function ForeEfter({ api }: VyProps) {
+export function ForeEfter({ api, state }: VyProps) {
   const m = api.foreEfter();
 
   if (!m) {
@@ -65,6 +66,16 @@ export function ForeEfter({ api }: VyProps) {
   const jour = lasJourDiagnos((api.motorResultat() as { resourceDiagnostics?: unknown } | null)?.resourceDiagnostics);
   const tackningSank = !!(efter && efter.tackningPct + 0.05 < fore.tackningPct);
   const visade = efter ? filtreraJamforRader(tabell) : [];
+  const godkannbar = godkannBeslutFranVy({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
+    tacktBehovPct: ofullstandig ? null : efter?.tackningPct,
+    hardViolations: api.regelbrott(),
+    saknadeKompetenskrav: raknaSaknadeKompetenskrav([
+      ...(summary?.hardViolations || []),
+      ...(summary?.warnings || []),
+    ]),
+  });
   const extra = efter
     ? [
         vikarie
@@ -109,11 +120,26 @@ export function ForeEfter({ api }: VyProps) {
             {efter || ofullstandig ? (
               <p className="mt-2 text-xs font-semibold text-muted-foreground">{berakningsKallaText(api.berakningsKalla())}</p>
             ) : null}
+            {!godkannbar.ok && efter ? (
+              <p className="mt-3 text-sm font-semibold text-warning">{godkannbar.reasons.join(" ")}</p>
+            ) : null}
           </div>
           {efter || ofullstandig ? (
-            <Button variant="outline" onClick={() => api.aterstallBalans()}>
-              Tillbaka till originaldata
-            </Button>
+            <div className="flex flex-col items-end gap-2">
+              <Button
+                disabled={!godkannbar.ok}
+                title={godkannbar.ok ? undefined : godkannbar.reasons.join(" ")}
+                onClick={() => api.godkannBalans?.()}
+              >
+                <CheckCircle2 /> Godkänn balans
+              </Button>
+              <Button variant="outline" onClick={() => api.aterstallBalans()}>
+                Tillbaka till originaldata
+              </Button>
+              <Button variant="ghost" onClick={() => api.setTab("schemaforslag")}>
+                Visa passlista
+              </Button>
+            </div>
           ) : (
             <Button onClick={() => api.skapaBalans()}>
               <Sparkles /> Skapa balans
@@ -122,6 +148,8 @@ export function ForeEfter({ api }: VyProps) {
         </div>
       </Card>
 
+      <BalansPagar job={api.motorJobb?.()} />
+
       <ResursbristPanel
         diagnos={jour}
         visaKundbrist={harMjukKundbrist({
@@ -129,7 +157,7 @@ export function ForeEfter({ api }: VyProps) {
           obemannadeAntal: obemannade.length,
           ofullstandigUtanSchema: Boolean(ofullstandig),
         })}
-        {...resursbristProps(api)}
+        {...resursbristProps(api, state)}
       />
 
       {efter ? (

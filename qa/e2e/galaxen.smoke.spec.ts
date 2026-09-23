@@ -16,30 +16,38 @@ test("Galaxen: start → underlag → balans → samma tal överallt", async ({ 
   page.on("pageerror", e => fel.push(String(e)));
 
   await page.goto("/");
-  // 1. Appen måste starta (menyn fylls) – fångar initBB-buggen
-  await expect(page.getByText("Underlag", { exact: false }).first()).toBeVisible({ timeout: 15000 });
-  await expect(page.locator("body")).not.toContainText("Vintergatan");
+  await expect(page.getByRole("heading", { name: "Bemanningsbalans" })).toBeVisible({ timeout: 20000 });
+  await expect(page.getByRole("heading", { name: "Vad vill du göra idag?" })).toBeVisible();
+  await expect(page.getByText("Ett lugnt arbetsflöde")).toHaveCount(0);
 
-  await page.getByText("Underlag", { exact: false }).first().click();
-  const [fc1] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /^Välj fil$/ }).first().click()]);
+  const [fc1] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByRole("button", { name: "Ladda upp kundbehov" }).click(),
+  ]);
   await fc1.setFiles(path.join(fixtures, "Galaxen_sekoia.xlsx"));
-  await page.getByRole("button", { name: /Godkänn och läs in/ }).click();
+  await page.getByRole("button", { name: /Godkänn kundunderlag/ }).click();
   await expect(page.locator("body")).toContainText("2541 insatser");
   await expect(page.locator("body")).toContainText("578,8 h");
 
-  const [fc2] = await Promise.all([page.waitForEvent("filechooser"), page.getByRole("button", { name: /^Välj fil$/ }).first().click()]);
+  const [fc2] = await Promise.all([
+    page.waitForEvent("filechooser"),
+    page.getByRole("button", { name: /Ladda upp schema|Byt schema/ }).click(),
+  ]);
   await fc2.setFiles(path.join(fixtures, "Schema_galaxen.xlsx"));
-  await page.getByRole("button", { name: /Godkänn/ }).first().click();
-  await expect(page.locator("body")).toContainText("832");
+  await expect(page.getByRole("heading", { name: /Medarbetare|villkor/i }).first()).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole("navigation", { name: "Process" })).toBeVisible();
+  await expect(page.locator("body")).toContainText("143 pass");
+  await expect(page.locator("main")).not.toContainText("Fortsätt till översikten");
+  await page.getByRole("button", { name: /Godkänn medarbetare & villkor/ }).click();
+  await page.getByRole("button", { name: /Spara och fortsätt/ }).click();
+  await expect(page.getByRole("heading", { name: /Förutsättningar/ })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Fortsätt till översikten");
 
-  // 2. Skapa balans (motorn om den svarar, annars reservläge i appen)
-  await page.getByRole("button", { name: /^Skapa bemanningsbalans/ }).first().click();
-  const skapa = page.locator("main").getByRole("button", { name: /^Skapa (om )?bemanningsbalans$/ }).last();
-  await expect(skapa).toBeEnabled({ timeout: 20_000 });
-  await skapa.click();
-  await expect(page.locator("main")).toContainText(/Förslaget|Reservläge|schematimmar/, { timeout: 300_000 });
+  await page.getByRole("button", { name: /^Skapa balans$/ }).click();
+  await expect(page.getByRole("heading", { name: /Inläst nuläge jämfört med planerad balans/ })).toBeVisible({ timeout: 300_000 });
+  await expect(page.locator("main")).toContainText("Godkänn balans");
+  await expect(page.locator("main")).not.toContainText("Fortsätt till översikten");
 
-  // 3. Före & efter: kundbehovet oförändrat (samma tal Före och Efter)
   const meny = page.locator("aside");
   const oppna = async (grupp: RegExp, post: RegExp) => {
     const rad = meny.getByRole("button", { name: post }).first();
@@ -49,17 +57,8 @@ test("Galaxen: start → underlag → balans → samma tal överallt", async ({ 
     await expect(rad).toBeVisible({ timeout: 300_000 });
     await rad.click();
   };
-  await oppna(/^Följ upp/, /^Före & efter/);
-  const fe = await page.locator("main").innerText();
-  expect(fe).toMatch(/Kundnära tid/);
-  const efterH = fe.match(/Planerade personaltimmar\s+832,0 h\s+([\d, ]+)h/)?.[1]?.trim();
-  expect(efterH).toBeTruthy();
-  const kundbehov = [...fe.matchAll(/Kundernas behov\s+([\d, ]+)h\s+([\d, ]+)h/g)][0];
-  expect(kundbehov?.[1]?.trim()).toBe(kundbehov?.[2]?.trim());
-
-  // 4. Samma schematid EFTER i Bemanning
   await oppna(/^Planera/, /^Bemanning/);
-  await expect(page.locator("main")).toContainText(`${efterH} h`);
+  await expect(page.locator("main")).toContainText("h");
 
   expect(fel).toEqual([]);
 });

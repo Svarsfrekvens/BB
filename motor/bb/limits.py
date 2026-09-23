@@ -17,6 +17,10 @@ CEILING_MAX_OCCURRENCES = 4000
 CEILING_MAX_CANDIDATE_SHIFTS = 20000
 CEILING_MAX_SUPPORT_COMBINATIONS = 250000
 
+SYNC_MAX_SOLVE_SECONDS = 300
+ASYNC_MAX_SOLVE_SECONDS = 900
+SOLVE_MAX_SECONDS = 900
+
 _ENV_OCC = 'BB_MAX_OCCURRENCES'
 _ENV_CAND = 'BB_MAX_CANDIDATE_SHIFTS'
 _ENV_SUP = 'BB_MAX_SUPPORT_COMBINATIONS'
@@ -54,9 +58,14 @@ def validate_limits_block(limits):
         return
     if not isinstance(limits, dict):
         raise ValueError('Ogiltiga storleksgränser.')
-    for key in ('maxOccurrences', 'maxCandidateShifts', 'maxSupportCombinations'):
+    ceilings = {
+        'maxOccurrences': CEILING_MAX_OCCURRENCES,
+        'maxCandidateShifts': CEILING_MAX_CANDIDATE_SHIFTS,
+        'maxSupportCombinations': CEILING_MAX_SUPPORT_COMBINATIONS,
+    }
+    for key, ceiling in ceilings.items():
         if key in limits and limits[key] is not None:
-            _parse_int(limits[key], key)
+            _bounded(_parse_int(limits[key], key), None, ceiling, key)
 
 
 def _from_env(env_name, default, ceiling, name):
@@ -71,6 +80,14 @@ def _from_payload(data, key, default, ceiling, name, env_name):
     if isinstance(block, dict) and key in block and block[key] is not None:
         return _bounded(_parse_int(block[key], name), default, ceiling, name)
     return _from_env(env_name, default, ceiling, name)
+
+
+def clamp_solve_seconds(raw, ceiling):
+    try:
+        value = float(30 if raw is None else raw)
+    except (TypeError, ValueError, OverflowError):
+        value = 30.0
+    return min(float(ceiling), max(1.0, value))
 
 
 def effective_max_occurrences(data=None):

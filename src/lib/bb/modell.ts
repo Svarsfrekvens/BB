@@ -521,8 +521,8 @@ function ordinarieCapTimmar(
   return periodCapacityMinutes(
     {
       ssg: m.grad,
-      workTimeModelId: m.workTimeModelId,
-      workTimeWindows: m.workTimeWindows,
+      ...(m.workTimeModelId ? { workTimeModelId: m.workTimeModelId } : {}),
+      ...(m.workTimeWindows ? { workTimeWindows: m.workTimeWindows } : {}),
     },
     periodDays,
     { fullTimeWeeklyHours: defaultWeeklyHours() },

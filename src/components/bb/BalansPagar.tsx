@@ -5,7 +5,7 @@ import { balansUtfallText, fasSteg, type SparatMotorJobb } from "@/lib/bb/motorJ
 export function BalansPagar({ job }: { job: SparatMotorJobb | null | undefined }) {
   if (!job?.id) return null;
   const klar = job.phase === "completed" || job.phase === "failed";
-  const steg = fasSteg(job.phase);
+  const steg = fasSteg(job.phase, job.phaseText);
   const titel = klar ? balansUtfallText(job.outcome) || "Balans klar" : "Bemanningsbalans skapas";
   return (
     <Card className="rounded-2xl p-6 shadow-lift" data-balans-jobb={job.phase || "queued"}>

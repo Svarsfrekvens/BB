@@ -81,6 +81,6 @@ export function kompletteraBehorighet(
   nu: Record<string, unknown>,
 ): Record<string, unknown> {
   const nasta = { ...nu, [falt]: varde };
-  if (falt === "passprofil" && String(varde) === "natt") nasta.nattbehorig = true;
+  if (falt === "passprofil" && String(varde) === "natt") nasta["nattbehorig"] = true;
   return nasta;
 }

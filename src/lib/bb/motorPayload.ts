@@ -15,6 +15,7 @@ import {
   type WorkTimeModel,
 } from "./arbetstid";
 import { harHärleddJour, jourMonsterFranSchema, jourNamnFranSchema } from "./nattJour";
+import { MOTOR_MAX_INSATSER as MOTOR_OCCURRENCE_CEILING } from "./motorPeriod";
 
 export type MotorPayload = Record<string, unknown>;
 
@@ -72,6 +73,10 @@ export const STANDARDMALLAR: Passmall[] = [
 
 /** Default motortak för insatstillfällen (occurrences). Motorn är auktoritativ via BB_MAX_OCCURRENCES eller data.limits.maxOccurrences. */
 export const MOTOR_DEFAULT_MAX_OCCURRENCES = 1600;
+/** Begärt tak i payload. Samma som motorns verifierade ceiling. */
+export const MOTOR_REQUESTED_MAX_OCCURRENCES = MOTOR_OCCURRENCE_CEILING;
+/** Begärt support-tak. Samma som motorns verifierade ceiling 250000. */
+export const MOTOR_REQUESTED_MAX_SUPPORT_COMBINATIONS = 250000;
 /** @deprecated Använd MOTOR_DEFAULT_MAX_OCCURRENCES. Klientvarning, inte motorns enda gräns. */
 export const MOTOR_MAX_INSATSER = MOTOR_DEFAULT_MAX_OCCURRENCES;
 
@@ -246,6 +251,7 @@ export type PayloadResultat = {
     overTak: boolean;
     maxInsatser: number;
     occurrenceLimitDefault?: number;
+    occurrenceLimitRequest?: number;
     occurrenceLimitAuthority?: "motor";
     occurrenceLimitNote?: string;
     regler: MotorRegler;
@@ -770,7 +776,6 @@ export function byggMotorPayload(opts: {
     forbudPerNamn.set(m.namn, forbudnaKunder(((m as Medarbetare).villkor || []) as MedarbetarVillkor[], from, to));
   }
   for (const e of employees) {
-    if (e.resourceType === "temporary") continue;
     const forbud = forbudPerNamn.get(String(e.name)) || [];
     for (const [kundNamn, nr] of kundNr) {
       if (forbud.includes(kundNamn)) continue;
@@ -818,6 +823,10 @@ export function byggMotorPayload(opts: {
     rules: regler,
     compensatoryRest: [],
     economy: { hourlyCost: Math.max(0, Number(opts.timkostnad) || 270) },
+    limits: {
+      maxOccurrences: MOTOR_REQUESTED_MAX_OCCURRENCES,
+      maxSupportCombinations: MOTOR_REQUESTED_MAX_SUPPORT_COMBINATIONS,
+    },
     objectiveWeights: {
       continuitySek: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.continuitySek ?? 50))),
       spreadSekPerPermille: Math.max(0, Math.min(10000, Number(opts.objectiveWeights?.spreadSekPerPermille ?? 2.5))),
@@ -837,9 +846,10 @@ export function byggMotorPayload(opts: {
       overTak,
       maxInsatser: MOTOR_DEFAULT_MAX_OCCURRENCES,
       occurrenceLimitDefault: MOTOR_DEFAULT_MAX_OCCURRENCES,
+      occurrenceLimitRequest: MOTOR_REQUESTED_MAX_OCCURRENCES,
       occurrenceLimitAuthority: "motor",
       occurrenceLimitNote:
-        "overTak jämför mot default 1600. Motorns faktiska tak sätts av data.limits.maxOccurrences eller BB_MAX_OCCURRENCES.",
+        "overTak jämför mot default 1600. Motorns faktiska tak sätts av data.limits.maxOccurrences (begärt 4000) eller BB_MAX_OCCURRENCES.",
       kunder: customers.length,
       medarbetare: employees.length,
       vikarier: vikarieNr,

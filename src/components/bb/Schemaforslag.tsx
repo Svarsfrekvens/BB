@@ -7,7 +7,7 @@ import { cn } from "@/lib/utils";
 import { fmtH } from "@/lib/bb/vy";
 import type { VyProps } from "@/lib/bb/vy";
 import { TomtLage } from "./Tomt";
-import { balansKanGodkannas, lasMotorSummary, raknaSaknadeKompetenskrav } from "@/lib/bb/vcFlode";
+import { godkannBeslutFranVy, lasMotorSummary, raknaSaknadeKompetenskrav } from "@/lib/bb/vcFlode";
 
 const VECKODAG = ["mån", "tis", "ons", "tor", "fre", "lör", "sön"];
 
@@ -59,7 +59,9 @@ export function Schemaforslag({ api }: VyProps) {
   const lage = m.efter ?? m.fore;
   const visa = vald === "alla" ? namn : [vald];
   const summary = lasMotorSummary(api.motorResultat());
-  const godkannbar = balansKanGodkannas({
+  const godkannbar = godkannBeslutFranVy({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
     tacktBehovPct: lage.tackningPct,
     hardViolations: api.regelbrott(),
     saknadeKompetenskrav: raknaSaknadeKompetenskrav([

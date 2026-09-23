@@ -10,7 +10,7 @@ from time import perf_counter
 from uuid import uuid4
 from .domain import (check_input, occurrences, span, paid, overlap, intersect,
                      instant, add_days, days, night_intervals, jour_intervals, is_night, monday,
-                     ssg_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
+                     period_paid_cap_minutes, skills_on_day, hard_constraints, weekend_allowed,
                      shift_allowed, rolling_week_windows, soft_constraints,
                      work_day_date, shifts_mergeable, occasion_work_day_date,
                      occasion_work_day_dates, rest_days_target, f01_known_span, f01_window_known,
@@ -28,7 +28,7 @@ from .precheck import (
     enumerate_person_shift_slots, explain_with_precheck, feasibility_precheck,
     has_critical_precheck, planning_diagnostics,
 )
-from .limits import effective_max_candidate_shifts, effective_max_support_combinations
+from .limits import SOLVE_MAX_SECONDS, effective_max_candidate_shifts, effective_max_support_combinations
 from .perf import peak_memory_mb, planning_summary, schedule_kpis
 from .replan import collect_locked_shifts
 from .validate import validate
@@ -189,7 +189,7 @@ def solve(data, seconds=30, build_only=False, lex_stop=None, coverage_trace=None
                 branches=int(self.NumBranches()),
             ))
     check_input(data)
-    seconds = min(300, max(1, float(seconds)))
+    seconds = min(SOLVE_MAX_SECONDS, max(1, float(seconds)))
     encoding = occurrence_encoding or 'support_z'
     if encoding not in ('support_z', 'start_choice'):
         raise ValueError('Ogiltig occurrence_encoding.')
@@ -366,17 +366,15 @@ def solve(data, seconds=30, build_only=False, lex_stop=None, coverage_trace=None
                     model.add(ax+bx<=1)
         forbid_overlong_occasions(model, items, rules, lit, prefix=f'span:{e["id"]}')
         forbid_compensatory_rest(model, items, rules, lit, prefix=f'comp:{e["id"]}')
-        temporary=e.get('resourceType')=='temporary'
-        hard=hard_constraints(e)
         fixed_used=sum(min_period(c) for c in fixed)
         decision_used=sum(min_period(c)*c['x'] for c in rows)
-        if temporary:
-            max_paid=hard.get('maxPaidMinutes')
-            if max_paid is not None:
-                model.add(decision_used<=remaining_capacity(int(max_paid), fixed_used))
+        period_cap=period_paid_cap_minutes(e,period_days,rules,wp)
+        if e.get('resourceType')=='temporary':
+            if period_cap is not None:
+                model.add(decision_used<=remaining_capacity(floor(period_cap+1e-7), fixed_used))
             cap=0
         else:
-            cap=floor(ssg_cap_minutes(e,period_days,rules,wp)+1e-7)
+            cap=floor(period_cap+1e-7)
             model.add(decision_used<=remaining_capacity(cap, fixed_used))
         used=decision_used+min(fixed_used, max(0, cap))
         if cap>0:

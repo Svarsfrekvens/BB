@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -40,23 +40,18 @@ export function KompletteraResursDialog({
   const [kompetensText, setKompetensText] = useState("");
   const [fel, setFel] = useState<string[]>([]);
 
-  const reset = () => {
+  useEffect(() => {
+    if (!open) return;
     setForm(tomExtraResurs());
     setDatumText("");
     setKompetensText("");
     setFel([]);
-  };
+  }, [open]);
 
   const set = <K extends keyof ExtraResurs>(k: K, v: ExtraResurs[K]) => setForm((f) => ({ ...f, [k]: v }));
 
   return (
-    <Dialog
-      open={open}
-      onOpenChange={(v) => {
-        if (v) reset();
-        onOpenChange(v);
-      }}
-    >
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto" data-dialog="komplettera-resurs">
         <DialogHeader>
           <DialogTitle>Komplettera resurs</DialogTitle>

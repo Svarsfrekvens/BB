@@ -11,5 +11,11 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.12.6
+      - key: BB_MAX_OCCURRENCES
+        value: "4000"
+      - key: BB_MAX_SUPPORT_COMBINATIONS
+        value: "250000"
+      - key: BB_JOB_STORE_DIR
+        value: /var/data/bb-jobs
       - key: BB_API_TOKEN
         sync: false

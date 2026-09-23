@@ -22,12 +22,12 @@ export function TomtLage({
   atgarder?: TomtAtgard[];
 }) {
   return (
-    <Card className="mx-auto max-w-xl rounded-2xl p-8 text-center shadow-lift">
+    <Card className="mx-auto max-w-xl rounded-[28px] p-10 text-center shadow-lift">
       <div className="mx-auto grid size-14 place-items-center rounded-2xl bg-primary-soft text-primary">
         <Ikon className="size-6" />
       </div>
-      <h2 className="mt-4 text-2xl font-extrabold text-deep">{rubrik}</h2>
-      <p className="mx-auto mt-2 max-w-md text-[15px] leading-relaxed text-muted-foreground">{text}</p>
+      <h2 className="mt-4 text-[26px] font-extrabold text-deep">{rubrik}</h2>
+      <p className="mx-auto mt-3 max-w-md text-base leading-relaxed text-muted-foreground">{text}</p>
       {atgarder.length ? (
         <div className="mt-6 flex flex-wrap justify-center gap-2">
           {atgarder.map((a) => {

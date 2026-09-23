@@ -192,6 +192,21 @@ def hard_constraints(e):
     return ((e.get('constraints') or {}).get('hard') or {})
 
 
+def period_paid_cap_minutes(e, period_days, rules, workplace=None):
+    """Betald periodkapacitet. Samma funktion i solver och validator.
+
+    Temporary har inget SSG-kontrakt: ssg=0 betyder inte noll timmar.
+    Explicit maxPaidMinutes är enda periodtaket. None = inget periodtak
+    (veckotak, vila och datum gäller ändå). Anställda begränsas av SSG.
+    """
+    if e.get('resourceType') == 'temporary':
+        mp = hard_constraints(e).get('maxPaidMinutes')
+        if mp is None:
+            return None
+        return float(int(mp))
+    return ssg_cap_minutes(e, period_days, rules, workplace)
+
+
 def soft_constraints(e):
     return ((e.get('constraints') or {}).get('soft') or {})
 

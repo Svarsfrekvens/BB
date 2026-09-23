@@ -10,14 +10,17 @@ import * as MV from "./medvind";
 import * as MODELL from "./modell";
 import { parseSekoiaRapport } from "./sekoia";
 export { parseSekoiaRapport } from "./sekoia";
+import { klassificeraExcel, beslutaImportvag, OKAND_UNDERLAG_FEL } from "./filtyp";
 import { standardKatalog, expanderaAktiviteter, aktivitetstimmar, kunderUtanKontakt, STANDARD_AKTIVITETER } from "./aktiviteter";
 import { beraknaKpi } from "./kpi";
 import { defaultWeeklyHours, DEFAULT_WORK_TIME_MODEL_ID, STANDARD_WORK_TIME_MODELS } from "./arbetstid";
 import { workTimeWindowsFromVillkor } from "./villkor";
 import { kompletteraBehorighet, harHärleddJour, jourNamnFranSchema } from "./nattJour";
-import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, aktivProcessId, raknaSaknadeKompetenskrav, getTidslage, tidslageText, konfigureratKundnaraMalPct } from "./vcFlode";
+import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet, balansKanGodkannas, godkannBeslutFranVy, aktivProcessId, raknaSaknadeKompetenskrav, getTidslage, tidslageText, konfigureratKundnaraMalPct } from "./vcFlode";
 import { lasJourDiagnos, visaJourResursbrist } from "./jourDiagnos";
 import { extraTillMedarbetare, valideraExtraResurs } from "./extraResurs";
+import { sattStartlage } from "./startlage";
+import { flodesTabAlias } from "./linjartFlode";
 
 declare global {
   interface Window {
@@ -47,18 +50,20 @@ const $ = (sel) => document.querySelector(sel);
  * Mer (tekniska vyer, hopfällt). Flikar som kräver underlag eller resultat är
  * låsta tills förutsättningen finns. */
 const TABS = [
-  { id: "hem", label: "Hem", sub: "Före, balans och utfall", ic: "⌂", grupp: "Start" },
+  { id: "hem", label: "Hem", sub: "Översikt och återuppta", ic: "⌂", grupp: "Start" },
+  { id: "uppladdning", label: "Underlag", sub: "Kundbehov och schema", ic: "⇪", grupp: "Start" },
   { id: "kundbehov", label: "Kundbehov", sub: "Insatser och tider per kund", ic: "♥", grupp: "Start", kravKund: true },
-  { id: "medarbetare", label: "Medarbetare", sub: "Uppgifter och villkor", ic: "◉", grupp: "Start", kravSchema: true },
-  { id: "uppladdning", label: "Underlag", sub: "Import av datakällor", ic: "⇪", grupp: "Start" },
-  { id: "resultat", label: "Granska balans", sub: "Så planerar vi schemaperioden", ic: "☑", grupp: "Start", kravResultat: true },
+  { id: "medarbetare", label: "Medarbetare", sub: "Villkor och kompetenser", ic: "◉", grupp: "Start", kravSchema: true },
+  { id: "planering", label: "Planering", sub: "Planeringsaktiviteter", ic: "▤", grupp: "Start", kravSchema: true },
+  { id: "forutsattningar", label: "Granska", sub: "Förutsättningar", ic: "☑", grupp: "Start", kravSchema: true },
   { id: "foreefter", label: "Före → Balans", sub: "Inläst nuläge mot planerad balans", ic: "⇄", grupp: "Start", kravResultat: true },
-  { id: "schemaforslag", label: "Godkänn balans", sub: "Pass och justeringar", ic: "▦", grupp: "Start", kravResultat: true },
+  { id: "nyckeltal", label: "Utfall", sub: "Så blev schemaperioden", ic: "◔", grupp: "Följ upp" },
+  { id: "resultat", label: "Granska balans", sub: "Samma yta som Före → Balans", ic: "☑", grupp: "Mer", kravResultat: true },
+  { id: "schemaforslag", label: "Passlista", sub: "Pass och justeringar", ic: "▦", grupp: "Mer", kravResultat: true },
   { id: "motor", label: "Beräkningslogg", sub: "Felsökning", ic: "⚡", grupp: "Mer", kravUnderlag: true },
   { id: "omplanering", label: "Omplanering", sub: "Förändring under perioden", ic: "↻", grupp: "Följ upp", kravResultat: true },
   { id: "resurskurva", label: "Resursbehov", sub: "Behov över dygnet", ic: "∿", grupp: "Planera", kravUnderlag: true },
   { id: "oversikt", label: "Bemanning", sub: "Verksamheten i siffror", ic: "◫", grupp: "Planera", kravUnderlag: true },
-  { id: "nyckeltal", label: "Utfall", sub: "Så blev schemaperioden", ic: "◔", grupp: "Följ upp" },
   { id: "ekonomi", label: "Rätt resurs i rätt tid", sub: "Intäkt, kostnad och kapacitet", ic: "kr", grupp: "Följ upp", kravUnderlag: true },
   { id: "kunder", label: "Per kund", sub: "Timmar per kund", ic: "⁝", grupp: "Följ upp", kravUnderlag: true },
   { id: "sprid", label: "Sprid behov", sub: "Flytta rörliga insatser", ic: "⇕", grupp: "Mer", kravUnderlag: true },
@@ -93,12 +98,13 @@ function tabTillganglig(t) {
 
 /** Byter flik. */
 function gaTill(id) {
+  id = flodesTabAlias(id);
+  if (id === "skapa") id = "forutsattningar";
   const t = TABS.find((x) => x.id === id);
   if (t && !tabTillganglig(t)) {
-    // Låst flik: kort hint om vad som saknas, i stället för en tom sida.
     notera(t.kravResultat ? "Skapa bemanningsbalansen först" : "Läs in underlaget först", "info", {
       detalj: t.kravResultat
-        ? "Resultatet visas när du har skapat bemanningsbalansen under Underlag."
+        ? "Resultatet visas när du har skapat bemanningsbalansen."
         : "Ladda upp kundernas behov och nuvarande schema under Underlag.",
     });
     tab = "uppladdning";
@@ -484,53 +490,93 @@ function parseResursblad(wb) {
 
 /* ---------- Import ---------- */
 let laser = false;   // sant medan en fil läses in (visar "Läser in…")
-function handleFile(file) {
-  laser = true; render();
+function importeraKundFranWb(wb, file) {
   const klar = () => { laser = false; };
-  const reader = new FileReader();
-  reader.onerror = () => { klar(); notera("Filen kunde inte läsas", "fel", { detalj: "Försök välja filen igen." }); render(); };
-  reader.onload = (e) => {
-    let parsed, wbRef;
-    try {
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array", cellDates: true });
-      wbRef = wb;
-      parsed = parseWorkbook(wb);
-    } catch (err) {
-      klar();
-      notera("Kunde inte läsa filen", "fel", { detalj: err.message + " Kontrollera att det är en Excel-fil (.xlsx)." });
-      render();
-      return;
-    }
-    if (!parsed || !parsed.rows.length) {
-      klar();
-      notera("Hittade ingen läsbar tabell", "fel", { detalj: "Filen behöver kolumnerna Datum, Kund, Insats och Planerad start." });
-      render();
-      return;
-    }
-    const dates = parsed.rows.map((r) => r.datum).filter(Boolean).sort();
-    const from = dates[0], to = dates[dates.length - 1];
-    const days = Math.round((new Date(to + "T12:00:00Z") - new Date(from + "T12:00:00Z")) / 864e5) + 1;
-    const kontroll = C.importkontroll(parsed.rows, { fran: from, till: to });    // Egen blockering: en kund som helt tappas i avvisade rader.
-    const seen = new Set(parsed.rows.map((r) => C.normKund(r.kund)).filter(Boolean));
-    const kept = new Set(kontroll.timmarPerKund.map((k) => k.kund));
-    for (const name of seen) if (!kept.has(name)) { kontroll.blockera = true; kontroll.varningar.push(`BLOCKERAT: kunden "${name}" tappades bort (alla rader avvisade)`); }
-    const first28 = days > 28 ? (() => { const p = C.filtreraPeriod(kontroll.godkanda, from, addDays(from, 27)); const n = C.nyckeltal(p); return { days: 28, count: n.antalInsatser, kundbehovH: n.kundbehovH, personalbehovH: n.personalbehovH }; })() : null;
-    pending = { ...kontroll, from, to, days, first28, godkanda: kontroll.godkanda };
-    pendingMeta = { sheet: parsed.sheet, headerRow: parsed.headerRow, fileName: file.name, resurs: parsed.resurs, berakningar: parsed.berakningar, kontroller: parsed.kontroller, personal: parsed.personal, intakter: parsed.intakter, passmallar: parsed.passmallar, individschema: parsed.individschema, villkor: parsed.villkor, scenario: parsed.scenario };
+  let parsed;
+  try {
+    parsed = parseWorkbook(wb);
+  } catch {
     klar();
-    if (pending.blockera) {
-      // Går inte att räkna på: visa filöversikten med felen istället.
-      tab = "underlag";
-      notera("Filen kunde inte läsas in", "fel", { detalj: (kontroll.varningar || [])[0] || "Kontrollera datum, kund och tider i filen." });
+    notera("Vi kunde inte läsa kundbehovet", "fel");
+    render();
+    return;
+  }
+  if (!parsed || !parsed.rows.length) {
+    klar();
+    notera(OKAND_UNDERLAG_FEL, "fel");
+    render();
+    return;
+  }
+  const dates = parsed.rows.map((r) => r.datum).filter(Boolean).sort();
+  const from = dates[0], to = dates[dates.length - 1];
+  const days = Math.round((new Date(to + "T12:00:00Z") - new Date(from + "T12:00:00Z")) / 864e5) + 1;
+  const kontroll = C.importkontroll(parsed.rows, { fran: from, till: to });    // Egen blockering: en kund som helt tappas i avvisade rader.
+  const seen = new Set(parsed.rows.map((r) => C.normKund(r.kund)).filter(Boolean));
+  const kept = new Set(kontroll.timmarPerKund.map((k) => k.kund));
+  for (const name of seen) if (!kept.has(name)) { kontroll.blockera = true; kontroll.varningar.push(`BLOCKERAT: kunden "${name}" tappades bort (alla rader avvisade)`); }
+  const first28 = days > 28 ? (() => { const p = C.filtreraPeriod(kontroll.godkanda, from, addDays(from, 27)); const n = C.nyckeltal(p); return { days: 28, count: n.antalInsatser, kundbehovH: n.kundbehovH, personalbehovH: n.personalbehovH }; })() : null;
+  pending = { ...kontroll, from, to, days, first28, godkanda: kontroll.godkanda };
+  pendingMeta = { sheet: parsed.sheet, headerRow: parsed.headerRow, fileName: file.name, resurs: parsed.resurs, berakningar: parsed.berakningar, kontroller: parsed.kontroller, personal: parsed.personal, intakter: parsed.intakter, passmallar: parsed.passmallar, individschema: parsed.individschema, villkor: parsed.villkor, scenario: parsed.scenario };
+  klar();
+  if (pending.blockera) {
+    tab = "underlag";
+    notera("Filen kunde inte läsas in", "fel", { detalj: (kontroll.varningar || [])[0] || "Kontrollera datum, kund och tider i filen." });
+    render();
+    return;
+  }
+  render();
+}
+function importeraSchemaFranSk(sk) {
+  laser = false;
+  if (!sk) {
+    notera(OKAND_UNDERLAG_FEL, "fel");
+    render();
+    return;
+  }
+  state.schemaOriginal = sk; state.schemaGodkand = false; state.balans = null; state.optimerat = false;
+  persist();
+  sattStartlage("app");
+  tab = state.rows && state.rows.length ? "medarbetare" : "uppladdning";
+  notera(`${sk.pass.length} pass och ${sk.medarbetare.length} medarbetare inlästa`, "ok",
+    { detalj: sk.vakantaPass ? `${sk.vakantaPass} öppna pass. Granska villkor innan du godkänner.` : "Granska SSG, jour/natt och villkor innan du godkänner." });
+  render();
+}
+function lasUnderlag(file, vald) {
+  laser = true; render();
+  const reader = new FileReader();
+  reader.onerror = () => { laser = false; notera("Filen kunde inte öppnas", "fel", { detalj: "Försök välja filen igen." }); render(); };
+  reader.onload = (e) => {
+    const buf = new Uint8Array(e.target.result);
+    let wbSchema;
+    let wbKund;
+    try {
+      wbSchema = XLSX.read(buf, { type: "array", cellDates: false });
+      wbKund = XLSX.read(buf, { type: "array", cellDates: true });
+    } catch {
+      laser = false;
+      notera("Vi kunde inte öppna filen", "fel", { detalj: "Välj en Excel-fil (.xlsx)." });
       render();
       return;
     }
-    // Visa granskningen. Kundunderlaget sparas först efter ett aktivt godkännande.
-    render();
-
+    const klass = klassificeraExcel(wbSchema);
+    const beslut = beslutaImportvag(vald, klass);
+    if (beslut.slag === "okand") {
+      laser = false;
+      notera(OKAND_UNDERLAG_FEL, "fel");
+      render();
+      return;
+    }
+    if (beslut.omdirigerad && beslut.meddelande) notera(beslut.meddelande, "info");
+    if (beslut.slag === "schema") {
+      importeraSchemaFranSk(klass.medvind || MV.parseMedvind(wbSchema, file.name));
+      return;
+    }
+    importeraKundFranWb(wbKund, file);
   };
   reader.readAsArrayBuffer(file);
 }
+function handleFile(file) { lasUnderlag(file, "kundbehov"); }
+function handleSchemaFil(file) { lasUnderlag(file, "schema"); }
 function addDays(iso, n) { const d = new Date(iso + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 
 /* ---------- Härledd modell när filen bara är en rå Sekoia-Rapport ----------
@@ -700,7 +746,7 @@ function harleddModell(rows, period, individschema, antag) {
 function approveImport() {
   if (!pending || pending.blockera) return;
   state.rows = pending.godkanda;
-  state.kundGodkand = false;
+  state.kundGodkand = true;
   state.kundAndrad = false;
   state.period = { from: pending.from, to: pending.to };
   state.importDays = pending.days;
@@ -729,10 +775,11 @@ function approveImport() {
   if (state.nyttSchema) state.nyttSchema.fileName = pendingMeta.fileName || "";
   persist();
   const antalInsatser = state.rows.length;
-  const antalMedarbetare = state.personal && state.personal.rows ? state.personal.rows.length : 0;
   pending = null; pendingMeta = null; curveDay = 0;
   markeraSparat();
-  notera(`${antalInsatser} insatser och ${antalMedarbetare} medarbetare inlästa`, "ok", { detalj: "Nu visas kundbehov, resursbehov och nyckeltal för perioden." });
+  notera(`${antalInsatser} insatser inlästa`, "ok", { detalj: "Kundunderlaget är godkänt. Nästa steg är schema." });
+  sattStartlage("app");
+  tab = "uppladdning";
   render();
 }
 
@@ -1198,7 +1245,7 @@ function skapaBalans() {
   state.balans.vikarie = { antalBorttagna: vik.antalBorttagna, antalBehalls: vik.antalBehalls };
   state.optimerat = true;
   state.balansGodkand = false;
-  tab = "resultat";
+  tab = "foreefter";
   persist();
   notera("Förhandsberäkning i appen", "ok",
     { detalj: `${schemaRes.forandringar.length} pass och ${res.flyttade.length} insatser ändrades. ${vik.antalBehalls} vikariepass behöver tillsättas.` });
@@ -1219,7 +1266,9 @@ function godkannBalans() {
       saknadeKompetenskrav = raknaSaknadeKompetenskrav(alla.map((x) => ({ rule: x.typ, message: x.text })));
     }
   } catch (e) { hard = 0; saknadeKompetenskrav = 0; }
-  const r = balansKanGodkannas({
+  const r = godkannBeslutFranVy({
+    motorJobb: state.motorJobb,
+    motorResultat: state.motorResultat,
     tacktBehovPct: efter ? efter.tackningPct : null,
     hardViolations: hard,
     saknadeKompetenskrav,
@@ -1231,6 +1280,7 @@ function godkannBalans() {
   state.balansGodkand = true;
   persist();
   notera("Balansen är godkänd", "ok", { detalj: "Täckt behov är 100 % och det finns inga hårda regelbrott." });
+  tab = "nyckeltal";
   render();
 }
 
@@ -1288,7 +1338,7 @@ function anvandMotorResultat(res) {
   state.motorResultat = { ...res, summary: res.summary || null, resourceDiagnostics: res.resourceDiagnostics || null, kalla: "motor", skapad, ofullstandig };
   state.optimerat = !ofullstandig;
   state.balansGodkand = false;
-  tab = "resultat";
+  tab = "foreefter";
   persist();
   notera(ofullstandig ? "Balans behöver kompletteras" : "Bemanningsbalans skapad med motor", ofullstandig ? "info" : "ok", {
     detalj: res.explanation || (ofullstandig ? "Registrerad personal räcker inte för obligatorisk jour." : "Granska resultatet innan du öppnar schemat."),
@@ -1301,34 +1351,6 @@ function aterstallBalans() {
   state.balans = null; state.optimerat = false; state.motorResultat = null; state.balansGodkand = false; persist();
   notera("Tillbaka till originaldata", "ok", { detalj: "Både schemat och kundbehovet visas som de lästes in." });
   render();
-}
-function handleSchemaFil(file) {
-  laser = true; render();
-  const reader = new FileReader();
-  reader.onerror = () => { laser = false; notera("Filen kunde inte läsas", "fel"); render(); };
-  reader.onload = (e) => {
-    let sk = null;
-    try {
-      const wb = XLSX.read(new Uint8Array(e.target.result), { type: "array", cellDates: false });
-      sk = MV.parseMedvind(wb, file.name);
-    } catch (err) {
-      laser = false;
-      notera("Kunde inte läsa filen", "fel", { detalj: err.message + " Kontrollera att det är en Excel-fil (.xlsx)." });
-      render(); return;
-    }
-    laser = false;
-    if (!sk) {
-      notera("Hittade inget personalschema", "fel", { detalj: 'Filen behöver ett blad där första raden börjar med "Schemarad" (Medvind-export).' });
-      render(); return;
-    }
-    state.schemaOriginal = sk; state.schemaGodkand = false; state.balans = null; state.optimerat = false;
-    persist();
-    tab = "uppladdning";
-    notera(`${sk.pass.length} pass och ${sk.medarbetare.length} medarbetare inlästa`, "ok",
-      { detalj: sk.vakantaPass ? `${sk.vakantaPass} öppna pass i Före-schemat. De är inte extra personal.` : "Nu kan du skapa bemanningsbalans." });
-    render();
-  };
-  reader.readAsArrayBuffer(file);
 }
 
 /* ---------- Härledda värden för vald period ---------- */
@@ -3011,7 +3033,9 @@ function render() {
         state.schemaGodkand = true;
         state.medarbetareAndrad = false;
         persist();
-        notera("Personalschemat är godkänt", "ok", { detalj: "Underlaget är klart för bemanningsbalans." });
+        notera("Medarbetare och villkor är godkända", "ok", { detalj: "Nästa steg är planering." });
+        sattStartlage("app");
+        tab = "planering";
         render();
       },
       rensaSchemaOriginal: () => { state.schemaOriginal = null; state.schemaGodkand = false; state.balans = null; state.optimerat = false; persist(); render(); },
@@ -3174,7 +3198,9 @@ function render() {
         state.kundGodkand = true;
         state.kundAndrad = false;
         persist();
-        notera("Kundunderlaget är godkänt", "ok", { detalj: "Alla kunder och insatser är klara för beräkningen." });
+        notera("Kundunderlaget är godkänt", "ok", { detalj: "Nästa steg är schema." });
+        sattStartlage("app");
+        tab = "uppladdning";
         render();
       },
       avbrytImport: () => { pending = null; pendingMeta = null; render(); },
@@ -3411,13 +3437,7 @@ $("#fileInput").onchange = (e) => { const f = e.target.files[0]; if (f) handleFi
 $("#nyttFileInput").onchange = (e) => { const f = e.target.files[0]; if (f) handleSchemaFil(f); e.target.value = ""; };
 
 function bootstrapGrundlage() {
-  // Ingen förifylld data: appen startar tom och väntar på att chefen läser in
-  // kundernas behov (Sekoia) och nuvarande schema (Medvind). Har en tidigare
-  // session sparat optimerad data återgår vi till nuläget – utan att röra
-  // de inlästa originalfilerna.
-  try {
-    if (state && state.optimerat) { state.optimerat = false; state.balans = null; persist(); }
-  } catch (e) { /* ignorera */ }
+  // Sparad Balans ska överleva reload. Originalfilerna rörs inte.
   render();
 }
 bootstrapGrundlage();

@@ -5,6 +5,22 @@
 
 import { createServerFn } from "@tanstack/react-start";
 
+/** JSON-värde som TanStack Start kan serialisera. Samma runtime-innehåll som tidigare objekt. */
+export type JsonValue =
+  | string
+  | number
+  | boolean
+  | null
+  | JsonValue[]
+  | { [key: string]: JsonValue };
+
+export type JsonObject = { [key: string]: JsonValue };
+
+function somJsonObjekt(v: unknown): JsonObject | null {
+  if (!v || typeof v !== "object") return null;
+  return v as JsonObject;
+}
+
 export type MotorSvar = {
   ok: boolean;
   status?: string;
@@ -16,8 +32,8 @@ export type MotorSvar = {
   fel?: { rule?: string; message?: string }[];
   varningar?: { rule?: string; message?: string }[];
   schemaJson?: string | null;
-  summary?: Record<string, unknown> | null;
-  resourceDiagnostics?: Record<string, unknown> | null;
+  summary?: JsonObject | null;
+  resourceDiagnostics?: JsonObject | null;
   meddelande?: string;
 };
 
@@ -29,7 +45,7 @@ export type MotorJobbSvar = {
   phaseText?: string;
   stillSearching?: boolean;
   inputHash?: string;
-  inputRevision?: unknown;
+  inputRevision?: JsonValue | null | undefined;
   reused?: boolean;
   outcome?: string | null;
   error?: string | null;
@@ -63,19 +79,14 @@ function motorFranOptimizeJson(data: any): MotorSvar {
     fel: validering?.errors ?? [],
     varningar: validering?.warnings ?? [],
     schemaJson: schema ? JSON.stringify(schema) : null,
-    summary: data?.summary && typeof data.summary === "object" ? data.summary : null,
-    resourceDiagnostics:
-      data?.resourceDiagnostics && typeof data.resourceDiagnostics === "object"
-        ? data.resourceDiagnostics
-        : schema?.resourceDiagnostics && typeof schema.resourceDiagnostics === "object"
-          ? schema.resourceDiagnostics
-          : null,
+    summary: somJsonObjekt(data?.summary),
+    resourceDiagnostics: somJsonObjekt(data?.resourceDiagnostics) || somJsonObjekt(schema?.resourceDiagnostics),
   };
 }
 
-function jobbFranJson(data: any, httpOk: boolean, fallback: string): MotorJobbSvar {
+function jobbFranJson(data: any, httpOk: boolean, fallback: string, httpStatus?: number): MotorJobbSvar {
   if (!httpOk) {
-    return { ok: false, status: data?.status, meddelande: fallback };
+    return { ok: false, status: String(httpStatus || data?.status || ""), meddelande: fallback };
   }
   const result = data?.result ? motorFranOptimizeJson(data.result) : undefined;
   const view: MotorJobbSvar = {
@@ -86,7 +97,7 @@ function jobbFranJson(data: any, httpOk: boolean, fallback: string): MotorJobbSv
     phaseText: data?.phaseText,
     stillSearching: Boolean(data?.stillSearching),
     inputHash: data?.inputHash,
-    inputRevision: data?.inputRevision,
+    inputRevision: data?.inputRevision as JsonValue | null | undefined,
     reused: Boolean(data?.reused),
     outcome: data?.outcome ?? null,
     error: data?.error ?? null,
@@ -154,7 +165,7 @@ async function anropaJobb(method: "GET" | "POST", vag: string, kropp?: unknown):
     data = null;
   }
   const detalj = typeof data?.detail === "string" ? data.detail : text.slice(0, 300);
-  return jobbFranJson(data, svar.ok, detalj || "Beräkningen kunde inte läsas.");
+  return jobbFranJson(data, svar.ok, detalj || "Beräkningen kunde inte läsas.", svar.status);
 }
 
 /** Räknar fram ett schemaförslag. Det befintliga schemat ändras inte. */
@@ -169,7 +180,7 @@ export const startaMotorJobb = createServerFn({ method: "POST" })
   .handler(async ({ data }) =>
     anropaJobb("POST", "/api/optimize/jobs", {
       data: data.data,
-      seconds: Math.min(300, Math.max(5, data.seconds ?? 180)),
+      seconds: Math.min(900, Math.max(5, data.seconds ?? 180)),
     }),
   );
 
