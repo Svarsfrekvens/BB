@@ -8,7 +8,7 @@ services:
     autoDeployTrigger: off
     buildCommand: pip install -r motor/requirements.txt
     startCommand: cd motor && python -m uvicorn bb.api:app --host 0.0.0.0 --port $PORT
-    healthCheckPath: /api/health
+    healthCheckPath: /
     disk:
       name: bb-data
       mountPath: /var/data
