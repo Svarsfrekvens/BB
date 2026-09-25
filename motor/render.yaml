@@ -5,10 +5,9 @@ services:
     region: frankfurt
     plan: 4c-8g
     branch: pilot-snapshot-2026-09-15
-    rootDir: motor
     autoDeployTrigger: off
-    buildCommand: pip install -r requirements.txt
-    startCommand: python -m uvicorn bb.api:app --host 0.0.0.0 --port $PORT
+    buildCommand: pip install -r motor/requirements.txt
+    startCommand: cd motor && python -m uvicorn bb.api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /api/health
     disk:
       name: bb-data
