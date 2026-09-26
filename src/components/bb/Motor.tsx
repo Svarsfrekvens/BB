@@ -379,7 +379,7 @@ export function Motor({ state, api }: VyProps) {
           ) : null}
           {!jobbar && senaste && !klar ? (
             <Button variant="outline" onClick={lokalBerakning}>
-              Förhandsberäkning i appen
+              Förhandsanalys
             </Button>
           ) : null}
         </div>

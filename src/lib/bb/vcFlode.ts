@@ -372,9 +372,39 @@ export function timmarEllerTomt(timmar: number | null | undefined) {
   return { text: `${timmar.toLocaleString("sv-SE", { maximumFractionDigits: 1 })}\u00a0h`, saknas: false as const };
 }
 
+export const FORHANDSANALYS_RUBRIK = "Förhandsanalys";
+export const FORHANDSANALYS_TEXT =
+  "Detta är en lokal förhandsanalys i appen, inte motorns färdiga Balans.";
+export const GODKANN_KRAVER_MOTOR = "Godkänn balans kräver ett aktuellt resultat från motorn.";
+
+/** Aktuellt, icke-stale motorresultat med utfallet balans_klar. */
+export function arFardigMotorBalans(d: {
+  motorJobb?: { outcome?: string | null | undefined; stale?: boolean | undefined } | null | undefined;
+  motorResultat?: unknown;
+}) {
+  const job = d.motorJobb;
+  if (!job || job.stale) return false;
+  if (String(job.outcome || "") !== "balans_klar") return false;
+  return lasMotorSummary(d.motorResultat) != null;
+}
+
+export function visningsFas(d: {
+  motorJobb?: { outcome?: string | null | undefined; stale?: boolean | undefined } | null | undefined;
+  motorResultat?: unknown;
+  harLokalBerakning?: boolean;
+}): { id: "fore" | "forhandsanalys" | "balans"; rubrik: string; text: string } {
+  if (arFardigMotorBalans(d)) {
+    return { id: "balans", rubrik: "Balans", text: tidslageText("balans").text };
+  }
+  if (d.harLokalBerakning || d.motorJobb?.stale) {
+    return { id: "forhandsanalys", rubrik: FORHANDSANALYS_RUBRIK, text: FORHANDSANALYS_TEXT };
+  }
+  return { id: "fore", rubrik: "Före", text: tidslageText("fore").text };
+}
+
 export function berakningsKallaText(kalla: "motor" | "lokal" | null | undefined) {
   if (kalla === "motor") return "Bemanningsbalans skapad med motor";
-  if (kalla === "lokal") return "Förhandsberäkning i appen";
+  if (kalla === "lokal") return FORHANDSANALYS_RUBRIK;
   return "Ingen beräkning är gjord ännu";
 }
 
@@ -520,7 +550,7 @@ function motorGodkannKalla(d: GodkannVyIndata) {
   };
 }
 
-/** Aktuellt motorresultat är canonical för Godkänn. Annars lokal gate. */
+/** Aktuellt motorresultat är canonical för Godkänn. Utan motor: ingen godkännbar Balans. */
 export function godkannBeslutFranVy(d: GodkannVyIndata) {
   const motor = motorGodkannKalla(d);
   if (motor) {
@@ -546,13 +576,7 @@ export function godkannBeslutFranVy(d: GodkannVyIndata) {
     }
     return { ok: reasons.length === 0, reasons, kalla: "motor" as const };
   }
-  const lokal = balansKanGodkannas({
-    tacktBehovPct: d.tacktBehovPct,
-    hardViolations: d.hardViolations,
-    ...(d.saknadeKompetenskrav != null ? { saknadeKompetenskrav: d.saknadeKompetenskrav } : {}),
-    ...(d.jourResursbrist != null ? { jourResursbrist: d.jourResursbrist } : {}),
-  });
-  return { ...lokal, kalla: "lokal" as const };
+  return { ok: false, reasons: [GODKANN_KRAVER_MOTOR], kalla: "lokal" as const };
 }
 
 export function hemHuvudCta(d: {

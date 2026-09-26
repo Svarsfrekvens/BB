@@ -354,7 +354,7 @@ describe("tekniska motorord", () => {
       }
     }
     expect(vcStatusText("INFEASIBLE")).not.toMatch(/INFEASIBLE/);
-    expect(berakningsKallaText("lokal")).toBe("Förhandsberäkning i appen");
+    expect(berakningsKallaText("lokal")).toBe("Förhandsanalys");
     expect(berakningsKallaText("motor")).toBe("Bemanningsbalans skapad med motor");
     expect(visningsNamnVerksamhet("")).toBe("Verksamhet ej namngiven");
     expect(visningsNamnVerksamhet("Ny verksamhet")).toBe("Verksamhet ej namngiven");
@@ -527,7 +527,7 @@ describe("Före / Balans / Utfall", () => {
     expect(raknaSaknadeKompetenskrav([{ message: "Insatsen kräver kompetens som saknas" }])).toBe(1);
   });
 
-  it("A–H: motorresultat är canonical för Godkänn, lokal gate bara utan motor", () => {
+  it("A–H: motorresultat är canonical för Godkänn; utan motor ingen godkännbar Balans", () => {
     const motorResultat = (s: Record<string, unknown>) => ({ summary: { status: "FEASIBLE", cost: 1, warnings: [], hardViolations: [], ...s } });
     const klarJobb = { outcome: "balans_klar" as const, stale: false };
     const a = godkannBeslutFranVy({
@@ -598,12 +598,13 @@ describe("Före / Balans / Utfall", () => {
     expect(g.kalla).toBe("motor");
 
     const hOk = godkannBeslutFranVy({ tacktBehovPct: 100, hardViolations: 0 });
-    expect(hOk.ok).toBe(true);
+    expect(hOk.ok).toBe(false);
     expect(hOk.kalla).toBe("lokal");
+    expect(hOk.reasons.join(" ")).toMatch(/motorn/);
     const hNej = godkannBeslutFranVy({ tacktBehovPct: 88.7, hardViolations: 0 });
     expect(hNej.ok).toBe(false);
     expect(hNej.kalla).toBe("lokal");
-    expect(hNej.reasons[0]).toMatch(/kundbehov återstår/);
+    expect(hNej.reasons.join(" ")).toMatch(/motorn/);
   });
 
   it("håller Täckt behov och Kundnära tid isär", () => {

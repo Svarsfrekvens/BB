@@ -80,8 +80,7 @@ export function Schemaforslag({ api }: VyProps) {
               Så planerar vi schemaperioden
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Nedan syns ert inlästa schema för perioden. Appen jämför det med kundernas behov och pekar ut när det finns
-              för mycket och för lite personal. Appen lägger inte ett nytt schema automatiskt – förslagen är beslutsstöd.
+              Nedan syns ert inlästa schema för perioden. Appen jämför det med kundernas behov. Ett färdigt schemaförslag kommer från motorn; godkännandet gäller motorns aktuella Balans.
             </p>
           </div>
           <select

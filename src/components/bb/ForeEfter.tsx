@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import type { VyProps } from "@/lib/bb/vy";
 import type { Lage } from "@/lib/bb/modell";
 import { TomtLage } from "./Tomt";
-import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt, godkannBeslutFranVy, raknaSaknadeKompetenskrav } from "@/lib/bb/vcFlode";
+import { filtreraJamforRader, jamforTon, lasMotorSummary, berakningsKallaText, visningEffekt, godkannBeslutFranVy, raknaSaknadeKompetenskrav, visningsFas, arFardigMotorBalans, FORHANDSANALYS_TEXT } from "@/lib/bb/vcFlode";
 import { lasJourDiagnos, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
 import { ResursbristPanel, resursbristProps } from "./ResursbristPanel";
 import { BalansPagar } from "./BalansPagar";
@@ -76,6 +76,12 @@ export function ForeEfter({ api, state }: VyProps) {
       ...(summary?.warnings || []),
     ]),
   });
+  const fardig = arFardigMotorBalans({ motorJobb: api.motorJobb?.(), motorResultat: api.motorResultat() });
+  const fas = visningsFas({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
+    harLokalBerakning: Boolean(efter || ofullstandig) && !fardig,
+  });
   const extra = efter
     ? [
         vikarie
@@ -88,11 +94,11 @@ export function ForeEfter({ api, state }: VyProps) {
             }
           : null,
         {
-          namn: "Hårda regelbrott",
+          namn: fardig ? "Hårda regelbrott" : "Lokala regelbrott (förhandsanalys)",
           fore: "–",
-          efter: String(summary?.hardViolations.length ?? api.regelbrott()),
-          forandring: String(summary?.hardViolations.length ?? api.regelbrott()),
-          riktning: (summary?.hardViolations.length || api.regelbrott() ? "ner" : "lika") as "ner" | "lika",
+          efter: String(fardig ? (summary?.hardViolations.length ?? 0) : api.regelbrott()),
+          forandring: String(fardig ? (summary?.hardViolations.length ?? 0) : api.regelbrott()),
+          riktning: ((fardig ? summary?.hardViolations.length : api.regelbrott()) ? "ner" : "lika") as "ner" | "lika",
         },
         {
           namn: "Arbetsmiljövarningar",
@@ -109,13 +115,14 @@ export function ForeEfter({ api, state }: VyProps) {
       <Card className="gap-0 rounded-2xl p-7 shadow-lift sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-2xl">
-            <Eyebrow>Före → Balans</Eyebrow>
+            <Eyebrow>{fardig ? "Före → Balans" : fas.rubrik}</Eyebrow>
             <h2 className="mt-1 text-2xl font-extrabold tracking-tight text-deep">
-              Inläst nuläge jämfört med planerad balans
+              {fardig ? "Inläst nuläge jämfört med planerad balans" : "Lokal förhandsanalys – inte motorns färdiga resultat"}
             </h2>
             <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-              Före är det inlästa underlaget. Balans är hur vi planerar schemaperioden. Pilarna följer om värdet ökar
-              eller minskar.
+              {fardig
+                ? "Före är det inlästa underlaget. Balans är hur vi planerar schemaperioden. Pilarna följer om värdet ökar eller minskar."
+                : FORHANDSANALYS_TEXT}
             </p>
             {efter || ofullstandig ? (
               <p className="mt-2 text-xs font-semibold text-muted-foreground">{berakningsKallaText(api.berakningsKalla())}</p>
@@ -168,7 +175,7 @@ export function ForeEfter({ api, state }: VyProps) {
                 <tr className="text-[11px] font-bold tracking-widest text-muted-foreground uppercase">
                   <th className="px-6 py-3 text-left">Mått</th>
                   <th className="px-6 py-3 text-right">Före</th>
-                  <th className="px-6 py-3 text-right">Balans</th>
+                  <th className="px-6 py-3 text-right">{fardig ? "Balans" : "Förhandsanalys"}</th>
                   <th className="px-6 py-3 text-right">Förändring</th>
                 </tr>
               </thead>
@@ -280,7 +287,13 @@ export function ForeEfter({ api, state }: VyProps) {
 
       <div className="grid gap-4 xl:grid-cols-2">
         <Kurva lage={fore} rubrik="Före" text="Inläst schema mot ursprungligt kundbehov." />
-        {efter ? <Kurva lage={efter} rubrik="Balans" text="Så planerar vi schemaperioden." /> : null}
+        {efter ? (
+          <Kurva
+            lage={efter}
+            rubrik={fardig ? "Balans" : "Förhandsanalys"}
+            text={fardig ? "Så planerar vi schemaperioden." : FORHANDSANALYS_TEXT}
+          />
+        ) : null}
       </div>
 
       {flyttade.length ? (

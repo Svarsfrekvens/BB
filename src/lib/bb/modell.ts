@@ -463,7 +463,6 @@ export function jamfor(
     punkter.push("Modellfel: planerad inom-pass-tid rymdes inte i arbetspassen och har inte räknats som osynlig extra tid.");
   }
   for (const v of varningar || []) punkter.push(v);
-  punkter.push("Appen föreslår justeringar och räknar om siffrorna – den lägger inte ett färdigt lagligt schema automatiskt.");
 
   return { tabell, punkter, minska: intervallText(minska), forstark: intervallText(forstark) };
 

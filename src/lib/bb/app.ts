@@ -1248,7 +1248,7 @@ function skapaBalans() {
   state.balansGodkand = false;
   tab = "foreefter";
   persist();
-  notera("Förhandsberäkning i appen", "ok",
+  notera("Förhandsanalys", "ok",
     { detalj: `${schemaRes.forandringar.length} pass och ${res.flyttade.length} insatser ändrades. ${vik.antalBehalls} vikariepass behöver tillsättas.` });
   render();
 }

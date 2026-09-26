@@ -13,7 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { ProcessFlode } from "./ProcessFlode";
 import { korBemanningsbalans, atterupptaMotorJobb } from "@/lib/bb/korBemanningsbalans";
 import { kopplaAtterupptning } from "@/lib/bb/motorJobb";
-import { readinessFranApi } from "@/lib/bb/vcFlode";
+import { readinessFranApi, arFardigMotorBalans } from "@/lib/bb/vcFlode";
 import { hamtaStartlage, lyssnaStartlage, sattStartlage } from "@/lib/bb/startlage";
 import { oversigtProcessLagen, oversigtProcessTab } from "@/lib/bb/oversiktProcess";
 
@@ -177,7 +177,10 @@ function Stegrad() {
   const steg = oversigtProcessLagen({
     aktivTab: s.tab,
     readiness: readinessFranApi(v.api),
-    harBalans: v.api.harBalans(),
+    harBalans: arFardigMotorBalans({
+      motorJobb: v.api.motorJobb?.(),
+      motorResultat: v.api.motorResultat(),
+    }),
     harUtfall: false,
     pagaende: Boolean(v.api.motorJobb?.()?.id && v.api.motorJobb?.()?.phase !== "completed"),
   });

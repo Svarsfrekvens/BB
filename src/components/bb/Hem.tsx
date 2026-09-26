@@ -23,6 +23,9 @@ import {
   tidslageText,
   timmarEllerTomt,
   visningsNamnVerksamhet,
+  visningsFas,
+  arFardigMotorBalans,
+  FORHANDSANALYS_TEXT,
 } from "@/lib/bb/vcFlode";
 import { fmtH, fmtPct } from "@/lib/bb/vy";
 import { lasJourDiagnos, visaJourResursbrist, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
@@ -87,8 +90,14 @@ export function Hem(props: VyProps) {
   const jourBrist = visaJourResursbrist(jour);
   const jobb = api.motorJobb?.();
   const pagaende = Boolean(jobb?.id && jobb.phase !== "completed" && jobb.phase !== "failed");
-  const lageId = getTidslage({ harBalans, harUtfall: false });
-  const lageInfo = tidslageText(lageId);
+  const fardigMotor = arFardigMotorBalans({ motorJobb: jobb, motorResultat: api.motorResultat() });
+  const fas = visningsFas({
+    motorJobb: jobb,
+    motorResultat: api.motorResultat(),
+    harLokalBerakning: harBalans && !fardigMotor,
+  });
+  const lageId = getTidslage({ harBalans: fardigMotor, harUtfall: false });
+  const lageInfo = fas.id === "forhandsanalys" ? { label: fas.rubrik, text: fas.text } : tidslageText(lageId);
   const lage = harBalans && !ofull ? fe?.efter ?? api.foreLage() : api.foreLage() ?? fe?.fore;
   const hard = api.regelbrott();
   const godkannbar = godkannBeslutFranVy({
@@ -110,7 +119,7 @@ export function Hem(props: VyProps) {
     balansGodkand,
     tacktBehovPct: lage?.tackningPct ?? null,
     pagaende,
-    klarForGranskning: harBalans && !pagaende && !ofull && !jourBrist,
+    klarForGranskning: fardigMotor && !pagaende && !ofull && !jourBrist,
   });
   const ssgSnitt = genomsnittligSsgPct(api.medarbetare());
   const ssgUtnytt = ssgUtnyttjandePct(null, null);
@@ -145,11 +154,11 @@ export function Hem(props: VyProps) {
 
   const mapped = lage
     ? {
-        status: harBalans && !ofull ? "FEASIBLE" : "NOT_RUN",
+        status: fardigMotor && !ofull ? "FEASIBLE" : "NOT_RUN",
         coveragePercent: lage.tackningPct,
         customerNearPercent: lage.kundnaraPct,
         cost: Math.round(lage.kostnad * 100),
-        hardViolations: summary?.hardViolations ?? [],
+        hardViolations: fardigMotor ? (summary?.hardViolations ?? []) : [],
         warnings: summary?.warnings ?? [],
         changedShiftCount: summary?.changedShiftCount ?? 0,
         lockedShiftCount: summary?.lockedShiftCount ?? 0,
@@ -261,11 +270,18 @@ export function Hem(props: VyProps) {
         {...resursbristProps(api, state)}
       />
 
+      {fas.id === "forhandsanalys" ? (
+        <Card className="rounded-2xl border-warning/40 p-5 shadow-lift" data-fas="forhandsanalys">
+          <p className="text-sm font-semibold text-deep">{fas.rubrik}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{FORHANDSANALYS_TEXT}</p>
+        </Card>
+      ) : null}
+
       {ofull ? null : (
       <TreOmraden
         /* KUNDNARA_FORKLARING och TACKT_BEHOV_FORKLARING visas i TreOmraden. */
         summary={mapped}
-        hardCount={hard}
+        hardCount={fardigMotor ? hard : 0}
         tom={!lage}
         {...(resurs ? { resurs } : {})}
         {...(lage

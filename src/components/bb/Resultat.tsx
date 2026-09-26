@@ -2,7 +2,7 @@ import { ArrowRight, Sparkles } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import type { VyProps } from "@/lib/bb/vy";
-import { berakningsKallaText, godkannBeslutFranVy, lasMotorSummary, raknaSaknadeKompetenskrav, readinessFranApi, vcStatusText } from "@/lib/bb/vcFlode";
+import { berakningsKallaText, godkannBeslutFranVy, lasMotorSummary, raknaSaknadeKompetenskrav, readinessFranApi, vcStatusText, visningsFas, arFardigMotorBalans, FORHANDSANALYS_TEXT } from "@/lib/bb/vcFlode";
 import { korBemanningsbalans } from "@/lib/bb/korBemanningsbalans";
 import { fmtPct } from "@/lib/bb/vy";
 import { lasJourDiagnos, visaJourResursbrist, harMjukKundbrist } from "@/lib/bb/jourDiagnos";
@@ -30,6 +30,12 @@ export function Resultat(props: VyProps) {
       ...(summary?.warnings || []),
     ]),
     jourResursbrist: jourBrist,
+  });
+  const fardig = arFardigMotorBalans({ motorJobb: api.motorJobb?.(), motorResultat: api.motorResultat() });
+  const fas = visningsFas({
+    motorJobb: api.motorJobb?.(),
+    motorResultat: api.motorResultat(),
+    harLokalBerakning: api.harBalans() && !fardig,
   });
   if (!api.harBalans()) {
     return (
@@ -64,10 +70,12 @@ export function Resultat(props: VyProps) {
   return (
     <div className="space-y-6">
       <div>
-        <div className="text-[11px] font-bold tracking-widest text-primary uppercase">Balans</div>
-        <h2 className="mt-1 text-3xl font-extrabold text-deep">Så planerar vi schemaperioden</h2>
+        <div className="text-[11px] font-bold tracking-widest text-primary uppercase">{fas.rubrik}</div>
+        <h2 className="mt-1 text-3xl font-extrabold text-deep">
+          {fardig ? "Så planerar vi schemaperioden" : "Lokal förhandsanalys – inte motorns färdiga resultat"}
+        </h2>
         <p className="mt-2 max-w-2xl text-base text-muted-foreground">
-          {vcStatusText(summary?.status, { jourResursbrist: jourBrist })}
+          {fardig ? vcStatusText(summary?.status, { jourResursbrist: jourBrist }) : FORHANDSANALYS_TEXT}
         </p>
         <p className="mt-1 text-sm font-semibold text-deep">{berakningsKallaText(api.berakningsKalla())}</p>
         {!godkannbar.ok ? (
