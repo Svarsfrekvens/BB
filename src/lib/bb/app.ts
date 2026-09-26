@@ -20,6 +20,7 @@ import { getBemanningsbalansReadiness, processStegLagen, visningsNamnVerksamhet,
 import { lasJourDiagnos, visaJourResursbrist } from "./jourDiagnos";
 import { extraTillMedarbetare, valideraExtraResurs } from "./extraResurs";
 import { sattStartlage } from "./startlage";
+import { BORJA_OM_STARTLAGE, BORJA_OM_TAB, nollstalltArbetsminne } from "./borjaOm";
 import { flodesTabAlias } from "./linjartFlode";
 
 declare global {
@@ -3442,20 +3443,18 @@ function bootstrapGrundlage() {
 }
 bootstrapGrundlage();
 
-// "Börja om": nollställer allt och går till Underlag. Ingen exempeldata finns.
+// "Börja om": nollställer arbetsminnet och visar Startsida. Ingen exempeldata.
 function borjaOm() {
-  state.rows = []; state.period = null; state.importDays = 0;
-  state.schemaOriginal = null; state.kundGodkand = false; state.schemaGodkand = false;
-  state.kundAndrad = false; state.medarbetareAndrad = false;
-  state.balans = null; state.optimerat = false; state.motorResultat = null; state.balansGodkand = false;
-  state.org = "";
-  state.resurs = null; state.berakningar = null; state.berakningarDerived = false;
-  state.kontroller = null; state.personal = null; state.intakter = null; state.passmallar = null;
-  state.individschema = null; state.nyttSchema = null; state.villkor = null; state.medarbetarInfo = {};
-  state.kundEdit = null; state.personalEdit = null; state.intaktEdit = null;
-  state.kundLek = null; state.schemaLek = null; sim = {};
+  const v = { ...DEFAULT_VERKS(), ...nollstalltArbetsminne() };
+  root.verks = [v];
+  root.active = v.id;
+  state = v;
+  pending = null;
+  pendingMeta = null;
+  sim = {};
   persist();
-  tab = "uppladdning";
+  sattStartlage(BORJA_OM_STARTLAGE);
+  tab = BORJA_OM_TAB;
   render();
 }
 

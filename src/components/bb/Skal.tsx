@@ -229,6 +229,10 @@ export function Skal({ children }: { children: ReactNode }) {
   const startlage = useSyncExternalStore(lyssnaStartlage, hamtaStartlage, hamtaStartlage);
   const lugnStart = startlage !== "app";
 
+  useEffect(() => {
+    if (lugnStart) setFragaOm(false);
+  }, [lugnStart]);
+
   // Varna innan fliken stängs om arbetet inte är exporterat.
   useEffect(() => {
     if (!s.osparat) return;
@@ -309,11 +313,9 @@ export function Skal({ children }: { children: ReactNode }) {
                 {s.osparat ? "Du har ändringar som inte är exporterade" : "Spara ditt arbete som en Excel-fil"}
               </TooltipContent>
             </Tooltip>
-            {s.optimerat ? (
-              <Button variant="outline" onClick={() => setFragaOm(true)}>
-                <RotateCcw /> Börja om
-              </Button>
-            ) : null}
+            <Button variant="outline" onClick={() => setFragaOm(true)}>
+              <RotateCcw /> Börja om
+            </Button>
           </div>
         </header>
         )}
@@ -336,7 +338,10 @@ export function Skal({ children }: { children: ReactNode }) {
             bbSkal.actions.exportera?.();
             setFragaOm(false);
           }}
-          onBekrafta={() => bbSkal.actions.borjaOm()}
+          onBekrafta={() => {
+            setFragaOm(false);
+            bbSkal.actions.borjaOm();
+          }}
         />
       </main>
     </div>
