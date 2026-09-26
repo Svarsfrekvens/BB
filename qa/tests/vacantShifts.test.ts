@@ -53,7 +53,13 @@ describe("VAC – skilj medarbetare från vakanta pass", () => {
     const r = galaxenPayload(7);
     const employees = (r.payload.employees as { name: string }[]) || [];
     expect(employees.length).toBe(5);
-    expect(employees.map((e) => e.name)).toEqual(["Topas", "Turmalin", "Jade", "Bärnsten", "Ametist"]);
+    expect(employees.map((e) => e.name)).toEqual([
+      "Medarbetare 1",
+      "Medarbetare 2",
+      "Medarbetare 3",
+      "Medarbetare 4",
+      "Medarbetare 5",
+    ]);
   });
 
   it("VAC-B: fyra obemannade rader med pass → exakt 40 open shifts", () => {
@@ -139,11 +145,13 @@ describe("VAC – skilj medarbetare från vakanta pass", () => {
       timkostnad: 270,
     });
     const employees = (r.payload.employees as {
+      id: string;
       name: string;
       skills: string[];
       constraints?: { hard?: { weekendMode?: string } };
     }[]) || [];
-    expect(employees.map((e) => e.name)).toEqual(["Topas"]);
+    expect(employees.map((e) => e.id)).toEqual(["e1"]);
+    expect(employees.map((e) => e.name)).toEqual(["Medarbetare 1"]);
     expect(employees.some((e) => e.name === "Vikarie 1")).toBe(false);
   });
 
@@ -169,9 +177,10 @@ describe("VAC – skilj medarbetare från vakanta pass", () => {
       dagar: 7,
       timkostnad: 270,
     });
-    const employees = (r.payload.employees as { name: string; code: string; resourceType: string }[]) || [];
-    expect(employees.map((e) => e.name)).toEqual(["Topas", "Lisa"]);
-    expect(employees.find((e) => e.name === "Lisa")?.code).toMatch(/^V/);
+    const employees = (r.payload.employees as { id: string; name: string; code: string; resourceType: string }[]) || [];
+    expect(employees.map((e) => e.id)).toEqual(["e1", "e2"]);
+    expect(employees.map((e) => e.name)).toEqual(["Medarbetare 1", "Medarbetare 2"]);
+    expect(employees.find((e) => e.id === "e2")?.code).toMatch(/^V/);
     expect(employees.every((e) => e.resourceType === "employee")).toBe(true);
   });
 });

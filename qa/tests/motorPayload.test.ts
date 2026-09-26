@@ -271,7 +271,13 @@ describe("STAFF – ingen syntetisk personal", () => {
     const employees = employeesOf(7);
     expect(employees.length).toBe(5);
     expect(employees.map((e) => e.id)).toEqual(["e1", "e2", "e3", "e4", "e5"]);
-    expect(employees.map((e) => e.name)).toEqual(["Topas", "Turmalin", "Jade", "Bärnsten", "Ametist"]);
+    expect(employees.map((e) => e.name)).toEqual([
+      "Medarbetare 1",
+      "Medarbetare 2",
+      "Medarbetare 3",
+      "Medarbetare 4",
+      "Medarbetare 5",
+    ]);
   });
 
   it("STAFF-B: stort kundbehov skapar inga extra personer", () => {
@@ -299,7 +305,7 @@ describe("STAFF – ingen syntetisk personal", () => {
   it("STAFF-D: payload klonar inte första personen till nya resurser", () => {
     const importerade = tillMedarbetare().map((m) => m.namn);
     const employees = employeesOf(28);
-    expect(employees.map((e) => e.name)).toEqual(importerade);
+    expect(employees.map((e) => e.name)).toEqual(importerade.map((_, i) => `Medarbetare ${i + 1}`));
     expect(new Set(employees.map((e) => e.id)).size).toBe(employees.length);
   });
 

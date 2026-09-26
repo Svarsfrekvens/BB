@@ -84,7 +84,7 @@ describe("natt, jour och närvaro är skilda krav", () => {
       timkostnad: 270,
       schemaPass: galaxenPass,
     });
-    const e = (r.payload.employees as { name: string; night: boolean; jour: boolean }[]).find((x) => x.name === "Turmalin");
+    const e = (r.payload.employees as { id: string; night: boolean; jour: boolean }[]).find((x) => x.id === "e1");
     expect(e?.jour).toBe(true);
     expect(e?.night).toBe(false);
     expect(harHärleddJour(null, "Turmalin", jourNamnFranSchema(galaxenPass))).toBe(true);

@@ -1,6 +1,8 @@
 /* ------------------------------------------------------------------ *
  * Översätter appens underlag till optimeringsmotorns dataformat.
  * Ingen beräkning sker här – bara omformning av redan inläst data.
+ * Personnamn och insatstitlar ersätts med neutrala etiketter i
+ * utgående payload; lokala kartor behåller visningsnamn.
  * ------------------------------------------------------------------ */
 
 import type { Insats } from "./typer";
@@ -59,6 +61,40 @@ function normKompetens(v: unknown) {
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "");
+}
+
+/** Kända tekniska koder skickas oförändrade. Övriga får körningslokal `kompetens:N`. */
+const TILLATNA_KOMPETENSER = new Set(["undersköterska", "delegering", "samordnare", "sjuksköterska"]);
+const KUND_KOMPETENS = /^kund:k\d+$/;
+
+function skapaKompetensMappare() {
+  const alias = new Map<string, string>();
+  return (v: unknown): string | null => {
+    const raw = String(v ?? "").trim();
+    if (!raw) return null;
+    if (KUND_KOMPETENS.test(raw)) return raw;
+    const nyckel = normKompetens(raw);
+    if (!nyckel) return null;
+    if (TILLATNA_KOMPETENSER.has(nyckel)) return nyckel;
+    const finns = alias.get(nyckel);
+    if (finns) return finns;
+    const kod = `kompetens:${alias.size + 1}`;
+    alias.set(nyckel, kod);
+    return kod;
+  };
+}
+
+function rensaSkills(lista: unknown, koda: (v: unknown) => string | null): string[] {
+  if (!Array.isArray(lista)) return [];
+  const ut: string[] = [];
+  const sett = new Set<string>();
+  for (const x of lista) {
+    const k = koda(x);
+    if (!k || sett.has(k)) continue;
+    sett.add(k);
+    ut.push(k);
+  }
+  return ut;
 }
 
 export type Passmall = { id: string; type: string; start: string; end: string; breaks: { offset: number; minutes: number }[]; skills: string[] };
@@ -404,7 +440,7 @@ export function byggMotorPayload(opts: {
     if (!kundNr.has(nyckel)) {
       const nr = kundNr.size + 1;
       kundNr.set(nyckel, nr);
-      customers.push({ id: `k${nr}`, code: `Kund ${nr}`, name: nyckel, active: true });
+      customers.push({ id: `k${nr}`, code: `Kund ${nr}`, name: `Kund ${nr}`, active: true });
     }
     return `k${kundNr.get(nyckel)}`;
   };
@@ -452,7 +488,7 @@ export function byggMotorPayload(opts: {
     interventions.push({
       id,
       customerId: kundId(String(r.kund || "Gemensamt")),
-      name: String(r.insats || "Insats"),
+      name: `Insats ${interventions.length + 1}`,
       type: flexibel ? "flexible" : "fixed",
       minutes: minuter,
       doubleStaff: Boolean(r.tvaPersoner),
@@ -599,7 +635,7 @@ export function byggMotorPayload(opts: {
     return {
       id,
       code,
-      name: m.namn,
+      name: `Medarbetare ${i + 1}`,
       resourceType: m.resourceType === "temp_pool" ? "temp_pool" : tillfallig ? "temporary" : "employee",
       ssg,
       ssgWindows: tillfallig ? [] : ssgWindows(Number(m.grad) || 100, villkor, from, to),
@@ -648,7 +684,7 @@ export function byggMotorPayload(opts: {
       interventions.push({
         id,
         customerId: cid,
-        name: a.namn,
+        name: `Insats ${interventions.length + 1}`,
         type: "flexible",
         minutes: minuter,
         doubleStaff: false,
@@ -754,7 +790,7 @@ export function byggMotorPayload(opts: {
       end: slut,
       type: p.jour ? "jour" : typAvStart(start),
       kod: p.kod || (p.jour ? "Jo" : "Ar"),
-      rowLabel: p.rad || p.namn,
+      rowLabel: `Öppet pass ${vacantShifts.length + 1}`,
       source: "medvind",
       origin: "fore",
     });
@@ -775,14 +811,14 @@ export function byggMotorPayload(opts: {
   for (const m of personalKalla) {
     forbudPerNamn.set(m.namn, forbudnaKunder(((m as Medarbetare).villkor || []) as MedarbetarVillkor[], from, to));
   }
-  for (const e of employees) {
-    const forbud = forbudPerNamn.get(String(e.name)) || [];
+  employees.forEach((e, i) => {
+    const forbud = forbudPerNamn.get(personalKalla[i]?.namn || "") || [];
     for (const [kundNamn, nr] of kundNr) {
       if (forbud.includes(kundNamn)) continue;
       const sk = kundSkill(`k${nr}`);
       if (!e.skills.includes(sk)) e.skills.push(sk);
     }
-  }
+  });
 
   const saknarKontakt = kunderUtanKontakt(
     [...kundNr.keys()].filter((n) => !/^gemensam/i.test(n)),
@@ -793,6 +829,22 @@ export function byggMotorPayload(opts: {
     varningar.push(
       `${saknarKontakt.length} kund${saknarKontakt.length > 1 ? "er" : ""} saknar kontaktperson medan en kontaktpersonsaktivitet är aktiv.`,
     );
+  }
+
+  const kodaKompetens = skapaKompetensMappare();
+  interventions.forEach((insats, i) => {
+    insats["name"] = `Insats ${i + 1}`;
+    insats["skills"] = rensaSkills(insats["skills"], kodaKompetens);
+  });
+  for (const e of employees) {
+    e.skills = rensaSkills(e.skills, kodaKompetens);
+    e.skillWindows = (e.skillWindows || [])
+      .map((w) => ({ ...w, skill: kodaKompetens(w.skill) || "" }))
+      .filter((w) => w.skill);
+  }
+  for (const t of mallar) t.skills = rensaSkills(t.skills, kodaKompetens);
+  for (const s of boundaryShifts) {
+    if (Array.isArray(s["skills"])) s["skills"] = rensaSkills(s["skills"], kodaKompetens);
   }
 
   const payload: MotorPayload = {

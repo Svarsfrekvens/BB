@@ -60,10 +60,10 @@ describe("arbetstidsmodell i payload och visning", () => {
     };
     expect(wp.defaultWorkTimeModelId).toBe(DEFAULT_WORK_TIME_MODEL_ID);
     expect(wp.workTimeModels.map((m) => m.id)).toEqual(expect.arrayContaining(STANDARD_WORK_TIME_MODELS.map((m) => m.id)));
-    const emps = r.payload.employees as { name: string; workTimeModelId?: string }[];
+    const emps = r.payload.employees as { id: string; name: string; workTimeModelId?: string }[];
     const ordinarie = emps.filter((e) => !String(e.name).startsWith("Extra"));
-    const alfa = ordinarie.find((e) => e.name === "Alfa");
-    const beta = ordinarie.find((e) => e.name === "Beta");
+    const alfa = ordinarie.find((e) => e.id === "e1");
+    const beta = ordinarie.find((e) => e.id === "e2");
     expect(alfa?.workTimeModelId).toBe("helgfri-40");
     expect(beta?.workTimeModelId).toBeUndefined();
     expect((r.payload.rules as { maxWeeklyHours: number }).maxWeeklyHours).toBe(48);
@@ -79,7 +79,7 @@ describe("arbetstidsmodell i payload och visning", () => {
       timkostnad: 270,
       heltidPerNamn: { Legacy: 36.33 },
     });
-    const emps = (r.payload.employees as { name: string; workTimeModelId?: string }[]).filter((e) => e.name === "Legacy");
+    const emps = (r.payload.employees as { id: string; workTimeModelId?: string }[]).filter((e) => e.id === "e1");
     expect(emps[0]?.workTimeModelId).toBeUndefined();
     const wp = r.payload.workplace as {
       workTimeModels: { id: string; weeklyMinutes: number }[];
@@ -103,7 +103,7 @@ describe("arbetstidsmodell i payload och visning", () => {
       timkostnad: 270,
       heltidPerNamn: { Nattmått: 36.33 },
     });
-    const emp = (r.payload.employees as { name: string; workTimeModelId?: string }[]).find((e) => e.name === "Nattmått");
+    const emp = (r.payload.employees as { id: string; workTimeModelId?: string }[]).find((e) => e.id === "e1");
     expect(emp?.workTimeModelId).toBe("standig-natt-36-20");
     const wp = r.payload.workplace as {
       workTimeModels: { id: string; weeklyMinutes: number }[];
@@ -128,8 +128,8 @@ describe("arbetstidsmodell i payload och visning", () => {
       dagar: 7,
       timkostnad: 270,
     });
-    const emps = (r.payload.employees as { name: string; workTimeModelId?: string }[]).filter(
-      (e) => e.name === "Natt" || e.name === "Dag",
+    const emps = (r.payload.employees as { id: string; workTimeModelId?: string }[]).filter(
+      (e) => e.id === "e1" || e.id === "e2",
     );
     expect(emps.every((e) => !e.workTimeModelId)).toBe(true);
   });

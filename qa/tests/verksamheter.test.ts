@@ -85,9 +85,10 @@ describe("samma motor för tre verksamhetsprofiler", () => {
     expect(b.payload.schemaVersion).toBe(1);
     expect(c.payload.schemaVersion).toBe(1);
     const insC = (c.payload.interventions as { name: string; requiredEmployeeId?: string }[]) || [];
-    expect(insC.some((i) => i.name === "Veckoavstämning kund" && i.requiredEmployeeId === "e1")).toBe(true);
-    const insInom = (utanSeparat.payload.interventions as { name: string }[]) || [];
-    expect(insInom.some((i) => i.name === "Veckoavstämning kund")).toBe(false);
+    expect(insC.some((i) => i.requiredEmployeeId === "e1")).toBe(true);
+    expect(insC.some((i) => i.name === "Veckoavstämning kund")).toBe(false);
+    const insInom = (utanSeparat.payload.interventions as { requiredEmployeeId?: string }[]) || [];
+    expect(insInom.some((i) => i.requiredEmployeeId)).toBe(false);
   });
 
   it("datumstyrd SSG och kundförbud går in i samma payload utan verksamhetsgren", () => {
