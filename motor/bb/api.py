@@ -66,7 +66,8 @@ async def payload(request):
 @app.get('/api/health')
 async def health():
     import importlib.util
-    return dict(ready=importlib.util.find_spec('ortools') is not None,storage='session-and-excel',limits=reported_limits())
+    from .flora_api import capabilities
+    return dict(ready=importlib.util.find_spec('ortools') is not None,storage='session-and-excel',limits=reported_limits(),flora=capabilities())
 
 
 @app.post('/api/validate')
@@ -132,3 +133,8 @@ async def read_optimize_job(job_id:str):
 @app.get('/')
 async def index():
     return {'service':'Bemanningsbalans optimeringsmotor','status':'ok','health':'/api/health','docs':'/docs'}
+
+
+# Additive integration: preserve the pilot endpoints, authentication and queue.
+from .flora_api import router as flora_router
+app.include_router(flora_router)
