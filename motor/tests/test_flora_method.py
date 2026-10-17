@@ -100,9 +100,91 @@ class FloraMethodTest(unittest.TestCase):
               dict(id='source-night-03',person='employee-X',start=1830,end=1890,code='Ar',type='AKTIVT_ARBETE')]
         c['references']['import']['segments']=copy.deepcopy(rows);c['fixed_segments']=copy.deepcopy(rows);c['candidates']=[]
         c['needs']=[];c['source_needs']=[]
-        checked=validate_case(c,dict(segments=rows,breaks=[],placements=[],temporary_unit_reassignments=[]))
+        out=solve_case(c,seconds=2,workers=1)
+        self.assertEqual(out['solver_status'],'OPTIMAL')
+        checked=out['validation']
+        self.assertEqual(checked['checked_status'],'PASS')
         self.assertNotIn('whole_occasion_under4h',{v['rule'] for v in checked['violations']})
         self.assertEqual(checked['details']['people']['employee-X']['jour_P2_minutes'],450)
+
+    def test_original_fixed_whole_duty_below_four_hours_is_infeasible(self):
+        c=copy.deepcopy(self.case)
+        row=dict(id='source-short-01',person='employee-X',start=600,end=780,
+                 code='Ar',type='AKTIVT_ARBETE')
+        c['staff'][0]['target_net']=180
+        c['references']['import']['segments']=[copy.deepcopy(row)]
+        c['fixed_segments']=[copy.deepcopy(row)];c['candidates']=[]
+        out=solve_case(c,seconds=2,workers=1)
+        self.assertEqual(out['solver_status'],'INFEASIBLE')
+        self.assertEqual(out['schedule']['segments'],[])
+        self.assertIsNone(out['after']['ordinary_net_minutes'])
+        self.assertFalse(out['business_schedule_approved'])
+
+    def test_original_reassignable_whole_duty_below_four_hours_is_infeasible(self):
+        for ordinary_recipient in (False,True):
+            with self.subTest(ordinary_recipient=ordinary_recipient):
+                c=copy.deepcopy(self.case)
+                row=dict(id='source-short-01',person='employee-X',start=600,end=780,
+                         code='Ar',type='AKTIVT_ARBETE')
+                c['staff'][0].update(ordinary=False,target_net=None)
+                c['references']['import']['segments']=[copy.deepcopy(row)]
+                if ordinary_recipient:
+                    recipient=copy.deepcopy(self.case['staff'][0])
+                    recipient.update(id='employee-Y',target_net=180)
+                    c['staff'].append(recipient)
+                    # Its imported three-hour reference forces the unit to the
+                    # ordinary recipient; keeping its original owner cannot
+                    # satisfy the ordinary per-person net constraint.
+                    c['references']['import']['segments'].append(
+                        dict(row,id='recipient-reference-01',person='employee-Y'))
+                c['fixed_segments']=[copy.deepcopy(row)];c['candidates']=[]
+                c['reassignable_temporary_units']=[dict(id='source-short',original_person='employee-X',
+                                                       start=600,end=780,rows=[copy.deepcopy(row)],
+                                                       segment_ids=[row['id']],ar_p2_minutes=180)]
+                out=solve_case(c,seconds=2,workers=1)
+                self.assertEqual(out['solver_status'],'INFEASIBLE')
+                self.assertEqual(out['schedule']['segments'],[])
+                self.assertFalse(out['business_schedule_approved'])
+
+    def test_original_whole_duty_of_exactly_four_hours_remains_feasible(self):
+        for reassignable in (False,True):
+            with self.subTest(reassignable=reassignable):
+                c=copy.deepcopy(self.case)
+                row=dict(id='source-four-01',person='employee-X',start=600,end=840,
+                         code='Ar',type='AKTIVT_ARBETE')
+                c['references']['import']['segments']=[copy.deepcopy(row)]
+                c['fixed_segments']=[copy.deepcopy(row)];c['candidates']=[]
+                if reassignable:
+                    c['staff'][0].update(ordinary=False,target_net=None)
+                    c['reassignable_temporary_units']=[dict(id='source-four',original_person='employee-X',
+                                                           start=600,end=840,rows=[copy.deepcopy(row)],
+                                                           segment_ids=[row['id']],ar_p2_minutes=240)]
+                out=solve_case(c,seconds=2,workers=1)
+                self.assertEqual(out['solver_status'],'OPTIMAL')
+                self.assertEqual(out['validation']['checked_status'],'PASS')
+                self.assertEqual(out['after']['fully_covered_needs'],1)
+                self.assertTrue(any(all(segment.get(key)==value for key,value in row.items())
+                                    for segment in out['raw_solution']['segments']))
+
+    def test_short_historical_and_incoming_duties_are_preserved_not_replanned(self):
+        for start,end in ((-840,-660),(-120,60)):
+            with self.subTest(start=start,end=end):
+                c=copy.deepcopy(self.case)
+                c['candidates'][0].update(day=1,lo=2340,hi=2580)
+                c['references']['import']['segments'][0].update(start=2340,end=2580)
+                for needs in (c['needs'],c['source_needs']):
+                    needs[0].update(domains=[[2340,2340]],original=2340)
+                history=dict(id='source-history-01',person='employee-X',start=start,end=end,
+                             code='Ar',type='AKTIVT_ARBETE')
+                c['references']['import']['segments'].append(copy.deepcopy(history))
+                c['fixed_segments'].append(copy.deepcopy(history))
+                c['staff'][0]['target_net']=240+max(0,end)
+                out=solve_case(c,seconds=2,workers=1)
+                self.assertEqual(out['solver_status'],'OPTIMAL')
+                self.assertEqual(out['validation']['checked_status'],'PASS')
+                self.assertEqual(out['after']['fully_covered_needs'],1)
+                self.assertTrue(any(all(row.get(key)==value for key,value in history.items())
+                                    for row in out['raw_solution']['segments']))
 
     def test_confirmed_absence_blocks_work_without_dropping_hours(self):
         c=copy.deepcopy(self.case);c['integration']['absence_mode']='preserve'
