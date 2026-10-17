@@ -39,3 +39,9 @@ Läs `LOVABLE-INTEGRATION.md` för kopplingen till Lovable.
 Modellen måste provas mot verkliga men avidentifierade scheman och SeKoia-underlag. Frösunda behöver fastställa alla regler, passmallar och prioriteringar. F-01 minst nio fridagar per 28 dagar är hård; arbetsdag är passets workDayDate (störst tjänstgöringstid), inte kalenderöverlapp. Helgtjänstgöring, lokala avtal och individuella villkor behöver fortsatt granskas.
 
 Motorn garanterar att ett returnerat förslag följer de regler som faktiskt finns i koden och passerar validatorn. Den kan inte garantera att alla verksamhetsregler är rätt beskrivna eller fullständiga utan verksamhetens granskning.
+
+## Gemensamt verksamhetsstöd
+
+Den verksamhetsneutrala API-vägen, profilkopplingen och ansvaret mellan Lovable
+och Render beskrivs i [SHARED-ENGINE.md](SHARED-ENGINE.md). Uppladdade filer
+ändrar inte regler automatiskt; varje verksamhet har en egen granskad profil.

@@ -25,7 +25,13 @@ router = APIRouter(lifespan=lifespan)
 
 
 def capabilities():
-    return dict(jobs=True, profile_configured=bool(os.environ.get('BB_FLORA_PROFILE')),
+    from .flora_jobs import load_profile, JobInputError
+    try:
+        profile, _ = load_profile()
+        readable = profile.get('schema_version') == 'bb-analysis-input-profile/1.0'
+    except JobInputError:
+        readable = False
+    return dict(jobs=True, profile_configured=readable,
                 remote_enabled=os.environ.get('BB_FLORA_REMOTE_ENABLED') == '1')
 
 
@@ -63,6 +69,9 @@ async def create_flora_job(request: Request):
     owner = job_owner(request)
     try:
         body = normalize_request(await json_body(request))
+        metadata = body['input']['metadata']
+        if metadata.get('schema_version') == 'bb-input/1.0' or metadata.get('business_id') is not None:
+            raise JobInputError('Verksamhetskopplat underlag ska skickas till /api/engine/jobs med en egen beslutsprofil.')
         client_key = request.headers.get('idempotency-key') or None
         if client_key and not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,160}', client_key):
             raise JobInputError('Ogiltig körningsnyckel.')

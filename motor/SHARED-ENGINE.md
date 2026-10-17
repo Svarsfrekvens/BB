@@ -1,0 +1,107 @@
+# Gemensam motor för verksamheterna
+
+Alla verksamheter använder samma importkontroll, solver, oberoende validator och
+beständiga jobbhantering. Uppladdningar är underlag, inte automatisk träning:
+nya exempel ska leda till granskade kodförbättringar och regressionstester.
+Ingen uppladdning ändrar en annan verksamhets beslut eller en sparad profil.
+
+## Vad som är implementerat
+
+- `GET /api/engine/capabilities`: status för den verifierade arbetsytan.
+- `POST /api/engine/jobs`: granska normaliserat underlag, välj rätt profil och köa.
+- `GET /api/engine/jobs/{id}`: läs endast samma arbetsytas och användnings körning.
+- `bb-input/1.0`: verksamhetsneutralt namn på den befintliga inmatningsstrukturen.
+  `flora-bb-input/1.0` stöds för kompatibilitet, med samma explicita koppling.
+- Resultatets `provenance.engine_context` dokumenterar verksamhet, profil och
+  användning. `automatic_learning` är alltid `false`.
+
+Gamla `/api/flora/jobs` och `/api/optimize` finns kvar med tidigare kontrakt.
+De nya skydden och kopplingarna gäller den gemensamma `/api/engine`-vägen.
+Lovables befintliga Flora-proxy växlar inte API-väg av denna backendändring.
+
+## Verifierad arbetsyta, separata profiler
+
+Appservern kontrollerar inloggning och verksamhetsbehörighet före varje anrop.
+Den sätter `Authorization: Bearer <serverhemlighet>` och `X-BB-Job-Owner`.
+Ägarvärdet ska vara det stabila arbetsyte-/organisations-ID som servern har
+verifierat, exempelvis `org:<organisationens UUID>`. Webbläsaren får aldrig
+bestämma ett betrott owner-värde eller få motorns serverhemlighet.
+
+`BB_ENGINE_REMOTE_ENABLED=1` aktiverar den gemensamma API-vägen för externa
+serveranrop. `BB_ENGINE_PROFILE_REGISTRY` anger en privat JSON-fil på servern:
+
+```json
+{
+  "schema_version": "bb-business-profiles/1.0",
+  "workspaces": {
+    "org:VERIFIERAT-ID": {
+      "business_id": "STABILT-VERKSAMHETS-ID",
+      "data_use": "development",
+      "profile_path": "/var/data/profiles/verksamhet.json"
+    }
+  }
+}
+```
+
+Lägg in en uttrycklig post för varje godkänd arbetsyta. Inga verkliga
+organisations-ID eller profiler uppfinns av implementationen. `development`
+och `operational` ger olika jobbutrymmen även för samma verksamhets-ID.
+En produktionsarbetsyta ska ha en separat granskad driftprofil.
+
+Varje profil har det befintliga formatet `bb-analysis-input-profile/1.0` med
+verksamhetens egna personkopplingar, datum, insatsbeslut, tillgänglighetsfönster,
+nettomål och regelkonfiguration. Den ska dessutom ha:
+
+```json
+{
+  "business_id": "STABILT-VERKSAMHETS-ID",
+  "data_use": "development",
+  "profile_id": "GRANSKAD-PROFILVERSION",
+  "review_provenance": {
+    "source": "Beslutsunderlag och versionsreferens",
+    "reviewed_at": "2026-10-18"
+  }
+}
+```
+
+Detta är bindningsfält, inte en komplett beräkningsprofil. Samma `business_id`
+och `data_use` krävs i underlagets `metadata`. Profilen väljs aldrig från en
+sökväg, ett namn eller ett profilobjekt som skickas av klienten. Saknad profil
+eller felkoppling stoppar just den arbetsytans begäran; Flora används aldrig
+som generell reservprofil. Registrerade profiler ligger utanför Git-repot.
+
+## Import och kända begränsningar
+
+Appens import behöver läsa verkliga Medvind-/Sekoia-exporter och normalisera
+personer, kunder, tidssegment, behov och källreferenser till BB-kontraktet.
+Motorn tar JSON, inte råa XLSX-filer. Nytt filformat kräver en importerare;
+den här ändringen implementerar inte en ny Excel-import i Lovable.
+
+Befintliga profilkontroller gäller: nya/ändrade personkopplingar, perioder,
+segment-ID, behovs-ID eller semantiska beslut måste granskas innan de används.
+Tider och durationer tas från det aktuella underlaget inom profilens granskade
+ramar. Profilen får inte innehålla ett gammalt solverresultat som facit.
+Det finns ingen automatisk överföring av Floras lokala regler till Galaxen
+eller Vintergatan.
+
+Den delade metoden har fortfarande dokumenterade metodbegränsningar: bl.a.
+angränsande 28-dagarsperioder, inga DST-skiften i väggtidsmodellen och granskad
+behörighet för insatserna. Full dygnsvila, undantagens tillämplighet, praktisk
+samplanering, full arbetstidsavräkning och okända periodkanter är fortsatt
+öppna kontroller. Gemensamt API betyder inte fullständigt regelgodkännande.
+
+## Render och verifiering
+
+Starta med `cd motor && python -m bb.startup && python -m uvicorn bb.api:app
+--host 0.0.0.0 --port $PORT`. Startmodulen försöker köra den befintliga privata
+Flora-installationen om den är konfigurerad. Ett fel där stoppar inte andra
+verksamheters profiler. Installationsutdata loggas inte. `/` visar liveness;
+arbetsytans capabilities visar om dess profil kan läsas. Saknade profiler är
+uttryckligen NOT_CONFIGURED, aldrig ett grönt beredskapsbesked.
+
+`tests/test_business_engine.py` kör tre syntetiska verksamheter genom verklig
+import, solver, validator och jobbdatabas med samma person-/kund-ID men olika
+behov och dygnsbryt. Testerna verifierar separata resultat, profilval,
+behörighet, idempotens, ändrade underlag, bevarade profiler och UNKNOWN-status.
+Det är regressionstester för gemensam kod; de bevisar inte att tre verkliga
+verksamheters produktionsunderlag är verifierade eller anslutna.

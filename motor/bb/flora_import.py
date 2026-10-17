@@ -247,8 +247,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         _fail("En indataprofil får inte innehålla sparade solverresultat eller startlösningar.")
     raw = deepcopy({k: v for k, v in raw_input.items() if k != "source_archive"})
     md = raw.get("metadata") or {}
-    if md.get("schema_version") != "flora-bb-input/1.0":
-        _fail("Underlaget måste vara flora-bb-input/1.0 från appens import.")
+    if md.get("schema_version") not in ("flora-bb-input/1.0", "bb-input/1.0"):
+        _fail("Underlaget måste vara bb-input/1.0 eller flora-bb-input/1.0 från appens import.")
     timezone = md.get("timezone")
     if not timezone:
         _fail("metadata.timezone saknas. Tidszon får inte gissas.")

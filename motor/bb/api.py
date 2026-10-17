@@ -138,3 +138,7 @@ async def index():
 # Additive integration: preserve the pilot endpoints, authentication and queue.
 from .flora_api import router as flora_router
 app.include_router(flora_router)
+
+# Shared API with explicit server-owned business/profile bindings.
+from .engine_api import router as engine_router
+app.include_router(engine_router)

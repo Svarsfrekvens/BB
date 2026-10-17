@@ -1,0 +1,100 @@
+"""Shared, workspace-scoped engine API. Authentication stays in bb.api.
+
+The app server must authenticate the user and authorize workspace membership
+before sending X-BB-Job-Owner. Never put the service token in browser code.
+"""
+import os
+import re
+
+from fastapi import APIRouter, HTTPException, Request
+
+from .business_profiles import (BusinessProfileError, INPUT_SCHEMAS, binding_for,
+                                profile_for, scope_for)
+from .flora_api import json_body
+from .flora_jobs import IdempotencyConflict, JobInputError, get_manager, normalize_request
+
+router = APIRouter()
+
+
+def verified_owner(request):
+    local = request.client and request.client.host in ('127.0.0.1', '::1', 'testclient')
+    if not local and os.environ.get('BB_ENGINE_REMOTE_ENABLED') != '1':
+        raise HTTPException(403, 'Den gemensamma motorn är inte aktiverad för externa anrop.')
+    owner = request.headers.get('x-bb-job-owner', '')
+    if not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,160}', owner):
+        raise HTTPException(403, 'Serverns verifierade arbetsyta saknas.')
+    if not local and not os.environ.get('BB_API_TOKEN'):
+        raise HTTPException(403, 'Beräkningstjänsten saknar skyddad anslutning.')
+    return owner
+
+
+def profile_error(exc):
+    return HTTPException(exc.status, {'code': exc.code, 'message': str(exc)})
+
+
+@router.get('/api/engine/capabilities')
+async def capabilities(request: Request):
+    owner = verified_owner(request)
+    report = dict(schema_version='bb-engine-capabilities/1.0', input_schemas=list(INPUT_SCHEMAS),
+                  shared_engine=True, automatic_learning=False,
+                  workspace_scoped_profiles=True, raw_excel_import=False,
+                  review_required=True, profile_status='NOT_CONFIGURED')
+    try:
+        binding = binding_for(owner)
+        # Read the profile as well: an environment variable alone is not readiness.
+        _, _, _, context = profile_for(owner, {'input': {'metadata': binding}})
+        report.update(business_id=context['business_id'], data_use=context['data_use'],
+                      profile_status='CONFIGURED_INPUT_REVIEW_REQUIRED')
+    except BusinessProfileError as exc:
+        report.update(profile_error_code=exc.code, profile_message=str(exc))
+    return report
+
+
+@router.post('/api/engine/jobs', status_code=202)
+async def create_job(request: Request):
+    owner = verified_owner(request)
+    try:
+        body = normalize_request(await json_body(request))
+        profile, profile_hash, scope, context = profile_for(owner, body)
+        # Fail changed dates/IDs/missing decisions before a job is queued. This
+        # pure adapter never runs the solver or changes the submitted workbook.
+        from .flora_import import prepare_case
+        from .flora import check_case
+        case = prepare_case(body['input'], profile, body['scenario'])
+        check_case(case)
+        client_key = request.headers.get('idempotency-key') or None
+        if client_key and not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,160}', client_key):
+            raise JobInputError('Ogiltig körningsnyckel.')
+        body['engine_context'] = context  # server-generated; client cannot override
+        manager = get_manager()
+        job, created = manager.store.submit(scope, body, profile, profile_hash, client_key)
+        manager.wake()
+        return {**job, 'deduplicated': not created, 'engine_context': context}
+    except BusinessProfileError as exc:
+        raise profile_error(exc) from exc
+    except IdempotencyConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except JobInputError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(422, {'code': 'INPUT_REVIEW_REQUIRED', 'message': str(exc)}) from exc
+    except (KeyError, TypeError, OverflowError) as exc:
+        raise HTTPException(422, {'code': 'INPUT_REVIEW_REQUIRED',
+                                 'message': 'Underlaget eller beslutsprofilen är ofullständig.'}) from exc
+
+
+@router.get('/api/engine/jobs/{job_id}')
+async def read_job(job_id: str, request: Request):
+    owner = verified_owner(request)
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
+        raise HTTPException(404, 'Körningen finns inte i den här arbetsytan.')
+    try:
+        scope = scope_for(owner, binding_for(owner))
+        job = get_manager().store.get(job_id, scope)
+    except BusinessProfileError as exc:
+        raise profile_error(exc) from exc
+    except JobInputError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not job:
+        raise HTTPException(404, 'Körningen finns inte i den här arbetsytan.')
+    return job

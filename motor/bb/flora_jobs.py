@@ -45,7 +45,8 @@ def digest(value) -> str:
 def method_fingerprint() -> str:
     """Cache identity follows actual implementation, not only its display name."""
     root = Path(__file__).resolve().parent
-    files = [root / "flora_import.py", *sorted((root / "flora").glob("*.py"))]
+    files = [root / "flora_import.py", root / "business_profiles.py",
+             root / "engine_api.py", root / "flora_jobs.py", *sorted((root / "flora").glob("*.py"))]
     content = hashlib.sha256(METHOD_VERSION.encode())
     for path in files:
         if path.is_file():
@@ -106,8 +107,8 @@ def normalize_request(body: dict) -> dict:
     source = body["input"]
     if source.get("source_archive") is not None:
         raise JobInputError("Originalarkivet ska stanna i webbläsaren. Skicka endast de inlästa uppgifterna.")
-    if not isinstance(source.get("metadata"), dict) or source["metadata"].get("schema_version") != "flora-bb-input/1.0":
-        raise JobInputError("Okänt underlagsformat. Läs in en Flora-rådatafil i BB först.")
+    if not isinstance(source.get("metadata"), dict) or source["metadata"].get("schema_version") not in ("flora-bb-input/1.0", "bb-input/1.0"):
+        raise JobInputError("Okänt underlagsformat. Skicka ett normaliserat BB-underlag från appens import.")
     for field in ("staff", "customers", "schedule_segments", "customer_needs", "business_rules"):
         if not isinstance(source.get(field), list):
             raise JobInputError(f"Underlaget saknar listan {field}.")
@@ -403,7 +404,9 @@ def run_worker(path: str, job_id: str, lease: str):
                                 "profile_hash": row["profile_hash"], "method_version": METHOD_VERSION,
                                 "method_fingerprint": row["method_hash"],
                                 "job_id": job_id, "calculation_seconds": time.monotonic() - started,
-                                "requires_review": True}
+                                "requires_review": True,
+                                "engine_context": request.get("engine_context"),
+                                "automatic_learning": False}
         with store.connect() as con:
             con.execute("UPDATE jobs SET status='succeeded',finished_at=?,result_json=? WHERE id=? AND lease=? AND status='running'",
                         (now(), canonical(result), job_id, lease))

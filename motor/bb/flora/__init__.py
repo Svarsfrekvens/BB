@@ -15,7 +15,7 @@ METHOD = 'joint-shifts-breaks-needs/v1'
 OBJECTIVE_MODES = {'coverage_then_temporary', 'coverage_then_workload_then_temporary'}
 
 
-def _check_case(case):
+def check_case(case):
     """Reject unsupported profiles instead of silently pooling unknown capacity."""
     cfg = case['config']
     required = ['shift_step','break_length','break_threshold','min_work_before_break',
@@ -241,7 +241,7 @@ def solve_case(case, *, seconds=75, workers=2, seed=41, objective_mode='coverage
     if objective_mode not in OBJECTIVE_MODES:raise ValueError('Okänd sökprofil.')
     if type(seconds) not in (int,float) or not 1 <= seconds <= 300:raise ValueError('Tidsbudget ska vara 1–300 sekunder per söknivå.')
     if type(workers) is not int or not 1 <= workers <= 4:raise ValueError('Antal solvertrådar ska vara 1–4.')
-    case=deepcopy(case); _check_case(case)
+    case=deepcopy(case); check_case(case)
     raw=_solve(case, seconds=seconds, workers=workers, seed=seed, det=seconds, objective_mode=objective_mode, progress=progress)
     validation=validate_case(case,raw)
     return _normalize(case,raw,validation)
