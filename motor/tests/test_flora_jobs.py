@@ -58,6 +58,22 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(IdempotencyConflict):
             self.submit(request={**self.request, "seconds": 2}, key="click-1")
 
+    def test_changed_day_boundary_is_a_new_run_with_same_source_hash(self):
+        def request(clock):
+            body=request_fixture()
+            body['settings']={'unit_rules':{'day_boundaries':{'next':{'person-a':{
+                'time':clock,'confirmed_at':'2026-10-17','source':'Explicit decision'}}}}}
+            return normalize_request(body)
+        first_request=request('03:00')
+        self.assertEqual(first_request['scenario']['workspace']['unit_rules']['day_boundaries']['next']['person-a']['time'],'03:00')
+        first,_=self.submit(request=first_request,key='boundary-1')
+        second,created=self.submit(request=request('07:00'),key='boundary-2')
+        self.assertTrue(created)
+        self.assertNotEqual(first['id'],second['id'])
+        self.assertEqual(first['input_hash'],second['input_hash'])
+        with self.assertRaises(IdempotencyConflict):
+            self.submit(request=request('07:00'),key='boundary-1')
+
     def test_second_key_for_same_input_also_binds_its_fingerprint(self):
         job, _ = self.submit(key="click-1")
         same, created = self.submit(key="click-2")

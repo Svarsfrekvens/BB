@@ -189,5 +189,80 @@ class ImportTest(unittest.TestCase):
             with self.subTest(scenario=scenario):
                 with self.assertRaises(FloraImportError):prepare_case(raw,profile,scenario)
 
+    def test_individual_period_day_boundaries_preserve_source_and_input(self):
+        raw,profile=sample()
+        second=deepcopy(raw["staff"][0]);second.update(person_id="person-b",alias="Test B")
+        raw["staff"].append(second)
+        profile["staff"]["person-b"]=deepcopy(profile["staff"]["person-a"])
+        entry=lambda clock:dict(time=clock,confirmed_at="2026-10-17",source="Beslut av testansvarig")
+        scenario=dict(workspace=dict(unit_rules=dict(day_boundaries={
+            "next":{"person-b":entry("23:59"),"person-a":entry("03:00")},
+            "history":{"person-a":entry("00:00")}})))
+        raw_before,profile_before,scenario_before=deepcopy((raw,profile,scenario))
+        result=prepare_case(raw,profile,scenario)
+        params=result["daily_rest_parameters"]
+        self.assertEqual(params["period_id"],"next")
+        self.assertEqual(params["mode"],"FIXED_PER_PERSON_AND_PERIOD")
+        self.assertEqual(params["missing_person_ids"],[])
+        self.assertEqual(params["status"],"BOUNDARIES_RECORDED_CHECK_NOT_IMPLEMENTED")
+        self.assertEqual(params["validation_status"],"UNKNOWN")
+        self.assertEqual([(r["period_id"],r["person_id"],r["minute_of_day"])
+                          for r in params["boundaries"]],
+                         [("history","person-a",0),("next","person-a",180),("next","person-b",1439)])
+        record=params["boundaries"][1]
+        self.assertEqual(record["time"],"03:00")
+        self.assertEqual(record["source"],"Beslut av testansvarig")
+        self.assertEqual(record["confirmed_at"],"2026-10-17")
+        self.assertEqual((record["period_start"],record["period_end"],record["timezone"]),
+                         ("2027-01-29","2027-02-25","Europe/Stockholm"))
+        self.assertEqual((raw,profile,scenario),(raw_before,profile_before,scenario_before))
+        self.assertEqual(result["integration"]["scenario"],scenario_before)
+        self.assertEqual(result["integration"]["input_sha256"],prepare_case(raw,profile)["integration"]["input_sha256"])
+
+    def test_day_boundary_legacy_and_missing_current_period_never_default(self):
+        raw,profile=sample()
+        for scenario in ({},dict(workspace=dict(unit_rules=dict(day_boundaries={}))),
+                         dict(workspace=dict(unit_rules=dict(day_boundaries={"history":{
+                             "person-a":dict(time="09:00",confirmed_at="2026-10-17",source="Historik")}})))):
+            with self.subTest(scenario=scenario):
+                params=prepare_case(raw,profile,scenario)["daily_rest_parameters"]
+                self.assertEqual(params["missing_person_ids"],["person-a"])
+                self.assertEqual(params["status"],"MISSING_BOUNDARIES")
+                self.assertEqual(params["validation_status"],"UNKNOWN")
+                self.assertFalse(any(r["period_id"]=="next" for r in params["boundaries"]))
+
+    def test_invalid_day_boundary_times_dates_and_provenance_are_rejected(self):
+        good=dict(time="03:00",confirmed_at="2026-10-17",source="Verksamhetsbeslut")
+        bad_times=(None,"",True,180,"3:00","24:00","03:60"," 03:00","03:00 ","03:00:00","０３:００")
+        bad_dates=(None,"",True,"2026-02-29","2026-13-01","2026-1-01","20261017","2026-10-17T00:00:00Z")
+        bad_sources=(None,"",True," \t\n")
+        for key,values in (("time",bad_times),("confirmed_at",bad_dates),("source",bad_sources)):
+            for value in values:
+                with self.subTest(key=key,value=value):
+                    raw,profile=sample()
+                    entry={**good,key:value}
+                    with self.assertRaisesRegex(FloraImportError,"Dygnsbryt"):
+                        prepare_case(raw,profile,dict(workspace=dict(unit_rules=dict(
+                            day_boundaries={"next":{"person-a":entry}}))))
+        raw,profile=sample()
+        leap={**good,"confirmed_at":"2024-02-29"}
+        self.assertEqual(prepare_case(raw,profile,dict(workspace=dict(unit_rules=dict(
+            day_boundaries={"next":{"person-a":leap}}))))["daily_rest_parameters"]["boundaries"][0]["confirmed_at"],"2024-02-29")
+
+    def test_day_boundaries_reject_unknown_ids_shapes_and_daily_overrides(self):
+        good=dict(time="03:00",confirmed_at="2026-10-17",source="Beslut")
+        bad_values=(None,[],"03:00",{"unknown-period":{"person-a":good}},
+                    {"next":{"unknown-person":good}},{"next":[]},
+                    {"next":{"person-a":None}},{"next":{"person-a":"03:00"}},
+                    {"next":{"person-a":{**good,"mode":"floating"}}},
+                    {"next":{"person-a":{**good,"2027-01-30":"04:00"}}},
+                    {"next":{"person-a":{**good,"period_start":"2027-01-30"}}},
+                    {"next":{"person-a":dict(time="03:00",source="Beslut")}})
+        for value in bad_values:
+            with self.subTest(value=value):
+                raw,profile=sample()
+                with self.assertRaisesRegex(FloraImportError,"Dygnsbryt"):
+                    prepare_case(raw,profile,dict(workspace=dict(unit_rules=dict(day_boundaries=value))))
+
 
 if __name__=="__main__": unittest.main()

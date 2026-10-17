@@ -8,10 +8,11 @@ from an older workbook.
 from __future__ import annotations
 
 from copy import deepcopy
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from hashlib import sha256
 import json
 from math import isfinite
+import re
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -110,6 +111,8 @@ def _workspace(scenario: dict, raw: dict, profile: dict) -> None:
                 _fail(f"Personutkast {pid}: ändringen av {key} behöver motorstöd/profilbeslut "
                       "innan körning. Uppgiften ignoreras inte.")
     rules = workspace.get("unit_rules") or {}
+    if not isinstance(rules, dict):
+        _fail("Verksamhetens regelinställningar måste vara ett objekt.")
     freeday = rules.get("freeday")
     if freeday and freeday.get("mode") != "rullande":
         _fail("Arbetskopians fridagsregel avviker från beslutad rullande tillämpning.")
@@ -130,6 +133,57 @@ def _workspace(scenario: dict, raw: dict, profile: dict) -> None:
     for customer, contact in (workspace.get("contacts") or {}).items():
         if contact.get("kp") or contact.get("vice") or contact.get("check") or contact.get("minutes") is not None:
             _fail(f"{customer}: nya kontaktpersonsbeslut behöver motorstöd före körning.")
+
+
+def _day_boundary_parameters(scenario: dict, periods: dict[str, dict],
+                             person_ids: set[str], period_id: str, timezone: str) -> dict:
+    """Record fixed individual boundaries without claiming a rest check exists.
+
+    Omitted boundaries remain unknown. Dates and timezone belong to the verified
+    uploaded periods; a scenario cannot introduce a floating or daily boundary.
+    """
+    rules = (scenario.get("workspace") or {}).get("unit_rules") or {}
+    values = rules.get("day_boundaries", {})
+    if not isinstance(values, dict):
+        _fail("Dygnsbryt ska anges som ett objekt med kända period- och person-ID.")
+    records = []
+    for key, persons in values.items():
+        if key not in periods:
+            _fail(f"Dygnsbrytet avser okänd period {key}; datum får inte gissas.")
+        if not isinstance(persons, dict):
+            _fail(f"Dygnsbryt {key}: personkopplingarna måste vara ett objekt.")
+        for person_id, value in persons.items():
+            label = f"Dygnsbryt {key}/{person_id}"
+            if person_id not in person_ids:
+                _fail(f"{label}: personen saknar en verifierad personkoppling.")
+            if not isinstance(value, dict) or set(value) != {"time", "confirmed_at", "source"}:
+                _fail(f"{label}: ange endast time, confirmed_at och source för ett fast dygnsbryt.")
+            clock = value["time"]
+            if not isinstance(clock, str) or re.fullmatch(r"(?:[01][0-9]|2[0-3]):[0-5][0-9]", clock) is None:
+                _fail(f"{label}: tiden ska anges som HH:MM mellan 00:00 och 23:59.")
+            confirmed = value["confirmed_at"]
+            if not isinstance(confirmed, str) or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", confirmed) is None:
+                _fail(f"{label}: bekräftelsedatum ska anges som ÅÅÅÅ-MM-DD.")
+            try:
+                date.fromisoformat(confirmed)
+            except ValueError:
+                _fail(f"{label}: bekräftelsedatumet finns inte i kalendern.")
+            source = value["source"]
+            if not isinstance(source, str) or not source.strip():
+                _fail(f"{label}: en uttrycklig källa krävs.")
+            records.append(dict(period_id=key, person_id=person_id, time=clock,
+                                minute_of_day=int(clock[:2])*60+int(clock[3:]),
+                                confirmed_at=confirmed, source=source,
+                                period_start=periods[key]["start"], period_end=periods[key]["end"],
+                                timezone=timezone))
+    order = {key: index for index, key in enumerate(periods)}
+    records.sort(key=lambda row: (order[row["period_id"]], row["person_id"]))
+    known = {row["person_id"] for row in records if row["period_id"] == period_id}
+    missing = sorted(person_ids-known)
+    return dict(mode="FIXED_PER_PERSON_AND_PERIOD", period_id=period_id, timezone=timezone,
+                boundaries=records, missing_person_ids=missing,
+                status="MISSING_BOUNDARIES" if missing else "BOUNDARIES_RECORDED_CHECK_NOT_IMPLEMENTED",
+                validation_status="UNKNOWN")
 
 
 def _economic_parameters(scenario: dict, person_ids: set[str]) -> dict:
@@ -223,6 +277,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     staff_raw = _index(raw.get("staff"), "person_id", "Personal")
     if set(staff_raw) != set(profile.get("staff", {})):
         _fail("Personregistret skiljer sig från profilens verifierade personkopplingar.")
+    daily_rest_parameters = _day_boundary_parameters(scenario, periods, set(staff_raw), pid, timezone)
     economic_parameters = _economic_parameters(scenario,set(staff_raw))
     staff = []
     for person_id, decision in profile["staff"].items():
@@ -426,6 +481,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                 workflow_decision=deepcopy(profile.get("workflow_decision",{})),
                 reassignable_temporary_units=units,confirmed_absence_locks=absence_locks,
                 integration=integration,
+                daily_rest_parameters=daily_rest_parameters,
                 economic_parameters=economic_parameters,
                 import_provenance=dict(upload=raw,excluded_segments=excluded,
                                        all_timed_history=[deepcopy(row) for row in segments_raw.values() if minute(row["start"])<0],

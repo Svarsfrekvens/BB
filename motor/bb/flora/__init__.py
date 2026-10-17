@@ -71,6 +71,21 @@ def _check_case(case):
             raise ValueError('Ogiltig kandidat eller personkoppling.')
 
 
+def _daily_rest_unknown(case):
+    parameters = case.get('daily_rest_parameters', {})
+    missing = parameters.get('missing_person_ids')
+    if missing is None:
+        missing = [p['id'] for p in case['staff']]
+    if missing:
+        message = (f'Dygnsbryt saknas för {len(missing)} medarbetare i beräkningsperioden. '
+                   'Vilogap kontrolleras, men full dygnsvila i tillämpliga 24-timmarsperioder är inte implementerad.')
+    else:
+        message = ('Individuella fasta dygnsbryt är registrerade för beräkningsperioden. '
+                   'Full kontroll av dygnsvila i tillämpliga 24-timmarsperioder och undantag är inte implementerad; '
+                   'registreringen innebär inget godkännande.')
+    return {'rule_id':'daily_rest_24h','message':message}
+
+
 def validate_case(case, result):
     """Independent validation with explicit PASS/FAIL/UNKNOWN rule states."""
     raw = result.get('raw_solution',result)
@@ -95,7 +110,7 @@ def validate_case(case, result):
     }
     rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
     unknowns = [
-        {'rule_id':'daily_rest_24h','message':'Referensmetoden kontrollerar vilogap men verifierar inte all dygnsvila i tillämpliga 24-timmarsperioder.'},
+        _daily_rest_unknown(case),
         {'rule_id':'jour_compensation_applicability','message':'Referensprofilens kompensationsantagande och individuella undantag är inte verifierade verksamhetsbeslut.'},
         {'rule_id':'practical_concurrency','message':'Tillåten samplanering verifierar inte praktisk aktiv medverkan, plats eller förflyttning.'},
         {'rule_id':'contract_accounting','message':'Bevarat Ar-netto är inte verifierad full SSG eller frånvaroavräkning.'},
@@ -198,6 +213,7 @@ def _normalize(case, raw, validation):
             'solver':{'status':solver_status,'phases':raw.get('stages',[]),'wall_seconds':raw.get('total_seconds'),'build_seconds':raw.get('build_seconds'),'model':raw.get('model'),'parameters':raw.get('parameters')},
             'assumptions':assumptions,'unassigned_need_ids':[mapped('need',i) for i in sorted(set(needs)-placed)],'raw_solution':raw,
             'cost_effect':_cost(case,before_people,after_people),
+            'daily_rest_parameters':deepcopy(case.get('daily_rest_parameters')),
             'time_accounting':{'before_break_reference':{'kind':'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
