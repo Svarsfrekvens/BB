@@ -193,3 +193,31 @@ as `scenario.workspace.unit_rules.day_boundaries`. They are used only when a
 fresh import has no such local setting. Explicit overrides, including an empty
 object, take precedence. Recording these decisions does not claim a complete
 daily-rest validation.
+# Fixed daily rest, 2026-10-18
+
+The shared method now enforces an uninterrupted 660-minute rest block within
+each fully known fixed 24-hour day, using the current person's recorded
+boundary. It does not substitute an 11-hour inter-duty gap for this check.
+The independent arithmetic returns `daily_rest_24h.json` with each window's
+person, start/end, longest continuous rest, status and reason. Jour, Kl/Öv and
+whole-duty gaps are not qualifying rest. A missing boundary remains UNKNOWN;
+P2 boundary decisions are not extended to adjacent periods.
+
+Combined work/jour occasions remain conditional where exception applicability
+has not been established. The certificate separately measures continuous
+night jour in 22:00–08:00, the 24-hour maximum and uninterrupted rest at least
+equal to the duty span immediately afterwards (Bransch E §5 mom6 b/c reference).
+Numerical PASS does not establish applicable agreement, consistent night-jour
+placement, MBL, special grounds or individual exemption. Other reductions,
+including the nine-hour exception and unforeseen-event compensation, are not
+implicitly enabled. Unsupported rest policies stay UNKNOWN.
+
+The code is shared by all registered businesses. Person IDs, boundaries and
+contract decisions remain in each private business profile. Flora's profile
+never supplies another business's missing rules. Synthetic three-business
+tests cover different boundaries with the same person IDs and isolated jobs.
+Galaxen/Vintergatan still need their own verified profiles before real runs.
+
+Old job records and workspaces are immutable. The method fingerprint changes
+with this code, so a newly requested calculation gets the new check without
+rewriting an old certificate. No automatic new calculation or approval occurs.

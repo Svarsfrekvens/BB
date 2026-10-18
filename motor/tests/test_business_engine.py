@@ -75,6 +75,11 @@ class BusinessEngineTests(unittest.TestCase):
             self.assertEqual(output['rule_policy']['planning_limits']['status'],'NOT_SELECTED')
             expected=self.bodies[business]['scenario']['workspace']['unit_rules']['day_boundaries']['next']['person-a']['time']
             self.assertEqual(output['daily_rest_parameters']['boundaries'][0]['time'],expected)
+            certificate=output['validation']['certificates']['daily_rest_24h.json']
+            self.assertEqual(certificate['version'],'fixed-daily-rest/1.0')
+            self.assertEqual({w['person_id'] for w in certificate['windows']},{'person-a'})
+            self.assertTrue(all(w['start'].endswith(expected) for w in certificate['windows']))
+            self.assertFalse(certificate['other_business_decisions_inherited'])
             foreign=self.client.get('/api/engine/jobs/'+job_id,headers=self.headers('unit-b' if business!='unit-b' else 'unit-c'))
             self.assertEqual(foreign.status_code,404)
             self.assertEqual(self.client.get('/api/flora/jobs/'+job_id,headers=self.headers(business)).status_code,404)

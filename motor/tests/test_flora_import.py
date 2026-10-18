@@ -204,7 +204,7 @@ class ImportTest(unittest.TestCase):
         self.assertEqual(params["period_id"],"next")
         self.assertEqual(params["mode"],"FIXED_PER_PERSON_AND_PERIOD")
         self.assertEqual(params["missing_person_ids"],[])
-        self.assertEqual(params["status"],"BOUNDARIES_RECORDED_CHECK_NOT_IMPLEMENTED")
+        self.assertEqual(params["status"],"BOUNDARIES_RECORDED_PENDING_RESULT_CHECK")
         self.assertEqual(params["validation_status"],"UNKNOWN")
         self.assertEqual([(r["period_id"],r["person_id"],r["minute_of_day"])
                           for r in params["boundaries"]],

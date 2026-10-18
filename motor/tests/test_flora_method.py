@@ -52,7 +52,7 @@ class FloraMethodTest(unittest.TestCase):
         v=validate_case(c,self.output)
         self.assertIn('known_actual_P1_work_missing',{x['rule'] for x in v['violations']})
 
-    def test_recorded_boundaries_remain_unknown_and_are_exported_per_run(self):
+    def test_recorded_boundaries_are_checked_and_unconfirmed_edges_remain_unknown(self):
         c=copy.deepcopy(self.case)
         params=dict(mode='FIXED_PER_PERSON_AND_PERIOD',period_id='up-period',timezone='Europe/Stockholm',
                     boundaries=[dict(period_id='up-period',person_id='employee-X',time='03:00',minute_of_day=180,
@@ -67,8 +67,10 @@ class FloraMethodTest(unittest.TestCase):
         rules=[row for row in out['validation']['rules'] if row['rule_id']=='daily_rest_24h']
         self.assertEqual(len(rules),1)
         self.assertEqual(rules[0]['status'],'UNKNOWN')
-        self.assertIn('registrerade',rules[0]['message'])
-        self.assertIn('inte implementerad',rules[0]['message'])
+        self.assertNotIn('inte implementerad',rules[0]['message'])
+        certificate=out['validation']['certificates']['daily_rest_24h.json']
+        self.assertEqual(sum(r['status']=='PASS' for r in certificate['windows']),27)
+        self.assertEqual(sum(r['status']=='UNKNOWN' for r in certificate['windows']),2)
         self.assertEqual(out['validation']['overall'],'UNKNOWN')
         self.assertTrue(out['review_required'])
         self.assertFalse(out['business_schedule_approved'])

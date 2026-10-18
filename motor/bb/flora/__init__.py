@@ -9,6 +9,7 @@ from math import isfinite
 from zoneinfo import ZoneInfo
 
 from .arithmetic import check_arithmetic
+from .daily_rest import assess as assess_daily_rest
 from .optimizer import solve as _solve
 
 METHOD = 'joint-shifts-breaks-needs/v1'
@@ -73,21 +74,6 @@ def check_case(case):
             raise ValueError('Ogiltig kandidat eller personkoppling.')
 
 
-def _daily_rest_unknown(case):
-    parameters = case.get('daily_rest_parameters', {})
-    missing = parameters.get('missing_person_ids')
-    if missing is None:
-        missing = [p['id'] for p in case['staff']]
-    if missing:
-        message = (f'Dygnsbryt saknas för {len(missing)} medarbetare i beräkningsperioden. '
-                   'Vilogap kontrolleras, men full dygnsvila i tillämpliga 24-timmarsperioder är inte implementerad.')
-    else:
-        message = ('Individuella fasta dygnsbryt är registrerade för beräkningsperioden. '
-                   'Full kontroll av dygnsvila i tillämpliga 24-timmarsperioder och undantag är inte implementerad; '
-                   'registreringen innebär inget godkännande.')
-    return {'rule_id':'daily_rest_24h','message':message}
-
-
 def validate_case(case, result):
     """Independent validation with explicit PASS/FAIL/UNKNOWN rule states."""
     raw = result.get('raw_solution',result)
@@ -97,6 +83,11 @@ def validate_case(case, result):
     checked = check_arithmetic(case,raw)
     summary = checked['summary']
     violations = summary['scope_errors']
+    rest = assess_daily_rest(case, raw)
+    violations.extend(rest['violations'])
+    summary['scope_check_pass'] = not violations
+    summary['daily_rest_24h'] = {k:rest[k] for k in ('version','status','required_minutes','missing_person_ids')}
+    checked['exports']['daily_rest_24h.json'] = rest
     by_rule = {v['rule'] for v in violations}
     checks = {
         'source_integrity': ('Kända källbehov, P1, fasta segment och personkopplingar är bevarade.', {'original_need_records_changed','known_actual_P1_work_missing','fixed_segment_modified_or_missing','duplicate_segment_id','unknown_or_invalid_candidate','unit_integrity','duplicate_mapped_segment','missing_or_extra_unit_recipient','work_during_confirmed_absence'}),
@@ -111,23 +102,30 @@ def validate_case(case, result):
         'capacity_limit': ('Profilens samtidiga personalnärvaro kontrollerad.', {'max2_active_staff'}),
     }
     rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
+    counts = {status:sum(row['status']==status for row in rest['windows']) for status in ('PASS','FAIL','UNKNOWN')}
+    rest_message = (f"Fast dygnsvilokontroll: {counts['PASS']} dygn uppfyllda, {counts['FAIL']} avvikelser, "
+                    f"{counts['UNKNOWN']} dygn kräver periodunderlag eller undantagsprövning. "
+                    f"Dygnsbryt saknas för {len(rest['missing_person_ids'])} medarbetare. "
+                    "Jour räknas inte som vila. Villkor för långa jourpass redovisas separat i kontrollintyget.")
+    rules.append(dict(rule_id='daily_rest_24h',status=rest['status'],message=rest_message))
     if case['config'].get('max_whole_duty_minutes') is not None:
         rules.append(dict(rule_id='whole_duty_maximum',status='FAIL' if 'whole_duty_over_selected_limit' in by_rule else 'PASS',
                           message='Hela planerade arbetstillfällen kontrollerade mot vald maxlängd.',
                           limit_minutes=case['config']['max_whole_duty_minutes']))
     unknowns = [
-        _daily_rest_unknown(case),
         {'rule_id':'jour_compensation_applicability','message':'Referensprofilens kompensationsantagande och individuella undantag är inte verifierade verksamhetsbeslut.'},
         {'rule_id':'practical_concurrency','message':'Tillåten samplanering verifierar inte praktisk aktiv medverkan, plats eller förflyttning.'},
         {'rule_id':'contract_accounting','message':'Bevarat Ar-netto är inte verifierad full SSG eller frånvaroavräkning.'},
         {'rule_id':'untimed_support','message':'Otidsatt journal-, kontaktpersons-, samordnar-, APT- och överlämningstid kan inte antas vara noll.'},
         {'rule_id':'complete_period_edges','message':'Efterföljande okänd historik och passhöljen kan inte godkännas som hela verifierade arbetstillfällen.'},
     ]
+    if rest['status']=='UNKNOWN':
+        unknowns.append(dict(rule_id='daily_rest_24h',message=rest_message))
     for item in case.get('integration',{}).get('unknowns',[]):
         unknowns.append(item if isinstance(item,dict) else {'rule_id':'input_limitation','message':str(item)})
     for row in summary['inherited_conditional_Jo_issues']:
         unknowns.append({'rule_id':'inherited_jour_window','message':'Ärvd jourkedja saknar verifierad planprofil.', 'detail':row})
-    rules.extend({'rule_id':u['rule_id'],'status':'UNKNOWN','message':u['message']} for u in unknowns)
+    rules.extend({'rule_id':u['rule_id'],'status':'UNKNOWN','message':u['message']} for u in unknowns if u['rule_id']!='daily_rest_24h')
     return {'overall':'FAIL' if violations else 'UNKNOWN','validator':'independent-minute-certificate/v1',
             'rules':rules,'violations':violations,'unknowns':unknowns,
             'historical':[],

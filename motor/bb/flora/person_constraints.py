@@ -3,6 +3,7 @@ Preserves slots; adds explicit identity, SSG, calendar and rest constraints.
 """
 from collections import defaultdict
 from ortools.sat.python import cp_model
+from .daily_rest import constrain as constrain_daily_rest
 
 def add_person_constraints(case,model,variables):
  H=case['horizon'];cfg=case['config'];profile=cfg['duty_profile'];staff={p['id']:p for p in case['staff']};units=case['reassignable_temporary_units'];movable={id for u in units for id in u['segment_ids']}
@@ -65,6 +66,9 @@ def add_person_constraints(case,model,variables):
   events=[]
   for id,rr in groups.items():events.append(dict(start=min(r['start'] for r in rr),end=max(r['end'] for r in rr),present=1,label=id,rest_after=max(cfg['min_daily_rest'],max(r['end'] for r in rr)-min(r['start'] for r in rr)) if any(r['code']=='Jo' for r in rr) and max(r['end'] for r in rr)-min(r['start'] for r in rr)>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']))
   events += [dict(start=u['start'],end=u['end'],present=pr,label=u['id'],rest_after=max(cfg['min_daily_rest'],u['end']-u['start']) if any(r['code']=='Jo' for r in u['rows']) and u['end']-u['start']>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']) for u,pr in optional]
+  combined={key for key,rr in groups.items() if {'Ar','Jo'}<={r['code'] for r in rr}}
+  combined.update(u['id'] for u,pr in optional if {'Ar','Jo'}<={r['code'] for r in u['rows']})
+  for event in events:event['combined_jour']=event['label'] in combined
   # Original P2 duties have no minimum-length exemption. Frozen history and
   # incoming duties retain their known times, matching the independent check.
   for event in events:
@@ -72,6 +76,7 @@ def add_person_constraints(case,model,variables):
     minimum=model.Add(event['end']-event['start']>=cfg['min_shift'])
     if not isinstance(event['present'],int):minimum.OnlyEnforceIf(event['present'])
   events += [dict(start=v['s']*cfg['shift_step'],end=v['e']*cfg['shift_step'],present=v['pr'],label=v['c']['id']) for v in vv]
+  constrain_daily_rest(case,model,person,events)
   # A selected 20/24h plan constrains complete duties, including retained units.
   # Historical incoming duties are preserved. No automatic trimming or splitting.
   limit=cfg.get('max_whole_duty_minutes')

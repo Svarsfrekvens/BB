@@ -137,7 +137,7 @@ def _workspace(scenario: dict, raw: dict, profile: dict) -> None:
 
 def _day_boundary_parameters(scenario: dict, periods: dict[str, dict],
                              person_ids: set[str], period_id: str, timezone: str) -> dict:
-    """Record fixed individual boundaries without claiming a rest check exists.
+    """Record fixed individual boundaries for the separate result-level check.
 
     Omitted boundaries remain unknown. Dates and timezone belong to the verified
     uploaded periods; a scenario cannot introduce a floating or daily boundary.
@@ -182,7 +182,7 @@ def _day_boundary_parameters(scenario: dict, periods: dict[str, dict],
     missing = sorted(person_ids-known)
     return dict(mode="FIXED_PER_PERSON_AND_PERIOD", period_id=period_id, timezone=timezone,
                 boundaries=records, missing_person_ids=missing,
-                status="MISSING_BOUNDARIES" if missing else "BOUNDARIES_RECORDED_CHECK_NOT_IMPLEMENTED",
+                status="MISSING_BOUNDARIES" if missing else "BOUNDARIES_RECORDED_PENDING_RESULT_CHECK",
                 validation_status="UNKNOWN")
 
 

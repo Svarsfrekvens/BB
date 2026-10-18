@@ -14,6 +14,7 @@ PRINCIPLES = (
     ('whole_duties', 'Passgränser bedöms på hela arbetstillfällen, inte varje arbets- eller jourdel.'),
     ('separate_time_types', 'Aktivt arbete, jour, rast, frånvaro och övertid redovisas separat.'),
     ('known_history', 'Känd historik används över periodgränsen; okänd framtid blir inte ledighet.'),
+    ('fixed_daily_rest', 'Sammanhängande dygnsvila kontrolleras mot personens fasta dygnsbryt; jour är inte vila och undantag kräver verksamhetens underlag.'),
     ('explicit_permissions', 'Behörighet och tillgänglighet får inte härledas ur namn eller exempeldata.'),
     ('business_isolation', 'Personkopplingar, lokala tider och beslut väljs från rätt verksamhetsprofil.'),
     ('independent_validation', 'Beräknat förslag kontrolleras separat; okänt är inte godkänt.'),
