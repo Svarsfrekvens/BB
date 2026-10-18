@@ -42,6 +42,8 @@ def check_case(case):
         raise ValueError('Referensmetodens väggtidsmodell stöder inte en sommartidsomställning i denna horisont.')
     if cfg['min_free_days'] < 9 or cfg['min_shift'] < 240:
         raise ValueError('Beslutade minimikrav på fridagar eller helt arbetspass får inte försvagas.')
+    if 'max_whole_duty_minutes' in cfg and (type(cfg['max_whole_duty_minutes']) is not int or cfg['max_whole_duty_minutes'] not in (1200,1440)):
+        raise ValueError('Högsta hela passlängd måste vara 1200 eller 1440 minuter.')
     if not case['staff'] or len(case['staff']) > 80 or len(case['needs']) > 4000:
         raise ValueError('Underlagets storlek stöds inte av denna testmetod.')
     for key in ['staff','needs','candidates','fixed_segments','reassignable_temporary_units']:
@@ -109,6 +111,10 @@ def validate_case(case, result):
         'capacity_limit': ('Profilens samtidiga personalnärvaro kontrollerad.', {'max2_active_staff'}),
     }
     rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
+    if case['config'].get('max_whole_duty_minutes') is not None:
+        rules.append(dict(rule_id='whole_duty_maximum',status='FAIL' if 'whole_duty_over_selected_limit' in by_rule else 'PASS',
+                          message='Hela planerade arbetstillfällen kontrollerade mot vald maxlängd.',
+                          limit_minutes=case['config']['max_whole_duty_minutes']))
     unknowns = [
         _daily_rest_unknown(case),
         {'rule_id':'jour_compensation_applicability','message':'Referensprofilens kompensationsantagande och individuella undantag är inte verifierade verksamhetsbeslut.'},
@@ -214,6 +220,7 @@ def _normalize(case, raw, validation):
             'assumptions':assumptions,'unassigned_need_ids':[mapped('need',i) for i in sorted(set(needs)-placed)],'raw_solution':raw,
             'cost_effect':_cost(case,before_people,after_people),
             'daily_rest_parameters':deepcopy(case.get('daily_rest_parameters')),
+            'rule_policy':deepcopy(case.get('rule_policy')),
             'time_accounting':{'before_break_reference':{'kind':'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}

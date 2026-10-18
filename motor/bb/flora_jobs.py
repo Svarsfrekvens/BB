@@ -46,7 +46,7 @@ def method_fingerprint() -> str:
     """Cache identity follows actual implementation, not only its display name."""
     root = Path(__file__).resolve().parent
     files = [root / "flora_import.py", root / "business_profiles.py",
-             root / "engine_api.py", root / "flora_jobs.py", *sorted((root / "flora").glob("*.py"))]
+             root / "engine_api.py", root / "flora_jobs.py", root / "rule_policy.py", *sorted((root / "flora").glob("*.py"))]
     content = hashlib.sha256(METHOD_VERSION.encode())
     for path in files:
         if path.is_file():

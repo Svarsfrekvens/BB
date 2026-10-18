@@ -451,6 +451,11 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     config.update(known_from=int((history_start-origin).total_seconds()//60),known_to=horizon,day_end=horizon//1440)
     if config.get("min_shift")!=240 or config.get("min_free_days")!=9 or config.get("calendar_mode")!="rolling":
         _fail("Profilen saknar beslutade minimi- och rullande fridagsregler.")
+    from .rule_policy import resolve_policy
+    try:
+        rule_policy=resolve_policy(profile,scenario,config,daily_rest_parameters)
+    except ValueError as exc:
+        _fail(str(exc))
     override = deepcopy(profile.get("scenario_override",{}))
     override["absence"] = ("P2 Se/Ti omitted ONLY in previously authorized ground-scenario scope"
                            if absence_mode=="omit_p2" else "Confirmed P2 Se/Ti preserved as hard absence locks")
@@ -482,6 +487,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                 reassignable_temporary_units=units,confirmed_absence_locks=absence_locks,
                 integration=integration,
                 daily_rest_parameters=daily_rest_parameters,
+                rule_policy=rule_policy,
                 economic_parameters=economic_parameters,
                 import_provenance=dict(upload=raw,excluded_segments=excluded,
                                        all_timed_history=[deepcopy(row) for row in segments_raw.values() if minute(row["start"])<0],

@@ -70,6 +70,9 @@ class BusinessEngineTests(unittest.TestCase):
             self.assertFalse(output['business_schedule_approved'])
             self.assertEqual(output['provenance']['engine_context']['business_id'],business)
             self.assertFalse(output['provenance']['automatic_learning'])
+            self.assertEqual(output['rule_policy']['business_id'],business)
+            self.assertEqual(output['rule_policy']['version'],'bb-shared-principles/1.0')
+            self.assertEqual(output['rule_policy']['planning_limits']['status'],'NOT_SELECTED')
             expected=self.bodies[business]['scenario']['workspace']['unit_rules']['day_boundaries']['next']['person-a']['time']
             self.assertEqual(output['daily_rest_parameters']['boundaries'][0]['time'],expected)
             foreign=self.client.get('/api/engine/jobs/'+job_id,headers=self.headers('unit-b' if business!='unit-b' else 'unit-c'))
@@ -109,6 +112,7 @@ class BusinessEngineTests(unittest.TestCase):
         self.assertEqual(self.client.get('/api/engine/capabilities').status_code,401)
         self.assertEqual(self.client.get('/api/engine/capabilities',headers={'Authorization':'Bearer test-token'}).status_code,403)
         output=self.client.get('/api/engine/capabilities',headers=self.headers()).json()
+        self.assertEqual(output['shared_principles']['version'],'bb-shared-principles/1.0')
         self.assertEqual(output['profile_status'],'CONFIGURED_INPUT_REVIEW_REQUIRED')
         self.assertNotIn(str(self.root),json.dumps(output));self.assertNotIn('unit-b',json.dumps(output))
         (self.root/'unit-a.json').unlink()

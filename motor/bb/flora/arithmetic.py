@@ -208,6 +208,12 @@ def check_arithmetic(case, solution):
         short = [o for o in occasions if 0 <= o["start"] < H and o["end"] - o["start"] < case["config"]["min_shift"]]
         if short:
             errors.append({"rule": "whole_occasion_under4h", "person": person, "ids": [o["id"] for o in short]})
+        maximum=case['config'].get('max_whole_duty_minutes')
+        if maximum is not None:
+            for o in occasions:
+                if 0<=o['start']<H and o['end']-o['start']>maximum:
+                    errors.append(dict(rule='whole_duty_over_selected_limit',person=person,
+                                       occasion=o['id'],actual_minutes=o['end']-o['start'],limit_minutes=maximum))
         gaps = [right["start"] - left["end"] for left, right in zip(occasions, occasions[1:]) if 0 <= right["start"] < H]
         if any(g < case["config"]["min_daily_rest"] for g in gaps):
             errors.append({"rule": "daily_rest11h", "person": person, "gaps": [g for g in gaps if g < case["config"]["min_daily_rest"]]})

@@ -72,6 +72,14 @@ def add_person_constraints(case,model,variables):
     minimum=model.Add(event['end']-event['start']>=cfg['min_shift'])
     if not isinstance(event['present'],int):minimum.OnlyEnforceIf(event['present'])
   events += [dict(start=v['s']*cfg['shift_step'],end=v['e']*cfg['shift_step'],present=v['pr'],label=v['c']['id']) for v in vv]
+  # A selected 20/24h plan constrains complete duties, including retained units.
+  # Historical incoming duties are preserved. No automatic trimming or splitting.
+  limit=cfg.get('max_whole_duty_minutes')
+  if limit is not None:
+   for event in events:
+    if isinstance(event['start'],int) and not 0<=event['start']<H:continue
+    maximum=model.Add(event['end']-event['start']<=limit)
+    if not isinstance(event['present'],int):maximum.OnlyEnforceIf(event['present'])
   for i,left in enumerate(events):
    for right in events[i+1:]:
     # P1 itself is historical. New P2 work obeys rest against its known edges.

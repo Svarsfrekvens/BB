@@ -5,6 +5,52 @@ beständiga jobbhantering. Uppladdningar är underlag, inte automatisk träning:
 nya exempel ska leda till granskade kodförbättringar och regressionstester.
 Ingen uppladdning ändrar en annan verksamhets beslut eller en sparad profil.
 
+## Gemensamma principer och lokala beslut
+
+`bb.rule_policy` är motorns gemensamma, versionsmärkta principregister
+(`bb-shared-principles/1.0`). Både Flora-vägen och den gemensamma vägen använder
+samma importerare, solver och oberoende validator. Deras nya körningsresultat
+innehåller `rule_policy`: profil-ID, profilkälla, verksamhetskoppling när sådan
+finns, faktiskt använda regelvärden, individuella dygnsbryt, planeringsval och
+ett fingeravtryck. Principregistret ingår också i motorns kodfingeravtryck;
+en gammal beräkning återanvänds inte som resultat av en ny regelversion.
+
+Gemensam metod: bevarade källor, hela arbetstillfällen, separata tidskategorier,
+historik över periodgräns, uttryckliga behörigheter, isolerade verksamheter och
+separat validering. Lokala värden hämtas från just den granskade profilen och
+det aktuella scenariot. Inga Flora-personer, jourtider, dygnsbryt, lokala undantag
+eller kostnadssatser flyttas till en annan verksamhet.
+
+### Explicit maxpass i ett planeringsscenario
+
+Ett dokumenterat planeringsval kan anges i en privat profil som
+`planning_limits`, eller i `scenario.workspace.unit_rules.planning_limits`:
+
+```json
+{
+  "max_whole_duty_minutes": 1200,
+  "source": "Verksamhetens beslut att pröva ett 20-timmarsscenario",
+  "confirmed_at": "2026-10-18"
+}
+```
+
+1200 respektive 1440 betyder 20 respektive 24 timmar. Ett scenario får skärpa
+en profilgräns, men inte höja den. Valet gäller hela arbetstillfällen med start
+i planeringsperioden, inklusive fasta och omfördelade pass; inkommande historik
+skrivs inte om. Solvern begränsar längden och den oberoende validatorn kontrollerar
+resultatet på nytt. Okända eller odokumenterade värden avvisas.
+
+Valet är inte ett avtalsgodkännande. Motorn delar inte automatiskt ett fast
+24-timmarspass för att klara en vald 20-timmarsgräns: om underlagets låsningar
+hindrar detta blir försöket `INFEASIBLE`, aldrig ett tyst kapat pass. För en fri
+20/24-jämförelse behöver kandidatprofilen först medge de granskade alternativen.
+Utan uttryckligt val visas `NOT_SELECTED` och det befintliga beräkningskontraktet
+bevaras. Profilens gamla `max_reassigned_minutes` gäller bara omfördelning och
+redovisas inte felaktigt som ett beslutat max för samtliga pass.
+
+Principerna kan läsas i `/api/engine/capabilities` och i Flora-delen av
+`/api/health`. Det är stöd i koden, inte bevis för att arbetsytorna är anslutna.
+
 ## Vad som är implementerat
 
 - `GET /api/engine/capabilities`: status för den verifierade arbetsytan.

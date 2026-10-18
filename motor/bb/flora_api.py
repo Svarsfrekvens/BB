@@ -26,12 +26,14 @@ router = APIRouter(lifespan=lifespan)
 
 def capabilities():
     from .flora_jobs import load_profile, JobInputError
+    from .rule_policy import shared_principles
     try:
         profile, _ = load_profile()
         readable = profile.get('schema_version') == 'bb-analysis-input-profile/1.0'
     except JobInputError:
         readable = False
     return dict(jobs=True, profile_configured=readable,
+                shared_principles=shared_principles(),
                 remote_enabled=os.environ.get('BB_FLORA_REMOTE_ENABLED') == '1')
 
 

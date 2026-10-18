@@ -12,6 +12,7 @@ from .business_profiles import (BusinessProfileError, INPUT_SCHEMAS, binding_for
                                 profile_for, scope_for)
 from .flora_api import json_body
 from .flora_jobs import IdempotencyConflict, JobInputError, get_manager, normalize_request
+from .rule_policy import shared_principles
 
 router = APIRouter()
 
@@ -39,6 +40,7 @@ async def capabilities(request: Request):
                   shared_engine=True, automatic_learning=False,
                   workspace_scoped_profiles=True, raw_excel_import=False,
                   review_required=True, profile_status='NOT_CONFIGURED')
+    report['shared_principles']=shared_principles()
     try:
         binding = binding_for(owner)
         # Read the profile as well: an environment variable alone is not readiness.
