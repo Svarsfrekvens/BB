@@ -61,7 +61,7 @@ def add_person_constraints(case,model,variables):
   # St is excluded from capacity; no active Ar or Jo is invented in its gap.
   groups=defaultdict(list)
   for r in rows:
-   if r['code'] in ['Ar','Jo','Kl','Öv']:groups[r['id'].rsplit('-',1)[0]].append(r)
+   if r['code'] in ['Ar','Jo','Kl','Öv']:groups[r.get('whole_duty_id') or r['id'].rsplit('-',1)[0]].append(r)
   events=[]
   for id,rr in groups.items():events.append(dict(start=min(r['start'] for r in rr),end=max(r['end'] for r in rr),present=1,label=id,rest_after=max(cfg['min_daily_rest'],max(r['end'] for r in rr)-min(r['start'] for r in rr)) if any(r['code']=='Jo' for r in rr) and max(r['end'] for r in rr)-min(r['start'] for r in rr)>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']))
   events += [dict(start=u['start'],end=u['end'],present=pr,label=u['id'],rest_after=max(cfg['min_daily_rest'],u['end']-u['start']) if any(r['code']=='Jo' for r in u['rows']) and u['end']-u['start']>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']) for u,pr in optional]

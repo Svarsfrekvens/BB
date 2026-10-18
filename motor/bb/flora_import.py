@@ -315,6 +315,20 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         segment = dict(id=sid,person=row["person_id"],start=a,end=b,
                        type=row.get("category"),code=row.get("source_code"),
                        locked_reason=decision.get("locked_reason"))
+        # Reviewed source categories describe activity, not a day/night function.
+        # Preserve the source row while mapping its explicit code for the solver.
+        if "model_type" in decision:
+            allowed = {"Ar": ("AKTIVT_ARBETE", {"AKTIVT_ARBETE", "ARBETE_BRUTTO"}),
+                       "Jo": ("SOVANDE_JOUR", {"SOVANDE_JOUR", "JOUR"})}
+            rule = allowed.get(segment["code"])
+            if not rule or decision["model_type"] != rule[0] or row.get("category") not in rule[1]:
+                _fail(f"Schemarad {sid}: modelltypen saknar stöd i källans tidskod och kategori.")
+            segment["type"] = decision["model_type"]
+        if "whole_duty_id" in decision:
+            duty = decision["whole_duty_id"]
+            if not isinstance(duty, str) or not duty or row.get("sequence_id") != duty:
+                _fail(f"Schemarad {sid}: hela passets källkoppling har ändrats.")
+            segment["whole_duty_id"] = duty
         is_absence = segment["code"] in ("Se","Ti") and a < horizon and b > 0
         if decision.get("reference_import"):
             imported.append(deepcopy(segment))
@@ -343,6 +357,15 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                                  absence_omitted=is_absence))
         elif decision["mode"] != "mutable":
             _fail(f"Schemarad {sid}: okänd beslutad hantering.")
+    duty_groups = {}
+    for segment in segments.values():
+        if segment.get("whole_duty_id"):
+            duty_groups.setdefault(segment["whole_duty_id"], []).append(segment)
+    for duty, duty_rows in duty_groups.items():
+        ordered = sorted(duty_rows, key=lambda row: row["start"])
+        if len({row["person"] for row in ordered}) != 1 or any(
+                left["end"] != right["start"] for left, right in zip(ordered, ordered[1:])):
+            _fail(f"Hela passet {duty}: person eller sammanhängande passgränser måste granskas.")
     candidates = []
     for window in profile.get("candidate_windows", []):
         person_id = window["person_id"]

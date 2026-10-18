@@ -151,3 +151,26 @@ behov och dygnsbryt. Testerna verifierar separata resultat, profilval,
 behörighet, idempotens, ändrade underlag, bevarade profiler och UNKNOWN-status.
 Det är regressionstester för gemensam kod; de bevisar inte att tre verkliga
 verksamheters produktionsunderlag är verifierade eller anslutna.
+
+## Granskade passkopplingar vid ny underlagsversion
+
+En profilmigrering behöver jämföra faktisk källsemantik, passgränser, raster,
+personal, behov och beslut. Byte av rad-ID räcker inte som granskning.
+Privata profiler och verkliga källexporter ska fortsatt ligga utanför Git.
+
+En granskad `segment_decisions`-post kan ange `whole_duty_id`, som måste matcha
+källradens `sequence_id`. Gruppen ska avse en person och sammanhängande tider.
+Solver och oberoende validator använder denna verifierade koppling i stället
+för att gissa gruppen från rad-ID:ts suffix. Validatorn läser kopplingen från
+det importerade underlaget, aldrig från ett ändringsbart resultatfält.
+
+`model_type` kan explicit normalisera Ar + ARBETE_BRUTTO till AKTIVT_ARBETE och
+Jo + JOUR till SOVANDE_JOUR för beräkningen. Kod och kategori måste stödja
+översättningen; källraden och dess separata funktionstyp bevaras. Det innebär
+inte ett beslut om dagpass, kvällspass eller vaken natt.
+
+När ett redan granskat förslag lämnas som nytt beräkningsunderlag avser
+motorns Före-värden just detta underlag. Det får inte märkas som den orörda
+ursprungsfilen. Nettoreferenser härleds spårbart från det aktuella underlagets
+arbetstid och raster; de är inte ett nytt SSG-beslut. Nya beräkningsresultat
+förblir separata förslag och skriver aldrig automatiskt över arbetsytan.

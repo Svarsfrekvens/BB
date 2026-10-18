@@ -23,6 +23,8 @@ def check_arithmetic(case, solution):
     CALENDAR_MODE = case['config']['calendar_mode']
     assert CALENDAR_MODE == 'rolling'
     source_ids = {r["id"] for r in original["references"]["import"]["segments"]}
+    # Trust only the importer's reviewed grouping, never a solver-supplied label.
+    whole_duty_ids = {r["id"]: r["whole_duty_id"] for r in original["references"]["import"]["segments"] if r.get("whole_duty_id")}
     units = {u["id"]: u for u in case["reassignable_temporary_units"]}
     errors = []
     inherited = []
@@ -202,7 +204,7 @@ def check_arithmetic(case, solution):
         groups = defaultdict(list)
         for r in rows:
             if r["code"] in {"Ar", "Jo", "Kl", "Öv"}:
-                groups[r["id"].rsplit("-", 1)[0] if r["id"] in source_ids else r["id"]].append(r)
+                groups[whole_duty_ids.get(r["id"]) or (r["id"].rsplit("-", 1)[0] if r["id"] in source_ids else r["id"])].append(r)
         occasions = sorted([{"id": id, "start": min(r["start"] for r in rr), "end": max(r["end"] for r in rr), "rows": rr} for id, rr in groups.items()], key=lambda occasion: (occasion["start"], occasion["end"]))
         all_occasions[person] = occasions
         short = [o for o in occasions if 0 <= o["start"] < H and o["end"] - o["start"] < case["config"]["min_shift"]]
