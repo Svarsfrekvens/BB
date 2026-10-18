@@ -59,7 +59,10 @@ def occasions(case, raw):
     groups = defaultdict(list)
     for r in raw.get('segments', []):
         if r['code'] in WORK_CODES:
-            key = trusted.get(r['id']) or r['id'].rsplit('-', 1)[0]
+            # Only source segment suffixes describe a common source cell.
+            # Generated IDs contain dates; stripping their final component
+            # would incorrectly merge different days into one monthly duty.
+            key = trusted.get(r['id']) or (r['id'].rsplit('-', 1)[0] if r['id'] in trusted else r['id'])
             groups[(r['person'], key)].append(r)
     return [dict(person=p, id=key, start=min(r['start'] for r in rows),
                  end=max(r['end'] for r in rows), rows=rows,

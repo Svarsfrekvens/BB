@@ -64,6 +64,7 @@ class FixedDailyRestTests(unittest.TestCase):
     def test_combined_jour_conditions_do_not_approve_unverified_exception(self):
         c=sample()
         rows=[row('night-1',0,360,'Jo'),row('night-2',360,1440)]
+        c['references']['import']['segments']=deepcopy(rows)
         out=assess(c,{'segments':rows})
         self.assertEqual(out['windows'][0]['longest_rest_minutes'],0)
         self.assertEqual(out['windows'][0]['status'],'UNKNOWN')
@@ -82,6 +83,7 @@ class FixedDailyRestTests(unittest.TestCase):
         c=sample()
         rows=[row('night-1',0,299,'Jo'),row('night-2',299,600),
               row('night-3',600,900,'Jo'),row('night-4',900,1440)]
+        c['references']['import']['segments']=deepcopy(rows)
         out=assess(c,{'segments':rows})
         duty=out['conditional_jour_duties'][0]
         self.assertEqual(duty['longest_night_jour_minutes'],299)
@@ -91,6 +93,13 @@ class FixedDailyRestTests(unittest.TestCase):
         c=sample();model=cp_model.CpModel()
         constrain(c,model,'person-a',[dict(start=360,end=1080,present=1)])
         self.assertEqual(cp_model.CpSolver().Solve(model),cp_model.INFEASIBLE)
+
+    def test_generated_dated_ids_are_distinct_duties(self):
+        rows=[row('NEW-person-a-2026-05-11',720,960),
+              row('NEW-person-a-2026-05-12',2160,2400)]
+        result=assess(sample(),{'segments':rows})
+        self.assertEqual(result['status'],'PASS')
+        self.assertEqual([r['longest_rest_minutes'] for r in result['windows']],[720,720])
 
     def test_optional_exception_only_applies_when_selected_for_same_person(self):
         for selected,expected in [(0,cp_model.INFEASIBLE),(1,cp_model.OPTIMAL)]:
