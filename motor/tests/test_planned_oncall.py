@@ -28,6 +28,26 @@ def fixture():
 
 
 class PlannedOncallTest(unittest.TestCase):
+    def test_reviewed_active_morning_does_not_change_source_or_net_target(self):
+        raw,profile=fixture()
+        before=prepare_case(raw,profile)
+        profile['planned_active_replacements']=[dict(id='test-duty-PLANAR03',
+            source_segment_id='test-duty-03', expected_start='2027-01-31T05:00',
+            expected_end='2027-01-31T07:00', start='2027-01-31T06:30', end='2027-01-31T07:00',
+            status='SCENARIO', source='Approved active morning planning decision')]
+        result=prepare_case(raw,profile)
+        self.assertEqual(result['references'],before['references'])
+        self.assertEqual(result['staff'],before['staff'])
+        self.assertEqual(result['import_provenance'],before['import_provenance'])
+        planned=next(r for r in result['fixed_segments'] if r['id']=='test-duty-PLANAR03')
+        self.assertEqual((planned['code'],planned['end']-planned['start']),('Ar',30))
+        from bb.flora.daily_rest import occasions
+        duty=next(d for d in occasions(result,{'segments':result['fixed_segments']}) if d['id']=='test-duty')
+        self.assertEqual(duty['end']-duty['start'],420)
+        self.assertEqual(len(duty['rows']),4)
+        profile['planned_active_replacements'][0]['start']='2027-01-31T06:00'
+        with self.assertRaises(FloraImportError):prepare_case(raw,profile)
+
     def test_explicit_plan_preserves_source_and_before_and_absence(self):
         raw, profile = fixture()
         before = deepcopy((raw, profile))

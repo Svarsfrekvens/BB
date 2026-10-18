@@ -239,3 +239,11 @@ assumptions. Reassignable source units carry their plan rows together. Both
 independent rest validators group these reviewed rows with the source occasion;
 generated unrelated duties remain separate. Ordinary net targets are unchanged.
 This does not establish contract-exception applicability or operational approval.
+
+`planned_active_replacements` supports separately reviewed Ar intervals under
+the same exact-source, P2-only, provenance and no-overlap checks. Active plan
+rows must adjoin the same source occasion's Ar/Jo; they cannot be isolated
+short shifts. They participate in fixed work, break/rest checks, whole-unit
+reassignment and the independent validator. Existing ordinary per-person net
+targets remain unchanged, so the optimizer must balance any added fixed Ar
+against other available work instead of increasing contractual capacity.

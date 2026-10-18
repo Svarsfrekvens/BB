@@ -378,36 +378,39 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
             _fail(f"Hela passet {duty}: person eller sammanhängande passgränser måste granskas.")
     # Explicit reviewed future-plan decisions only. Never rewrite a source
     # outcome, infer capacity from sickness, or apply a P2 decision to P1.
-    planned_oncall = []
-    for plan in profile.get("planned_oncall_replacements", []):
+    planned_oncall, planned_active = [], []
+    planned_rows = [(p, "Jo") for p in profile.get("planned_oncall_replacements", [])]
+    planned_rows += [(p, "Ar") for p in profile.get("planned_active_replacements", [])]
+    for plan, code in planned_rows:
         sid = plan.get("source_segment_id")
         row = segments_raw.get(sid)
         if not row or row.get("source_code") != "St" or decisions[sid]["mode"] != "excluded":
-            _fail("Planerad jour kräver en uttryckligt undantagen St-källrad.")
+            _fail("Planerad aktivitet kräver en uttryckligt undantagen St-källrad.")
         if plan.get("status") != "SCENARIO" or not plan.get("source"):
-            _fail("Planerad jour saknar SCENARIO-status eller beslutsreferens.")
+            _fail("Planerad aktivitet saknar SCENARIO-status eller beslutsreferens.")
         if (row["start"], row["end"]) != (plan.get("expected_start"), plan.get("expected_end")):
-            _fail("Sjuktidens källtider har ändrats; jourbeslutet måste granskas igen.")
+            _fail("Sjuktidens källtider har ändrats; aktivitetsbeslutet måste granskas igen.")
         a, b = minute(plan.get("start")), minute(plan.get("end"))
         if not 0 <= a < b <= horizon or not minute(row["start"]) <= a < b <= minute(row["end"]):
-            _fail("Planerad jour måste ligga inom beslutad P2-sjuktid.")
+            _fail("Planerad aktivitet måste ligga inom beslutad P2-sjuktid.")
         person_id = row["person_id"]
         group = sid.rsplit("-", 1)[0]
         new_id = plan.get("id")
         if not isinstance(new_id, str) or new_id in segments or new_id.rsplit("-", 1)[0] != group:
-            _fail("Planerad jour saknar unik koppling till källpasset.")
+            _fail("Planerad aktivitet saknar unik koppling till källpasset.")
         siblings = [r for key, r in segments.items() if r["person"] == person_id and
-                    key.rsplit("-", 1)[0] == group and r["code"] == "Jo"]
+                    key.rsplit("-", 1)[0] == group and r["code"] in ({"Jo"} if code == "Jo" else {"Ar", "Jo"})]
         if not siblings or not any(r["end"] == a or r["start"] == b for r in siblings):
-            _fail("Planerad jour måste ansluta till källpassets befintliga jour.")
+            _fail("Planerad aktivitet måste ansluta till källpassets befintliga arbete eller jour.")
         if any(r["person"] == person_id and r["code"] in {"Ar", "Jo", "Kl", "Öv", "Se", "Ti"}
                and max(a, r["start"]) < min(b, r["end"]) for r in segments.values()):
-            _fail("Planerad jour överlappar arbete, jour eller spärrad frånvaro.")
-        segment = dict(id=new_id, person=person_id, start=a, end=b, code="Jo",
-                       type="SOVANDE_JOUR", locked_reason="EXPLICIT_PLANNED_ONCALL_SCENARIO")
+            _fail("Planerad aktivitet överlappar arbete, jour eller spärrad frånvaro.")
+        segment = dict(id=new_id, person=person_id, start=a, end=b, code=code,
+                       type="SOVANDE_JOUR" if code == "Jo" else "AKTIVT_ARBETE",
+                       locked_reason="EXPLICIT_PLANNED_ACTIVITY_SCENARIO")
         segments[new_id] = segment
         fixed.append(segment)
-        planned_oncall.append(deepcopy(plan))
+        (planned_oncall if code == "Jo" else planned_active).append(deepcopy(plan))
     candidates = []
     for window in profile.get("candidate_windows", []):
         person_id = window["person_id"]
@@ -505,7 +508,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     units = []
     for unit in profile.get("reassignable_units", []):
         ids = list(unit["segment_ids"])
-        ids.extend(p["id"] for p in planned_oncall
+        ids.extend(p["id"] for p in planned_oncall + planned_active
                    if p["source_segment_id"].rsplit("-", 1)[0] == unit["id"])
         rows = [segments[sid] for sid in ids]
         persons = {r["person"] for r in rows}
@@ -530,9 +533,10 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     for adjustment in applied_adjustments:
         override["segment_scenario_"+adjustment["segment_id"]] = (
             adjustment["message"]+" Källa: "+adjustment["source"])
-    if planned_oncall:
-        override["planned_oncall"] = dict(status="SCENARIO", decisions=planned_oncall,
-            original_outcomes="UNCHANGED", ordinary_net_targets="UNCHANGED")
+    for label, plans in (("planned_oncall", planned_oncall), ("planned_active", planned_active)):
+        if plans:
+            override[label] = dict(status="SCENARIO", decisions=plans,
+                original_outcomes="UNCHANGED", ordinary_net_targets="UNCHANGED")
     integration = dict(profile_id=profile["profile_id"],input_sha256=_digest(raw),profile_sha256=_digest(profile),
                        person_id_map={key:key for key in staff_raw},
                        person_aliases={key:value.get("alias") for key,value in staff_raw.items()},
@@ -547,6 +551,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        source_segment_count=len(segments_raw),source_need_count=len(needs_raw),
                        scenario_adjustments=applied_adjustments,
                        planned_oncall_replacements=planned_oncall,
+                       planned_active_replacements=planned_active,
                        scenario=deepcopy(scenario))
     return dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
                 staff=staff,fixed_segments=sorted(fixed,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),
