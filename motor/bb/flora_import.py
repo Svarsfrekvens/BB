@@ -270,6 +270,16 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     minute = lambda value: int((_time(value, timezone)-origin).total_seconds()//60)
     horizon = int((end-origin).total_seconds()//60)
     scenario = scenario or {}
+    if profile.get('reviewed_day_boundaries') is not None:
+        # Reuse previously reviewed, business-specific decisions when a fresh
+        # file import has no local overrides. An explicit empty value remains
+        # empty; neither a missing fact nor a user's override is concealed.
+        scenario = deepcopy(scenario)
+        workspace = scenario.setdefault('workspace', {})
+        if isinstance(workspace, dict):
+            rules = workspace.setdefault('unit_rules', {})
+            if isinstance(rules, dict) and 'day_boundaries' not in rules:
+                rules['day_boundaries'] = deepcopy(profile['reviewed_day_boundaries'])
     _workspace(scenario, raw, profile)
     absence_mode = scenario.get("absence_mode", profile.get("absence_mode"))
     if absence_mode not in profile.get("allowed_absence_modes", []):

@@ -174,3 +174,22 @@ motorns Före-värden just detta underlag. Det får inte märkas som den orörda
 ursprungsfilen. Nettoreferenser härleds spårbart från det aktuella underlagets
 arbetstid och raster; de är inte ett nytt SSG-beslut. Nya beräkningsresultat
 förblir separata förslag och skriver aldrig automatiskt över arbetsytan.
+# Re-importing original data alongside an existing proposal
+
+A workspace binding may include `dataset_profiles`, a server-owned map from
+an imported `metadata.dataset_id` to an absolute private profile path. The
+existing `profile_path` remains the default. This permits a reviewed original
+workbook and an earlier reviewed proposal to coexist without replacing the
+saved workspace or invalidating access to older jobs.
+
+The dataset ID only selects among profiles registered for the authenticated
+workspace. Each selected profile must still match the business and data use,
+have review provenance, and pass the complete input review before a job is
+queued. No path, foreign business profile, or relaxed validation can be supplied
+by an upload. Unknown dataset IDs retain the default profile's strict review.
+
+A profile may carry `reviewed_day_boundaries` with the same validated structure
+as `scenario.workspace.unit_rules.day_boundaries`. They are used only when a
+fresh import has no such local setting. Explicit overrides, including an empty
+object, take precedence. Recording these decisions does not claim a complete
+daily-rest validation.

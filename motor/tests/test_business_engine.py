@@ -108,6 +108,43 @@ class BusinessEngineTests(unittest.TestCase):
         first=self.submit().json();second=self.submit(body=body).json()
         self.assertNotEqual(first['id'],second['id']);self.assertNotEqual(first['input_hash'],second['input_hash'])
 
+    def test_reviewed_dataset_variant_preserves_default_and_checks_uploaded_rows(self):
+        variant=deepcopy(self.profiles['unit-a']);variant['profile_id']='unit-a-original'
+        path=self.root/'unit-a-original.json';path.write_text(json.dumps(variant))
+        self.registry['workspaces']['org:unit-a']['dataset_profiles']={'ORIGINAL':str(path)}
+        self.save_registry()
+        original=deepcopy(self.bodies['unit-a']);original['input']['metadata']['dataset_id']='ORIGINAL'
+        response=self.submit(body=original);self.assertEqual(response.status_code,202,response.text)
+        self.assertEqual(response.json()['engine_context']['profile_id'],'unit-a-original')
+        self.assertEqual(self.submit().json()['engine_context']['profile_id'],'unit-a-reviewed')
+        original['input']['schedule_segments'].pop()
+        self.assertEqual(self.submit(body=original).status_code,422)
+
+    def test_dataset_variant_cannot_cross_business_or_take_client_path(self):
+        binding=self.registry['workspaces']['org:unit-a']
+        binding['dataset_profiles']={'ORIGINAL':str(self.root/'unit-b.json')};self.save_registry()
+        body=deepcopy(self.bodies['unit-a']);body['input']['metadata']['dataset_id']='ORIGINAL'
+        response=self.submit(body=body)
+        self.assertEqual(response.json()['detail']['code'],'PROFILE_BINDING_MISMATCH')
+        binding['dataset_profiles']={'ORIGINAL':'relative.json'};self.save_registry()
+        self.assertEqual(self.submit(body=body).json()['detail']['code'],'PROFILE_CONFIGURATION_INVALID')
+
+    def test_reviewed_boundaries_survive_fresh_import_without_overwriting_explicit_choice(self):
+        body=deepcopy(self.bodies['unit-a']);profile=deepcopy(self.profiles['unit-a'])
+        reviewed=body['scenario']['workspace']['unit_rules'].pop('day_boundaries')
+        profile['reviewed_day_boundaries']=reviewed
+        before=deepcopy(body)
+        case=prepare_case(body['input'],profile,body['scenario'])
+        self.assertEqual(case['daily_rest_parameters']['boundaries'][0]['time'],'03:00')
+        self.assertEqual(body,before)
+        body['scenario']['workspace']['unit_rules']['day_boundaries']={}
+        case=prepare_case(body['input'],profile,body['scenario'])
+        self.assertEqual(case['daily_rest_parameters']['missing_person_ids'],['person-a'])
+        body['scenario']['workspace']['unit_rules']['day_boundaries']=deepcopy(reviewed)
+        body['scenario']['workspace']['unit_rules']['day_boundaries']['next']['person-a']['time']='07:00'
+        case=prepare_case(body['input'],profile,body['scenario'])
+        self.assertEqual(case['daily_rest_parameters']['boundaries'][0]['time'],'07:00')
+
     def test_capabilities_private_and_readiness_checks_file(self):
         self.assertEqual(self.client.get('/api/engine/capabilities').status_code,401)
         self.assertEqual(self.client.get('/api/engine/capabilities',headers={'Authorization':'Bearer test-token'}).status_code,403)

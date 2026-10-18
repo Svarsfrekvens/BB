@@ -53,7 +53,14 @@ def binding_for(owner):
             or not isinstance(binding.get('profile_path'), str)
             or not Path(binding['profile_path']).is_absolute()):
         raise BusinessProfileError('PROFILE_CONFIGURATION_INVALID', 'Arbetsytans profilkoppling är ofullständig.', 503)
-    return {k: binding[k] for k in ('business_id', 'data_use', 'profile_path')}
+    variants = binding.get('dataset_profiles', {})
+    if (not isinstance(variants, dict) or any(
+            not isinstance(key, str) or not key.strip() or not isinstance(path, str)
+            or not Path(path).is_absolute() for key, path in variants.items())):
+        raise BusinessProfileError('PROFILE_CONFIGURATION_INVALID',
+                                   'Arbetsytans underlagsprofiler har fel format.', 503)
+    return {**{k: binding[k] for k in ('business_id', 'data_use', 'profile_path')},
+            'dataset_profiles': variants}
 
 
 def scope_for(owner, binding):
@@ -71,7 +78,12 @@ def profile_for(owner, request):
     if md.get('data_use') != binding['data_use']:
         raise BusinessProfileError('DATA_USE_MISMATCH',
             'Underlaget och arbetsytan måste avse samma användning: utveckling eller drift.')
-    profile = _read(binding['profile_path'], 'Verksamhetens beslutsprofil')
+    # Only server-registered variants in this authenticated business may be
+    # selected. Dataset names are routing hints, never proof that rows are valid:
+    # prepare_case still checks the complete reviewed mapping before queuing.
+    dataset_id = md.get('dataset_id')
+    variant = binding['dataset_profiles'].get(dataset_id) if isinstance(dataset_id, str) else None
+    profile = _read(variant or binding['profile_path'], 'Verksamhetens beslutsprofil')
     if (profile.get('schema_version') != 'bb-analysis-input-profile/1.0'
             or not isinstance(profile.get('profile_id'), str) or not profile['profile_id']
             or profile.get('business_id') != binding['business_id']
