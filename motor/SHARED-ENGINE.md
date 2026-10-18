@@ -221,3 +221,21 @@ Galaxen/Vintergatan still need their own verified profiles before real runs.
 Old job records and workspaces are immutable. The method fingerprint changes
 with this code, so a newly requested calculation gets the new check without
 rewriting an old certificate. No automatic new calculation or approval occurs.
+
+## Explicit planned on-call overlay
+
+A private reviewed profile may carry `planned_oncall_replacements`: individually
+mapped excluded St source rows, exact expected source bounds, approved planned
+start/end, unique source-cell-linked ID, SCENARIO status and decision reference.
+The importer only adds Jo within those P2 source bounds, adjoining existing Jo
+in the same source occasion. Work/Jo/Se/Ti overlaps, changed source times,
+historical reconstruction and missing references are rejected. No automatic
+St-to-capacity conversion occurs when this field is absent. These decisions
+remain private and business-specific.
+
+The immutable uploaded source and Before reference retain the recorded outcome.
+Added plan rows are separately exposed in integration provenance and scenario
+assumptions. Reassignable source units carry their plan rows together. Both
+independent rest validators group these reviewed rows with the source occasion;
+generated unrelated duties remain separate. Ordinary net targets are unchanged.
+This does not establish contract-exception applicability or operational approval.

@@ -56,6 +56,8 @@ def longest_free(lo, hi, occupied):
 
 def occasions(case, raw):
     trusted = {r['id']: r.get('whole_duty_id') for r in case['references']['import']['segments']}
+    trusted.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
+                    for p in case.get('integration',{}).get('planned_oncall_replacements',[])})
     groups = defaultdict(list)
     for r in raw.get('segments', []):
         if r['code'] in WORK_CODES:

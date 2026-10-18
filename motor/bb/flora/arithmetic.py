@@ -25,6 +25,8 @@ def check_arithmetic(case, solution):
     source_ids = {r["id"] for r in original["references"]["import"]["segments"]}
     # Trust only the importer's reviewed grouping, never a solver-supplied label.
     whole_duty_ids = {r["id"]: r["whole_duty_id"] for r in original["references"]["import"]["segments"] if r.get("whole_duty_id")}
+    whole_duty_ids.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
+                          for p in case.get('integration',{}).get('planned_oncall_replacements',[])})
     units = {u["id"]: u for u in case["reassignable_temporary_units"]}
     errors = []
     inherited = []
