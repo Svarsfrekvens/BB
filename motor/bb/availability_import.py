@@ -56,6 +56,45 @@ def minute(value, zone):
     return int(dt.timestamp() // 60)
 
 
+def _effective_needs(rows, ledger, zone):
+    """Rebuild operative times from this request plus explicit reviewed overlays."""
+    result = {r['need_id']: dict(earliest=minute(r['window_start'], zone),
+        latest_end=minute(r['window_end'], zone), duration=r.get('duration_minutes'),
+        count=r.get('personnel_count_candidate'), customer_id=r.get('customer_id')) for r in rows}
+    fields = {'window_start':'earliest', 'Intervallstart':'earliest',
+        'window_end':'latest_end', 'Intervall änden':'latest_end',
+        'duration_minutes':'duration', 'Förväntad genomförandetid (min)':'duration',
+        'personnel_count_candidate':'count', 'antal_personer_original':'count',
+        'customer_id':'customer_id', 'kund_id':'customer_id'}
+    derived = {'start_iso', 'slut_iso', 'fonster_min', 'fonsterkontroll', 'p2_overlapp_min'}
+    def value(key, raw):
+        if key not in ('earliest', 'latest_end'):
+            return raw
+        if isinstance(raw, str) and len(raw)>9 and raw[2:3]=='-' and raw[5:6]=='-':
+            raw=datetime.strptime(raw,'%d-%m-%Y %H:%M').isoformat(timespec='minutes')
+        return minute(raw, zone)
+    for record in ledger:
+        identity=record.get('need_id')
+        if (identity not in result or record.get('status') not in ('CONFIRMED_BY_USER', 'SCENARIO')
+                or not record.get('decision_id') or not record.get('source')
+                or not isinstance(record.get('changes'), list)):
+            raise ValueError('En rättning saknar källa, status eller säker behovskoppling.')
+        before=deepcopy(result[identity])
+        for change in record['changes']:
+            field=change.get('field')
+            if field in derived:
+                # These explain a source check. Only the actual dated primary
+                # fields affect the solver; original display cells stay intact.
+                continue
+            if field not in fields:
+                raise ValueError('Beslutsprofilens rättningsfält saknar uttrycklig mappning: '+str(field))
+            key=fields[field]
+            if value(key, change.get('before'))!=before[key]:
+                raise ValueError('Rättningens Före-värde stämmer inte med uppladdningen: '+identity)
+            result[identity][key]=value(key,change.get('after'))
+    return result
+
+
 def check_case(case):
     """Validate supported decisions without constructing CP-SAT in HTTP preflight."""
     if case.get('schema_version') != 'bb-availability-case/1.0':
@@ -143,6 +182,9 @@ def prepare_case(raw, profile, scenario=None):
         raise ValueError('Den privata profilen saknar ett granskat tillgänglighetsunderlag.')
     check_case(case)
     md = raw['metadata']
+    reviewed_sha=(case.get('metadata') or {}).get('source_workbook_sha256')
+    if reviewed_sha is not None and reviewed_sha != md.get('source_file_sha256'):
+        raise ValueError('Det granskade underlaget är inte avstämt mot denna originalfils kontrollsumma.')
     periods = {p['id']: p for p in md['periods']}
     period = periods[md['planning_period_id']]
     if (case['period']['start'][:10] != period['start']
@@ -174,8 +216,16 @@ def prepare_case(raw, profile, scenario=None):
     planning_ids = {n['need_id'] for n in raw['customer_needs'] if period['start'] <= n['date'] <= period['end']}
     if planning_ids != {n['id'] for n in case['needs']}:
         raise ValueError('Alla periodens behov måste finnas i den nya körningen.')
+    effective=_effective_needs([r for r in raw['customer_needs'] if r['need_id'] in planning_ids],
+                               profile.get('decision_ledger', []), zone)
     for need in case['needs']:
         row = needs[need['id']]
+        current=effective[need['id']]
+        if any(need.get(key)!=value for key,value in current.items()):
+            raise ValueError('Behovets granskade modell skiljer sig från uppladdningen och beslutade rättningar: '+need['id'])
+        if need.get('required_profession_source') != row.get('profession_raw'):
+            raise ValueError('Behovets källbelagda yrkeskrav har ändrats: '+need['id'])
+        need.update(current)
         need['source_ref'] = row.get('source_ref')
         need['original_submitted_row'] = deepcopy(row)
     case['integration'] = dict(profile_id=profile['profile_id'], business_id=profile.get('business_id'),

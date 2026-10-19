@@ -19,9 +19,9 @@ def sample(business='synthetic-a'):
         planning_period_id='next', history_period_id='history', source_layout='synthetic/1.0'),
         staff=[dict(person_id='p1', alias='Invented person')], customers=[dict(customer_id='k1', scope='INDIVIDUAL')],
         schedule_segments=source, customer_needs=[dict(need_id='n1', date='2026-06-01', customer_id='k1',
-            window_start='2026-06-01T08:30', window_end='2026-06-01T09:30', duration_minutes=30),
+            window_start='2026-06-01T08:30', window_end='2026-06-01T09:30', duration_minutes=30,personnel_count_candidate=1),
             dict(need_id='n2', date='2026-06-01', customer_id='k1', window_start='2026-06-01T09:30',
-                 window_end='2026-06-01T10:30', duration_minutes=30)], business_rules=[], vc_answers=[])
+                 window_end='2026-06-01T10:30', duration_minutes=30,personnel_count_candidate=1)], business_rules=[], vc_answers=[])
     person = dict(id='p1', alias='Invented person', planned_Ar_target_minutes=240, staffing_type='ORDINARY_SOURCE',
         availability_status='VERIFIED', allowed_presence_windows=[dict(start=a, end=b, status='VERIFIED')],
         history_known=True, skills_known=[], hard_condition_unknown=False,

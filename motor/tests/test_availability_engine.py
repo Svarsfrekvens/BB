@@ -50,6 +50,26 @@ class AvailabilityMethodTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'indataversion'):
                 prepare(profile, request)
 
+    def test_a_new_source_hash_cannot_rebind_stale_effective_need_times(self):
+        request, profile=sample()
+        request['input']['customer_needs'][0]['duration_minutes']=45
+        profile['source_identity']=source_identity(request['input'])
+        with self.assertRaisesRegex(ValueError,'granskade modell skiljer sig'):
+            prepare(profile,request)
+
+    def test_sourced_temporal_overlay_is_applied_separately_and_checks_its_before_value(self):
+        request, profile=sample();before=deepcopy(request)
+        profile['reviewed_case']['needs'][0]['duration']=45
+        profile['decision_ledger']=[dict(need_id='n1',status='CONFIRMED_BY_USER',decision_id='synthetic-review',source='Invented explicit decision',
+            changes=[dict(field='duration_minutes',before=30,after=45)])]
+        case=prepare(profile,request)
+        self.assertEqual(case['needs'][0]['duration'],45)
+        self.assertEqual(case['needs'][0]['original_submitted_row']['duration_minutes'],30)
+        self.assertEqual(request,before)
+        profile['decision_ledger'][0]['changes'][0]['before']=25
+        with self.assertRaisesRegex(ValueError,'Före-värde'):
+            prepare(profile,request)
+
     def test_routing_metadata_and_row_order_do_not_change_source_identity(self):
         request, _ = sample(); raw = request['input']; before = source_identity(raw)
         raw['metadata'].update(business_id='another-authenticated-owner', data_use='development', import_warnings=['display'])
