@@ -20,6 +20,7 @@ from ortools.sat.python import cp_model
 
 from .history import jour_windows, merged_intervals, overlap, utc_minute
 from .daily_rest import add_standard_daily_rest
+from ..concurrency_policy import reviewed_modes
 
 DAY, WEEK, ROLLING = 1440, 10080, 40320
 SAFE_BUDGET_CEILINGS = {"max_occurrences": 4000, "max_candidates": 20000,
@@ -261,6 +262,7 @@ def _unknown_facts(data):
 
 def build_model(data, diagnostic_only=False):
     """Build all occurrences and global duties; return (model, extraction context)."""
+    concurrency = reviewed_modes(data)
     availability_missing = _availability_facts(data)
     if availability_missing and not diagnostic_only:
         people = ", ".join(fact["employee_id"] for fact in availability_missing)
@@ -615,7 +617,7 @@ def build_model(data, diagnostic_only=False):
                         model.Add(start >= block["left"]).OnlyEnforceIf(support)
                         model.Add(start + need["duration"] <= block["right"]).OnlyEnforceIf(support)
                         interval = model.NewOptionalFixedSizeIntervalVar(start, need["duration"], support, f"{nid}_{source['id']}_Ar{index}_interval")
-                        assignments_by_person[employee_id].append(interval)
+                        assignments_by_person[employee_id].append((interval, nid))
                         supports.append(support); per_person[employee_id].append(support)
                         context["supports"].append({"need_id": nid, "employee_id": employee_id, "candidate_id": source["id"], "presence": support, "start": start, "duration": need["duration"]})
                 for fixed in frozen_by_person[employee_id]:
@@ -629,7 +631,7 @@ def build_model(data, diagnostic_only=False):
                         model.Add(start >= a).OnlyEnforceIf(support)
                         model.Add(start + need["duration"] <= b).OnlyEnforceIf(support)
                         interval = model.NewOptionalFixedSizeIntervalVar(start, need["duration"], support, f"{nid}_{fixed['id']}_frozenAr{index}_interval")
-                        assignments_by_person[employee_id].append(interval)
+                        assignments_by_person[employee_id].append((interval, nid))
                         supports.append(support); per_person[employee_id].append(support)
                         context["supports"].append({"need_id": nid, "employee_id": employee_id,
                             "candidate_id": fixed["id"], "presence": support, "start": start,
@@ -641,10 +643,19 @@ def build_model(data, diagnostic_only=False):
             model.Add(coverage == 0)
         context["needs"][nid] = {"source": need, "coverage": coverage, "start": start,
                                   "blockers": sorted(set(blockers)), "supports": supports}
-    for intervals in assignments_by_person.values():
-        # No unverified parallel service: this conservative domain remains a
-        # scenario restriction, not a invented concurrency business decision.
-        model.AddNoOverlap(intervals)
+    for entries in assignments_by_person.values():
+        intervals = [interval for interval, nid in entries]
+        shared = {nid for interval, nid in entries if concurrency and concurrency[nid] == 'SHARED'}
+        if not shared:
+            model.AddNoOverlap(intervals)
+        else:
+            # An exclusive task occupies this employee completely. Shared
+            # tasks can overlap; each need still requires its own distinct,
+            # eligible performers at its actual start. The integer capacity
+            # is an encoding bound, not an invented business concurrency cap.
+            capacity = len(shared)
+            model.AddCumulative(intervals,
+                [1 if concurrency[nid] == 'SHARED' else capacity for interval, nid in entries], capacity)
     coverage_total = sum(n["coverage"] for n in context["needs"].values())
     model.Maximize(coverage_total)
     context["coverage_total"] = coverage_total

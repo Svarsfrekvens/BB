@@ -54,6 +54,11 @@ workspace identity. A missing business never falls back to Flora.
   Unknown permission means no assignment, while the need stays in the denominator.
 - Confirmed availability is required. Historical presence is not availability;
   a vacancy is staffing demand, never an employee or an implicit temporary booking.
+- Co-planning is opt-in through a source-bound, per-need reviewed policy.
+  Compatible workflows may share an eligible person; exclusive and unclassified
+  activities retain that person's full capacity. Missing policy keeps legacy
+  no-overlap behavior. See [CONCURRENCY.md](CONCURRENCY.md) for decision binding,
+  independent checks, unique personal minutes and practical unknowns.
 - Ordinary source Ar is preserved exactly per person. The whole mutable duty
   minimum includes retained original duties. Whole typed Jo and its source demand
   are handled separately from active work.
