@@ -159,6 +159,7 @@ class StoreTests(unittest.TestCase):
         importer = types.ModuleType("bb.flora_import")
         importer.prepare_case = Mock(return_value={"actual_uploaded_case": True})
         method = types.ModuleType("bb.flora")
+        method.check_case = Mock()
         def solve(*args, **kwargs):
             started.set()
             if not release.wait(3):
@@ -209,6 +210,7 @@ class StoreTests(unittest.TestCase):
         importer = types.ModuleType("bb.flora_import")
         importer.prepare_case = Mock(return_value={"actual_uploaded_case": True})
         method = types.ModuleType("bb.flora")
+        method.check_case = Mock()
         method.solve_case = Mock(return_value={"solver_status": "FEASIBLE", "review_required": True})
         method.validate_case = Mock(return_value={"overall": "UNKNOWN", "rules": []})
         with patch.dict("sys.modules", {"bb.flora_import": importer, "bb.flora": method}):
@@ -229,6 +231,7 @@ class StoreTests(unittest.TestCase):
         importer = types.ModuleType("bb.flora_import")
         importer.prepare_case = Mock(side_effect=ValueError("Behov N1 saknar beslutad duration."))
         method = types.ModuleType("bb.flora")
+        method.check_case = Mock()
         method.solve_case = Mock()
         method.validate_case = Mock()
         with patch.dict("sys.modules", {"bb.flora_import": importer, "bb.flora": method}):

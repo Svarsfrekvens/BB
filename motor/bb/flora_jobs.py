@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from contextlib import contextmanager
 
 
-METHOD_VERSION = "flora-reassignment/1.0"
+METHOD_VERSION = "shared-business-engine/2.0"
 OBJECTIVES = {"coverage_then_temporary", "coverage_then_workload_then_temporary"}
 MAX_SECONDS = 300
 _MANAGERS: dict[str, "JobManager"] = {}
@@ -46,7 +46,10 @@ def method_fingerprint() -> str:
     """Cache identity follows actual implementation, not only its display name."""
     root = Path(__file__).resolve().parent
     files = [root / "flora_import.py", root / "business_profiles.py",
-             root / "engine_api.py", root / "flora_jobs.py", root / "rule_policy.py", *sorted((root / "flora").glob("*.py"))]
+             root / "engine_api.py", root / "flora_api.py", root / "flora_jobs.py", root / "rule_policy.py",
+             root / "engine_methods.py", root / "availability_import.py",
+             root / "profile_encoding.py",
+             *sorted((root / "flora").glob("*.py")), *sorted((root / "availability").glob("*.py"))]
     content = hashlib.sha256(METHOD_VERSION.encode())
     for path in files:
         if path.is_file():
@@ -392,13 +395,10 @@ def run_worker(path: str, job_id: str, lease: str):
             return
         request = json.loads(row["request_json"])
         profile = json.loads(row["profile_json"])
-        from .flora_import import prepare_case
-        from .flora import solve_case, validate_case
-        case = prepare_case(request["input"], profile, request["scenario"])
+        from .engine_methods import prepare, solve
+        case = prepare(profile, request)
         started = time.monotonic()
-        result = solve_case(case, seconds=request["seconds"], workers=2,
-                            objective_mode=request["objective_mode"])
-        result["validation"] = validate_case(case, result)
+        result = solve(profile, case, request)
         result["input_hash"] = row["input_hash"]
         result["provenance"] = {**result.get("provenance", {}), "input_hash": row["input_hash"],
                                 "profile_hash": row["profile_hash"], "method_version": METHOD_VERSION,
