@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import re
+import zlib
 
 from .flora_jobs import JobInputError, canonical, digest
 
@@ -24,8 +25,9 @@ class BusinessProfileError(JobInputError):
 
 def _read(path, label):
     try:
-        value = json.loads(Path(path).read_bytes())
-    except (OSError, ValueError, TypeError) as exc:
+        from .profile_encoding import decode_profile
+        value = decode_profile(json.loads(Path(path).read_bytes()))
+    except (OSError, ValueError, TypeError, EOFError, zlib.error) as exc:
         raise BusinessProfileError('PROFILE_CONFIGURATION_UNAVAILABLE',
                                    f'{label} kunde inte läsas på servern.', 503) from exc
     if not isinstance(value, dict):

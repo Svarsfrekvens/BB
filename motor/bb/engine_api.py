@@ -44,9 +44,12 @@ async def capabilities(request: Request):
     try:
         binding = binding_for(owner)
         # Read the profile as well: an environment variable alone is not readiness.
-        _, _, _, context = profile_for(owner, {'input': {'metadata': binding}})
+        metadata = {**binding, 'dataset_id': request.query_params.get('dataset_id')}
+        profile, _, _, context = profile_for(owner, {'input': {'metadata': metadata}})
         report.update(business_id=context['business_id'], data_use=context['data_use'],
                       profile_status='CONFIGURED_INPUT_REVIEW_REQUIRED')
+        if profile.get('engine_strategy') == 'reviewed-availability/1.0':
+            report['recommended_search_seconds'] = 300
     except BusinessProfileError as exc:
         report.update(profile_error_code=exc.code, profile_message=str(exc))
     return report
@@ -56,14 +59,14 @@ async def capabilities(request: Request):
 async def create_job(request: Request):
     owner = verified_owner(request)
     try:
-        body = normalize_request(await json_body(request))
+        # The shared route matches the app gateway's bounded 8 MiB transfer.
+        # The legacy Flora endpoint retains its existing 6 MiB limit.
+        body = normalize_request(await json_body(request, max_body=8*1024*1024))
         profile, profile_hash, scope, context = profile_for(owner, body)
         # Fail changed dates/IDs/missing decisions before a job is queued. This
         # pure adapter never runs the solver or changes the submitted workbook.
-        from .flora_import import prepare_case
-        from .flora import check_case
-        case = prepare_case(body['input'], profile, body['scenario'])
-        check_case(case)
+        from .engine_methods import prepare
+        prepare(profile, body)
         client_key = request.headers.get('idempotency-key') or None
         if client_key and not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,160}', client_key):
             raise JobInputError('Ogiltig körningsnyckel.')

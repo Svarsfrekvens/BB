@@ -37,11 +37,11 @@ def capabilities():
                 remote_enabled=os.environ.get('BB_FLORA_REMOTE_ENABLED') == '1')
 
 
-async def json_body(request):
+async def json_body(request, *, max_body=MAX_BODY):
     content = bytearray()
     async for chunk in request.stream():
         content.extend(chunk)
-        if len(content) > MAX_BODY:
+        if len(content) > max_body:
             raise HTTPException(413, 'För stort underlag.')
     try:
         return json.loads(content)
