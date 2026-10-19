@@ -11,6 +11,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from .flora_import import _workspace
+from .concurrency_policy import reviewed_modes, source_row_digest
 
 STRATEGY = 'reviewed-availability/1.0'
 SOURCE_LISTS = {'staff': 'person_id', 'customers': 'customer_id',
@@ -155,6 +156,7 @@ def check_case(case):
             raise ValueError('Behovet har en okänd utförarkoppling: ' + need['id'])
         if need.get('blockers') and eligible:
             raise ValueError('Ett olöst behörighetsvillkor får inte samtidigt tillåta tilldelning.')
+    reviewed_modes(case)
     return case
 
 
@@ -181,6 +183,10 @@ def prepare_case(raw, profile, scenario=None):
     if not isinstance(case, dict):
         raise ValueError('Den privata profilen saknar ett granskat tillgänglighetsunderlag.')
     check_case(case)
+    policy = case.get('concurrency_policy')
+    if policy and (policy['business_id'] != profile.get('business_id')
+                   or policy['source_identity'] != identity):
+        raise ValueError('Samplaneringsbeslutet tillhör ett annat underlag eller en annan verksamhet.')
     md = raw['metadata']
     reviewed_sha=(case.get('metadata') or {}).get('source_workbook_sha256')
     if reviewed_sha is not None and reviewed_sha != md.get('source_file_sha256'):
@@ -228,6 +234,8 @@ def prepare_case(raw, profile, scenario=None):
         need.update(current)
         need['source_ref'] = row.get('source_ref')
         need['original_submitted_row'] = deepcopy(row)
+        if policy and need['concurrency']['source_row_sha256'] != source_row_digest(row):
+            raise ValueError('Samplaneringsbeslutet måste granskas mot den aktuella källraden: '+need['id'])
     case['integration'] = dict(profile_id=profile['profile_id'], business_id=profile.get('business_id'),
         data_use=profile['data_use'], source_identity=identity,
         source_file_sha256=md.get('source_file_sha256'),

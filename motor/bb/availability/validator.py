@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 from fractions import Fraction
+from hashlib import sha256
+import json
 from math import ceil, floor
 from zoneinfo import ZoneInfo
 
@@ -18,6 +20,53 @@ DAY = 1440
 WEEK = 7 * DAY
 ROLLING = 28 * DAY
 FEASIBLE_STATUSES = {"OPTIMAL", "FEASIBLE"}
+
+
+def _reviewed_shared_needs(data, issue, unknown):
+    """Independently check decision provenance; do not import the model/parser."""
+    needs = data.get('needs', [])
+    if 'concurrency_policy' not in data:
+        if any('concurrency' in n for n in needs):
+            issue('concurrency_decision', 'Concurrency classifications have no reviewed policy')
+        return set()
+    p = data['concurrency_policy']
+    text = lambda v: isinstance(v, str) and bool(v.strip())
+    context = data.get('integration', {})
+    if (not isinstance(p, dict) or set(p) != {'schema_version', 'mode', 'status', 'decision_id', 'source', 'business_id', 'source_identity', 'period_lo', 'period_hi'}
+            or p.get('schema_version') != 'bb-concurrency-policy/1.0'
+            or p.get('mode') != 'EXPLICIT_PER_NEED_COMPATIBILITY'
+            or p.get('status') not in ('SCENARIO', 'CONFIRMED_BY_USER')
+            or not all(text(p.get(k)) for k in ('decision_id', 'source', 'business_id', 'source_identity'))
+            or p.get('period_lo') != data['period']['lo'] or p.get('period_hi') != data['period']['hi']
+            or p.get('business_id') != context.get('business_id')
+            or p.get('source_identity') != context.get('source_identity')):
+        issue('concurrency_decision', 'Concurrency policy is missing or belongs to another source, period or business')
+        return set()
+    shared, valid = set(), True
+    for need in needs:
+        row_valid = True
+        d, row = need.get('concurrency'), need.get('original_submitted_row')
+        if (not isinstance(d, dict) or set(d) != {'mode', 'decision_id', 'source_ref', 'source_row_sha256', 'reason'}
+                or d.get('mode') not in ('SHARED', 'EXCLUSIVE', 'UNCLASSIFIED')
+                or d.get('decision_id') != p['decision_id']
+                or not text(d.get('source_ref')) or not text(d.get('reason'))
+                or not isinstance(row, dict) or row.get('need_id') != need['id']):
+            row_valid = False
+        else:
+            digest = sha256(json.dumps(row, ensure_ascii=False, sort_keys=True,
+                separators=(',', ':'), allow_nan=False).encode()).hexdigest()
+            if d.get('source_row_sha256') != digest:
+                row_valid = False
+            elif d['mode'] == 'SHARED':
+                shared.add(need['id'])
+            elif d['mode'] == 'UNCLASSIFIED':
+                unknown('concurrency_classification', 'Unclassified activity remains exclusive; no sharing inferred', need_id=need['id'])
+        if not row_valid:
+            valid = False
+            issue('concurrency_decision', 'Activity concurrency decision is not bound to its actual source row', need_id=need['id'])
+    if valid:
+        unknown('practical_concurrency', 'Explicit sharing is a mathematical scenario; active attention, location and travel remain unverified', decision_id=p['decision_id'])
+    return shared if valid else set()
 
 
 def _origin(data):
@@ -374,6 +423,8 @@ def validate(data, result):
         status = "FAIL" if new else "UNKNOWN" if missing or not feasible else "PASS" if applicable else "NOT_APPLICABLE"
         report["rules"].append({"rule": rule, "status": status, "new_violations": len(new), "historical_violations": len(hist), "unknown_count": len(missing), "details": details or {}})
 
+    shared_needs = _reviewed_shared_needs(data, issue, unknown)
+
     if dynamic_requested:
         # Verification of the contract text and verification of its local
         # application are separate facts.  Neither a mathematical result nor a
@@ -698,15 +749,34 @@ def validate(data, result):
         for nid, records in assignments.items():
             for record in records:
                 active_records[record["employee_id"]].append((record["start"], record["end"], nid))
+        allowed_pairs, examples, peaks = 0, [], {}
         for employee_id, records in active_records.items():
             ongoing = []
             for a, b, nid in sorted(records):
                 ongoing = [(x, y, n) for x, y, n in ongoing if y > a]
                 for x, y, other in ongoing:
-                    # This isolated case has no verified business samplanning
-                    # identity/effort contract.  A common title is not evidence.
-                    issue("activity_capacity", "Same person is assigned overlapping activities without verified shared-work semantics", employee_id=employee_id, need_ids=[other, nid], overlap=[a, min(b, y)])
+                    if nid in shared_needs and other in shared_needs:
+                        allowed_pairs += 1
+                        if len(examples) < 20:
+                            examples.append(dict(employee_id=employee_id, need_ids=[other, nid], overlap=[a, min(b, y)]))
+                    else:
+                        issue("activity_capacity", "Same person overlaps an exclusive or unverified activity", employee_id=employee_id, need_ids=[other, nid], overlap=[a, min(b, y)])
                 ongoing.append((a, b, nid))
+            events = sorted(event for a, b, nid in records if min(b, hi) > max(a, lo)
+                for event in [(max(a, lo), 1), (min(b, hi), -1)])
+            active, peak = 0, 0
+            for moment, delta in events:
+                active += delta
+                peak = max(peak, active)
+            peaks[employee_id] = peak
+        if 'concurrency_policy' in data:
+            p = data['concurrency_policy'] if isinstance(data['concurrency_policy'], dict) else {}
+            report['concurrency'] = dict(decision_id=p.get('decision_id'),
+                permitted_overlapping_pairs=allowed_pairs, examples=examples,
+                maximum_simultaneous_by_person=peaks,
+                assigned_person_minutes_once=sum(_overlap([(a,b) for a,b,nid in records],lo,hi) for records in active_records.values()),
+                summed_need_duration_person_minutes=sum(max(0,min(b,hi)-max(a,lo)) for records in active_records.values() for a,b,nid in records),
+                practical_execution_verified=False)
         report["coverage"] = {
             "status": "COMPLETE" if len(assignments) == len(needs) and not omitted_set else "PARTIAL",
             "input_need_count": len(needs), "assigned_needs": len(assignments),
@@ -1042,6 +1112,8 @@ def validate(data, result):
         rule_names = ["input_integrity", "input_unknown", "proposed_schedule", "availability", "daily_rest", "weekly_rest", "long_duty", "jour_compensation", "jour_rolling_28d", "history_boundary", "post_period_rest"]
     if dynamic_requested:
         rule_names.extend(["jour_adjacency", "planned_exception_process", "daily_rest_24h_placement", "C_SCOPE_DISABLED"])
+    if 'concurrency_policy' in data or any('concurrency' in n for n in data.get('needs', [])):
+        rule_names.extend(['concurrency_decision', 'concurrency_classification', 'practical_concurrency'])
     for name in rule_names:
         rule_status(name)
     report["summary"] = {"new_violations": len(report["violations"]["new"]), "historical_violations": len(report["violations"]["historical"]), "unknown_controls": len(report["unknown_controls"])}

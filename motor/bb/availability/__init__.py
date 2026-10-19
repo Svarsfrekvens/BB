@@ -187,7 +187,7 @@ def normalize(case, raw, validation):
     policy = shared_principles()
     policy.update(profile_id=integration['profile_id'], business_id=integration['business_id'],
                   effective_profile_values=deepcopy(case['rules']), other_business_decisions_inherited=False)
-    return dict(schema_version='bb-engine-run/1.0', review_required=True, business_schedule_approved=False,
+    result = dict(schema_version='bb-engine-run/1.0', review_required=True, business_schedule_approved=False,
         method=METHOD, solver_status=raw['solver_status'], period=period,
         before=totals(before, False), after=totals(after, True),
         persons=[dict(person_id=pid, alias=p.get('alias'), before=before[pid], after=after.get(pid),
@@ -212,3 +212,11 @@ def normalize(case, raw, validation):
             status='UNKNOWN_PAID_TIME_NOT_VERIFIED', explanation='Rastavräkning saknas; Ar-tid får inte bli verifierad betald nettotid eller kostnadsbesparing.'),
         rule_policy=policy, provenance=dict(source_identity=integration['source_identity'], source_file_sha256=integration['source_file_sha256'],
             profile_source=integration['profile_source'], decisions=integration['decisions'], old_solver_result_reused=False))
+    if 'concurrency_policy' in case:
+        result['concurrency'] = dict(policy=deepcopy(case['concurrency_policy']),
+            **deepcopy(validation['details'].get('concurrency', {})))
+        result['provenance']['concurrency_decision'] = deepcopy(case['concurrency_policy'])
+        result['time_accounting']['covered_need_minutes_basis'] = 'SOURCE_ACTIVITY_DURATIONS_NOT_UNIQUE_PERSON_TIME'
+        for intervention in result['schedule']['interventions']:
+            intervention['concurrency'] = deepcopy(needs[intervention['need_id']]['concurrency'])
+    return result
