@@ -103,3 +103,21 @@ async def read_job(job_id: str, request: Request):
     if not job:
         raise HTTPException(404, 'Körningen finns inte i den här arbetsytan.')
     return job
+
+
+@router.get('/api/engine/jobs/{job_id}/submitted-source')
+async def read_submitted_source(job_id: str, request: Request):
+    """Private, immutable job input for comparison before any working-copy transfer."""
+    owner = verified_owner(request)
+    if not re.fullmatch(r'[a-f0-9]{32}', job_id):
+        raise HTTPException(404, 'Körningen finns inte i den här arbetsytan.')
+    try:
+        scope = scope_for(owner, binding_for(owner))
+        source = get_manager().store.submitted_source(job_id, scope)
+    except BusinessProfileError as exc:
+        raise profile_error(exc) from exc
+    except JobInputError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if not source:
+        raise HTTPException(404, 'Körningen finns inte i den här arbetsytan.')
+    return source

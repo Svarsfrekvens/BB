@@ -8,7 +8,7 @@ import unittest
 from unittest.mock import Mock, patch
 from fastapi.testclient import TestClient
 from bb.api import app
-from bb.flora_jobs import JobStore, run_worker
+from bb.flora_jobs import JobStore, digest, run_worker
 from bb.flora_import import prepare_case
 from test_flora_import import sample
 from test_flora_method import fixture
@@ -73,6 +73,13 @@ class BusinessEngineTests(unittest.TestCase):
             self.assertEqual(output['rule_policy']['business_id'],business)
             self.assertEqual(output['rule_policy']['version'],'bb-shared-principles/1.0')
             self.assertEqual(output['rule_policy']['planning_limits']['status'],'NOT_SELECTED')
+            submitted=self.client.get('/api/engine/jobs/'+job_id+'/submitted-source',headers=self.headers(business))
+            self.assertEqual(submitted.status_code,200,submitted.text)
+            saved=submitted.json()
+            self.assertEqual(saved['request']['input'],self.bodies[business]['input'])
+            self.assertEqual(saved['input_hash'],digest(saved['request']['input']))
+            self.assertEqual(saved['profile_hash'],output['provenance']['profile_hash'])
+            self.assertFalse(saved['business_schedule_approved'])
             expected=self.bodies[business]['scenario']['workspace']['unit_rules']['day_boundaries']['next']['person-a']['time']
             self.assertEqual(output['daily_rest_parameters']['boundaries'][0]['time'],expected)
             certificate=output['validation']['certificates']['daily_rest_24h.json']
@@ -82,10 +89,32 @@ class BusinessEngineTests(unittest.TestCase):
             self.assertFalse(certificate['other_business_decisions_inherited'])
             foreign=self.client.get('/api/engine/jobs/'+job_id,headers=self.headers('unit-b' if business!='unit-b' else 'unit-c'))
             self.assertEqual(foreign.status_code,404)
+            self.assertEqual(self.client.get('/api/engine/jobs/'+job_id+'/submitted-source',headers=self.headers('unit-b' if business!='unit-b' else 'unit-c')).status_code,404)
             self.assertEqual(self.client.get('/api/flora/jobs/'+job_id,headers=self.headers(business)).status_code,404)
         self.assertEqual(len(set(jobs.values())),3);self.assertEqual(before,self.bodies)
         for business in self.profiles:
             self.assertEqual(json.loads((self.root/(business+'.json')).read_text()),self.profiles[business])
+
+    def test_submitted_source_rejects_changed_saved_input_without_returning_rows(self):
+        job_id=self.submit().json()['id']
+        self.assertEqual(self.client.get('/api/engine/jobs/'+job_id+'/submitted-source',headers=self.headers()).status_code,503)
+        claimed,lease=self.store.claim();self.assertEqual(claimed,job_id)
+        run_worker(str(self.store.path),job_id,lease)
+        with self.store.connect() as con:
+            row=con.execute('SELECT request_json FROM jobs WHERE id=?',(job_id,)).fetchone()
+            changed=json.loads(row['request_json']);changed['input']['customer_needs'][0]['duration_minutes']=999
+            con.execute('UPDATE jobs SET request_json=? WHERE id=?',(json.dumps(changed),job_id))
+        response=self.client.get('/api/engine/jobs/'+job_id+'/submitted-source',headers=self.headers())
+        self.assertEqual(response.status_code,503)
+        self.assertNotIn('customer_needs',response.text)
+
+    def test_job_build_commit_is_recorded_only_when_render_provides_a_full_hash(self):
+        with patch.dict(os.environ,{'RENDER_GIT_COMMIT':'a'*40}):
+            job=self.submit().json()
+        self.assertEqual(job['build_commit'],'a'*40)
+        read=self.client.get('/api/engine/jobs/'+job['id'],headers=self.headers())
+        self.assertEqual(read.status_code,200)
+        self.assertEqual(read.json()['build_commit'],'a'*40)
 
     def test_client_cannot_choose_foreign_profile_or_override_context(self):
         self.assertEqual(self.submit('unit-a',self.bodies['unit-b']).status_code,422)
