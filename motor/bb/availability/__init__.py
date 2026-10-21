@@ -179,6 +179,7 @@ def normalize(case, raw, validation):
         for key, code in [('work', 'Ar'), ('jour', 'Jo')]:
             for index, (a, b) in enumerate(duty.get(key, [])):
                 segments.append(dict(segment_id=f"{duty['id']}:{code}:{index}", person_id=duty['employee_id'],
+                    pass_id=f"duty:{duty['id']}", pass_id_basis='SELECTED_DUTY_ID',
                     start=_stamp(a, zone), end=_stamp(b, zone), code=code,
                     staffing_type='ordinary' if people[duty['employee_id']]['staffing_type'] == 'ORDINARY_SOURCE' else 'temporary',
                     source_ref=deepcopy(duty.get('source_refs', [])), minutes_in_period=overlap(a, b, lo, hi)))
@@ -193,6 +194,10 @@ def normalize(case, raw, validation):
         persons=[dict(person_id=pid, alias=p.get('alias'), before=before[pid], after=after.get(pid),
             weekly_net_minutes=None, minimum_rolling_free_days=None) for pid, p in people.items()],
         schedule=dict(segments=segments, breaks=[], interventions=interventions), validation=validation,
+        transfer_contract=dict(version='bb-engine-transfer-anchors/1.0',
+            pass_ids_complete=(feasible and bool(segments) and len({d['id'] for d in after_duties})==len(after_duties)
+                               and all(s['pass_id'] for s in segments)),
+            break_anchors_complete=True, approval_inherited=False),
         solver=dict(status=raw['solver_status'], wall_seconds=raw['search_seconds'], build_seconds=raw['build_seconds'],
             phases=raw['phases'], coverage_optimal_within_model=raw['coverage_optimal_within_model'],
             phase2_status=raw['phase2_status']), raw_solution=raw,

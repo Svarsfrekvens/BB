@@ -2,7 +2,7 @@
 import copy
 import unittest
 
-from bb.flora import solve_case, validate_case
+from bb.flora import _normalize, solve_case, validate_case
 
 
 def fixture():
@@ -36,12 +36,35 @@ class FloraMethodTest(unittest.TestCase):
         self.assertEqual(out['after']['fully_covered_needs'],1)
         self.assertEqual(out['after']['ordinary_net_minutes'],240)
         self.assertEqual(out['schedule']['segments'][0]['person_id'],'uploaded-employee')
+        self.assertEqual(out['schedule']['segments'][0]['pass_id'],'generated:candidate-X')
+        self.assertEqual(out['schedule']['segments'][0]['pass_id_basis'],'MODEL_CANDIDATE_SHIFT')
+        self.assertTrue(out['transfer_contract']['pass_ids_complete'])
+        self.assertFalse(out['transfer_contract']['approval_inherited'])
         self.assertEqual(out['schedule']['interventions'][0]['need_id'],'uploaded-need')
         self.assertTrue(out['schedule']['segments'][0]['start'].endswith('+02:00'))
         self.assertFalse(out['business_schedule_approved'])
         self.assertEqual(out['validation']['checked_status'],'PASS')
         self.assertEqual(out['validation']['overall'],'UNKNOWN')
         self.assertIsNone(out['after']['extra_minutes'])
+
+    def test_transfer_anchors_require_reviewed_pass_group_and_unique_break_row(self):
+        case=copy.deepcopy(self.case);raw=copy.deepcopy(self.output['raw_solution'])
+        source={'id':'source-row','person':'employee-X','start':900,'end':1140,'code':'Ar','type':'AKTIVT_ARBETE'}
+        raw['segments'].append(source)
+        unknown=_normalize(case,raw,self.output['validation'])
+        self.assertIsNone(next(s for s in unknown['schedule']['segments'] if s['segment_id']=='source-row')['pass_id'])
+        self.assertFalse(unknown['transfer_contract']['pass_ids_complete'])
+        source['whole_duty_id']='reviewed-duty'
+        raw['breaks']=[{'person':'employee-X','start':960,'end':990}]
+        known=_normalize(case,raw,self.output['validation'])
+        self.assertEqual(next(s for s in known['schedule']['segments'] if s['segment_id']=='source-row')['pass_id'],'reviewed:reviewed-duty')
+        self.assertEqual(known['schedule']['breaks'][0]['anchor_segment_id'],'source-row')
+        self.assertEqual(known['schedule']['breaks'][0]['pass_id'],'reviewed:reviewed-duty')
+        self.assertTrue(known['transfer_contract']['break_anchors_complete'])
+        raw['segments'].append({'id':'overlap','person':'employee-X','start':930,'end':1050,'code':'Ar','type':'AKTIVT_ARBETE'})
+        ambiguous=_normalize(case,raw,self.output['validation'])
+        self.assertIsNone(ambiguous['schedule']['breaks'][0]['anchor_segment_id'])
+        self.assertFalse(ambiguous['transfer_contract']['break_anchors_complete'])
 
     def test_preserves_input_and_detects_missing_history(self):
         c=copy.deepcopy(self.case)

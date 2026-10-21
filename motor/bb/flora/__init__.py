@@ -198,10 +198,33 @@ def _normalize(case, raw, validation):
         persons.append({'person_id':mapped('person',pid),'alias':meta.get('person_aliases',{}).get(pid,p.get('name',pid)),
                         'before':before_people[pid], 'after':None if a is None else {'net_minutes':a['worked_net_minutes'],'gross_minutes':a['gross_Ar_minutes'],'jour_minutes':a['jour_P2_minutes'],'break_minutes':a['break_minutes'],'free_days':a['free_days']},
                         'weekly_net_minutes':weekly.get(pid),'minimum_rolling_free_days':None if a is None else a['rolling_free_min']})
+    # Only profile-confirmed whole duties, reviewed reassignment units, and
+    # generated candidate shifts provide a pass identity. Source-row prefixes,
+    # touching times and source_ref are never used to invent a whole pass.
+    unit_by_row={sid:u['id'] for u in case.get('reassignable_temporary_units',[]) for sid in u['segment_ids']}
+    candidate_ids={c['id'] for c in case.get('candidates',[])}
+    def pass_identity(row):
+        if row.get('whole_duty_id'):
+            return 'reviewed:'+row['whole_duty_id'], 'PROFILE_WHOLE_DUTY_ID'
+        if row['id'] in unit_by_row:
+            return 'unit:'+unit_by_row[row['id']], 'REVIEWED_REASSIGNABLE_UNIT'
+        if row['id'] in candidate_ids:
+            return 'generated:'+row['id'], 'MODEL_CANDIDATE_SHIFT'
+        return None, 'UNVERIFIED'
     segments=[{'segment_id':r['id'],'person_id':mapped('person',r['person']),'start':stamp(r['start']),'end':stamp(r['end']),'code':r['code'],
+               'pass_id':pass_identity(r)[0], 'pass_id_basis':pass_identity(r)[1],
                'staffing_type':'ordinary' if people[r['person']]['ordinary'] else 'temporary','source_ref':meta.get('segment_source_refs',{}).get(r['id']),
                'minutes_in_period':clip(r['start'],r['end'])} for r in raw.get('segments',[])]
-    breaks=[{'person_id':mapped('person',r['person']),'start':stamp(r['start']),'end':stamp(r['end']),'duty_id':next((s['id'] for s in raw.get('segments',[]) if s['person']==r['person'] and s['start']<=r['start']<r['end']<=s['end']),None)} for r in raw.get('breaks',[])]
+    breaks=[]
+    for index,r in enumerate(raw.get('breaks',[])):
+        anchors=[s for s in raw.get('segments',[]) if s['person']==r['person'] and s['start']<=r['start']<r['end']<=s['end']]
+        anchor=anchors[0] if len(anchors)==1 else None
+        breaks.append({'break_id':f'break:{index}', 'person_id':mapped('person',r['person']),
+                       'start':stamp(r['start']), 'end':stamp(r['end']),
+                       'duty_id':anchor['id'] if anchor else None,
+                       'anchor_segment_id':anchor['id'] if anchor else None,
+                       'anchor_status':'UNIQUE_CONTAINING_SEGMENT' if anchor else 'UNRESOLVED',
+                       'pass_id':pass_identity(anchor)[0] if anchor else None})
     interventions=[{'need_id':mapped('need',r['id']),'person_id':mapped('person',r['person']),'start':stamp(int((datetime.fromisoformat(r['start'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)),
                     'end':stamp(int((datetime.fromisoformat(r['end'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)), 'customer_id':mapped('customer',r['customer']),
                     'source_ref':meta.get('need_source_refs',{}).get(r['id'],needs[r['id']].get('source_row'))} for r in validation.get('certificates',{}).get('executors',[])]
@@ -214,6 +237,10 @@ def _normalize(case, raw, validation):
             'period':meta.get('period',{'id':'P2','start':case['origin'][:10],'end':(datetime.fromisoformat(case['end'])-timedelta(days=1)).date().isoformat(),'timezone':'Europe/Stockholm'}),
             'before':totals(before_people,False),'after':totals(after_people,True),'persons':persons,
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,
+            'transfer_contract':{'version':'bb-engine-transfer-anchors/1.0',
+                                 'pass_ids_complete':solver_status in {'FEASIBLE','OPTIMAL'} and bool(segments) and all(s['pass_id'] is not None for s in segments),
+                                 'break_anchors_complete':all(b['anchor_segment_id'] is not None and b['pass_id'] is not None for b in breaks),
+                                 'approval_inherited':False},
             'solver':{'status':solver_status,'phases':raw.get('stages',[]),'wall_seconds':raw.get('total_seconds'),'build_seconds':raw.get('build_seconds'),'model':raw.get('model'),'parameters':raw.get('parameters')},
             'assumptions':assumptions,'unassigned_need_ids':[mapped('need',i) for i in sorted(set(needs)-placed)],'raw_solution':raw,
             'cost_effect':_cost(case,before_people,after_people),

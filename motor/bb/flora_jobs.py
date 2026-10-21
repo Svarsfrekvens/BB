@@ -190,6 +190,8 @@ class JobStore:
                 con.execute("ALTER TABLE jobs ADD COLUMN client_key TEXT")
             if "method_hash" not in columns:
                 con.execute("ALTER TABLE jobs ADD COLUMN method_hash TEXT")
+            if "build_commit" not in columns:
+                con.execute("ALTER TABLE jobs ADD COLUMN build_commit TEXT")
             if "runner_identity" not in columns:
                 con.execute("ALTER TABLE jobs ADD COLUMN runner_identity TEXT")
             con.execute("CREATE UNIQUE INDEX IF NOT EXISTS jobs_client_key ON jobs(owner,client_key) WHERE client_key IS NOT NULL")
@@ -212,21 +214,59 @@ class JobStore:
 
     @staticmethod
     def public(row) -> dict:
+        result=json.loads(row["result_json"]) if row["result_json"] else None
+        stored_version=(result.get("provenance", {}).get("method_version") if isinstance(result, dict) else None)
         return dict(id=row["id"], status=row["status"], input_hash=row["input_hash"],
-                    method_version=METHOD_VERSION, created_at=row["created_at"],
+                    method_version=stored_version or (METHOD_VERSION if row["status"] in ("queued", "running") else None),
+                    created_at=row["created_at"],
                     method_fingerprint=row["method_hash"],
+                    build_commit=row["build_commit"],
                     started_at=row["started_at"], finished_at=row["finished_at"],
                     error=json.loads(row["error_json"]) if row["error_json"] else None,
-                    result=json.loads(row["result_json"]) if row["result_json"] else None)
+                    result=result)
 
     def get(self, job_id: str, owner: str) -> dict | None:
         with self.connect() as con:
             row = con.execute("SELECT * FROM jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
         return self.public(row) if row else None
 
+    def submitted_source(self, job_id: str, owner: str) -> dict | None:
+        """Read the exact owner-scoped submitted request; never re-create it from today's workbook.
+
+        The profile itself stays server-side. Its hash and the method fingerprint
+        identify the calculation context; neither is an approval or a build ID.
+        """
+        with self.connect() as con:
+            row = con.execute("SELECT * FROM jobs WHERE id=? AND owner=?", (job_id, owner)).fetchone()
+        if row is None:
+            return None
+        if row["status"] != "succeeded" or not row["result_json"]:
+            raise JobInputError("Endast en färdig körning har ett överförbart indataunderlag.")
+        try:
+            request = json.loads(row["request_json"])
+            profile = json.loads(row["profile_json"])
+            result = json.loads(row["result_json"])
+            if (digest(request["input"]) != row["input_hash"]
+                    or digest(profile) != row["profile_hash"]
+                    or result.get("input_hash") != row["input_hash"]
+                    or result.get("provenance", {}).get("profile_hash") != row["profile_hash"]):
+                raise ValueError("source mismatch")
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            raise JobInputError("Den sparade körningens indata och kontrollsummor stämmer inte.") from exc
+        return dict(schema_version="bb-engine-submitted-source/1.0", job_id=job_id,
+                    request=request, input_hash=row["input_hash"], profile_hash=row["profile_hash"],
+                    hash_rule="SHA-256 of UTF-8 JSON with sorted keys, compact separators, ensure_ascii=False, allow_nan=False",
+                    method_version=result.get("provenance", {}).get("method_version"),
+                    method_fingerprint=row["method_hash"],
+                    build_commit=row["build_commit"], created_at=row["created_at"],
+                    review_required=True, business_schedule_approved=False)
+
     def submit(self, owner: str, request: dict, profile: dict, profile_hash: str, client_key: str | None = None) -> tuple[dict, bool]:
         input_hash = digest(request["input"])
         method_hash = method_fingerprint()
+        build_commit = os.environ.get("RENDER_GIT_COMMIT", "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{40}", build_commit):
+            build_commit = None
         dedup = digest(dict(request=request, profile_hash=profile_hash, method=METHOD_VERSION, method_hash=method_hash))
         if request.get("retry_of"):
             previous = self.get(request["retry_of"], owner)
@@ -243,9 +283,9 @@ class JobStore:
                         raise IdempotencyConflict("Samma körningsnyckel har använts för ändrade uppgifter. Skapa en ny körning.")
                     return self.public(old), False
             cur = con.execute("""INSERT OR IGNORE INTO jobs
-                (id,owner,dedup,input_hash,profile_hash,request_json,profile_json,status,created_at,client_key,method_hash)
-                VALUES (?,?,?,?,?,?,?,'queued',?,?,?)""",
-                (job_id, owner, dedup, input_hash, profile_hash, canonical(request), canonical(profile), now(), client_key, method_hash))
+                (id,owner,dedup,input_hash,profile_hash,request_json,profile_json,status,created_at,client_key,method_hash,build_commit)
+                VALUES (?,?,?,?,?,?,?,'queued',?,?,?,?)""",
+                (job_id, owner, dedup, input_hash, profile_hash, canonical(request), canonical(profile), now(), client_key, method_hash, build_commit))
             created = cur.rowcount == 1
             row = con.execute("SELECT * FROM jobs WHERE owner=? AND dedup=?", (owner, dedup)).fetchone()
             if client_key:
@@ -393,6 +433,13 @@ def run_worker(path: str, job_id: str, lease: str):
         if row["method_hash"] and row["method_hash"] != method_fingerprint():
             store.failure(job_id, lease, "METHOD_CHANGED", "Beräkningskoden ändrades efter att körningen skapades. Starta en ny körning med aktuellt underlag.")
             return
+        # The commit captured at submission can only describe the solver if the
+        # worker is still running that same build when it starts the job.
+        if row["build_commit"]:
+            worker_commit = os.environ.get("RENDER_GIT_COMMIT", "").strip().lower()
+            if worker_commit != row["build_commit"]:
+                store.failure(job_id, lease, "BUILD_CHANGED", "Beräkningstjänstens byggversion ändrades innan körningen startade. Starta en ny körning med aktuellt underlag.")
+                return
         request = json.loads(row["request_json"])
         profile = json.loads(row["profile_json"])
         from .engine_methods import prepare, solve
@@ -403,6 +450,7 @@ def run_worker(path: str, job_id: str, lease: str):
         result["provenance"] = {**result.get("provenance", {}), "input_hash": row["input_hash"],
                                 "profile_hash": row["profile_hash"], "method_version": METHOD_VERSION,
                                 "method_fingerprint": row["method_hash"],
+                                "build_commit": row["build_commit"],
                                 "job_id": job_id, "calculation_seconds": time.monotonic() - started,
                                 "requires_review": True,
                                 "engine_context": request.get("engine_context"),
