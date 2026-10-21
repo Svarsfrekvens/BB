@@ -57,6 +57,8 @@ def check_case(case):
         if len({r['id'] for r in rows}) != len(rows):
             raise ValueError('Dubbla ID i '+key+'.')
     whole=case.get('whole_duty_candidates',[])
+    if not isinstance(whole,list) or any(not isinstance(r,dict) for r in whole):
+        raise ValueError('Hela passkandidater måste vara en lista med giltiga poster.')
     if len({r.get('id') for r in whole}) != len(whole):
         raise ValueError('Dubbla ID i hela passkandidater.')
     staff = {p['id']:p for p in case['staff']}
@@ -80,20 +82,30 @@ def check_case(case):
     for c in case['candidates']:
         if c['person'] not in staff or c['min_length'] < cfg['min_shift'] or not(0 <= c['day'] < 28) or c['lo'] >= c['hi']:
             raise ValueError('Ogiltig kandidat eller personkoppling.')
+        if break_policy=='EXPLICIT_NO_BREAK_SCENARIO' and any(
+            r['person']==c['person'] and r['code'] in ('Ar','Jo','Kl','Öv') and
+            max(r['start'],c['lo'])<min(r['end'],c['hi'])
+            for r in case['fixed_segments']):
+            raise ValueError('Arbetspasskandidat överlappar samma persons låsta arbete eller jour.')
         if break_policy=='EXPLICIT_NO_BREAK_SCENARIO' and (
             c['max_length'] > 780 or c['min_length'] > c['max_length'] or
             c['lo'] < c['day']*1440 or c['hi'] > (c['day']+1)*1440 or
             c['hi']-c['lo'] < c['min_length']):
             raise ValueError('Arbetspass utan jour måste rymmas inom 4–13 timmar på en dag.')
-    generated={r['id'] for r in case['fixed_segments']}|{c['id'] for c in case['candidates']}
+    generated=({r['id'] for r in case['fixed_segments']}|{c['id'] for c in case['candidates']}|
+               {r['id'] for r in case['references']['import']['segments']})
     possible_by_person={p:[] for p in staff}
     for c in case['candidates']:
         possible_by_person[c['person']].append((c['lo'],c['hi']))
     for c in whole:
         parts=c.get('parts',[])
-        if break_policy!='EXPLICIT_NO_BREAK_SCENARIO' or not isinstance(c.get('id'),str) or not c['id'] or c['person'] not in staff:
+        if (break_policy!='EXPLICIT_NO_BREAK_SCENARIO' or not isinstance(c.get('id'),str) or
+            not c['id'] or c.get('person') not in staff):
             raise ValueError('Helt jourpass kräver egen giltig kandidat och explicit scenario utan rast.')
-        if c['end']-c['start']!=1440 or not 0<=c['start']<c['end']<=case['horizon'] or [r.get('code') for r in parts]!=['Ar','Jo','Ar']:
+        if (type(c.get('start')) is not int or type(c.get('end')) is not int or
+            not isinstance(parts,list) or any(not isinstance(r,dict) for r in parts) or
+            c['end']-c['start']!=1440 or not 0<=c['start']<c['end']<=case['horizon'] or
+            [r.get('code') for r in parts]!=['Ar','Jo','Ar']):
             raise ValueError('Jourkandidat måste vara ett helt 24-timmarspass Ar–Jo–Ar.')
         if not staff[c['person']].get('sleeping_oncall')=='JA' or any(
             type(r.get('start')) is not int or type(r.get('end')) is not int or r['start']>=r['end'] for r in parts):
@@ -109,6 +121,9 @@ def check_case(case):
             raise ValueError('Jourkandidat saknar minst fem timmar sammanhängande nattjour.')
         if c['id'] in generated or any(f"{c['id']}:{i}" in generated for i in range(1,4)):
             raise ValueError('Jourkandidat krockar med befintligt schemarad-ID.')
+        if any(r['person']==c['person'] and r['code'] in ('Ar','Jo','Kl','Öv') and
+               max(r['start'],c['start'])<min(r['end'],c['end']) for r in case['fixed_segments']):
+            raise ValueError('Jourkandidat överlappar samma persons låsta arbete eller jour.')
         generated.update(f"{c['id']}:{i}" for i in range(1,4))
         possible_by_person[c['person']].extend((r['start'],r['end']) for r in parts if r['code']=='Ar')
     for person,spans in possible_by_person.items():

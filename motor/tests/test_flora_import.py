@@ -67,6 +67,19 @@ class ImportTest(unittest.TestCase):
         with self.assertRaisesRegex(FloraImportError,'källa'):
             prepare_case(raw,profile)
 
+    def test_malformed_whole_duty_profile_has_reviewable_error(self):
+        for hypothesis in (None, {'purpose':'LOCAL_MODEL_EXPERIMENT','source':'Example',
+                                   'person_id':'person-a','parts':[{}, {}, {}]},
+                           {'purpose':'LOCAL_MODEL_EXPERIMENT','source':'Example',
+                            'person_id':'person-a','id':'candidate-1',
+                            'start':'2027-02-02T09:00','end':'2027-02-03T09:00',
+                            'parts':[None, {}, {}]}):
+            with self.subTest(hypothesis=hypothesis):
+                raw,profile=sample()
+                profile['whole_duty_candidates']=[hypothesis]
+                with self.assertRaises(FloraImportError):
+                    prepare_case(raw,profile)
+
     def test_uploaded_values_and_generic_period_ids(self):
         raw,profile=sample(); result=prepare_case(raw,profile)
         self.assertEqual(result["origin"],"2027-01-29T00:00")

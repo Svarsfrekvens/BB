@@ -109,6 +109,32 @@ class NoBreakDutyExperiment(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'Ar–Jo–Ar'):
             solve_case(case,seconds=1)
 
+    def test_whole_candidate_cannot_overlap_fixed_work(self):
+        case=whole_jour_candidate_case()
+        case['fixed_segments']=[dict(id='fixed-work',person='employee-X',
+                                     code='Ar',start=600,end=660)]
+        with self.assertRaisesRegex(ValueError,'överlappar samma persons låsta arbete'):
+            solve_case(case,seconds=1)
+
+    def test_active_candidate_cannot_overlap_fixed_work(self):
+        case=no_break_case(480)
+        case['fixed_segments']=[dict(id='fixed-work',person='employee-X',
+                                     code='Ar',start=600,end=660)]
+        with self.assertRaisesRegex(ValueError,'Arbetspasskandidat överlappar'):
+            solve_case(case,seconds=1)
+
+    def test_whole_candidate_cannot_reuse_source_row_id(self):
+        case=whole_jour_candidate_case()
+        case['whole_duty_candidates'][0]['id']='source-night-1'
+        with self.assertRaisesRegex(ValueError,'krockar med befintligt schemarad-ID'):
+            solve_case(case,seconds=1)
+
+    def test_malformed_whole_candidate_is_rejected_cleanly(self):
+        case=whole_jour_candidate_case()
+        case['whole_duty_candidates'][0]['parts']=None
+        with self.assertRaisesRegex(ValueError,'helt 24-timmarspass'):
+            solve_case(case,seconds=1)
+
     def test_whole_candidate_requires_night_jour_and_obeys_rolling_cap(self):
         case=whole_jour_candidate_case()
         case['whole_duty_candidates'][0]['parts']=[

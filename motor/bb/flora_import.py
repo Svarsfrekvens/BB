@@ -433,12 +433,18 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                                original_end=old["end"] if old else None))
     whole_duty_candidates=[]
     for hypothesis in profile.get('whole_duty_candidates',[]):
+        if not isinstance(hypothesis,dict):
+            _fail('Hel passkandidat måste vara en giltig post.')
         if hypothesis.get('purpose')!='LOCAL_MODEL_EXPERIMENT' or not hypothesis.get('source'):
             _fail('Ny hel passkandidat kräver uttrycklig experimentmarkering och källa.')
         if hypothesis.get('person_id') not in staff_raw:
             _fail('Hel passkandidat avser okänd person.')
         parts=hypothesis.get('parts')
-        if not isinstance(parts,list) or len(parts)!=3:
+        if (not isinstance(hypothesis.get('id'),str) or not hypothesis['id'] or
+            not hypothesis.get('start') or not hypothesis.get('end') or
+            not isinstance(parts,list) or len(parts)!=3 or
+            any(not isinstance(part,dict) or not all(part.get(k) for k in
+                    ('code','start','end')) for part in parts)):
             _fail('Hel passkandidat kräver tre tidsatta Ar–Jo–Ar-delar.')
         whole_duty_candidates.append(dict(id=hypothesis['id'],person=hypothesis['person_id'],
             start=minute(hypothesis['start']),end=minute(hypothesis['end']),
