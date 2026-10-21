@@ -19,6 +19,7 @@ def pass_mapping_preflight(request: dict, profile: dict, *, saved_profile_hash: 
                     current_profile_matches_saved_job=current_profile_hash == saved_profile_hash,
                     source_rows_in_period=None, source_rows_excluded=None,
                     possible_pass_evidence=None, applicability='FLORA_ONLY',
+                    unverified_source_segment_ids=None,
                     future_result_guaranteed=False, transfer_approved=False)
 
     origin = datetime.fromisoformat(case['origin'])
@@ -30,6 +31,7 @@ def pass_mapping_preflight(request: dict, profile: dict, *, saved_profile_hash: 
     rows = request['input']['schedule_segments']
     counts = {'profile_whole_duty_id': 0, 'reviewed_reassignment_unit': 0,
               'model_candidate_shift': 0, 'unverified': 0}
+    unverified_ids = []
     excluded = 0
     period_rows = 0
     for row in rows:
@@ -50,12 +52,14 @@ def pass_mapping_preflight(request: dict, profile: dict, *, saved_profile_hash: 
             counts['model_candidate_shift'] += 1
         else:
             counts['unverified'] += 1
+            unverified_ids.append(sid)
     return dict(schema_version='bb-engine-pass-preflight/1.0',
                 strategy='flora-reassignment/1.0', input_hash=input_hash,
                 current_profile_hash=current_profile_hash,
                 current_profile_matches_saved_job=current_profile_hash == saved_profile_hash,
                 source_rows_in_period=period_rows, source_rows_excluded=excluded,
                 possible_pass_evidence=counts,
+                unverified_source_segment_ids=sorted(unverified_ids),
                 reviewed_reassignment_units=len(case['reassignable_temporary_units']),
                 candidate_shifts=len(case['candidates']),
                 original_breaks=len(case['references']['import']['breaks']),
