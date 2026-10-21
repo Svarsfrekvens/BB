@@ -108,6 +108,25 @@ class BusinessEngineTests(unittest.TestCase):
         self.assertEqual(response.status_code,503)
         self.assertNotIn('customer_needs',response.text)
 
+    def test_pass_preflight_reads_current_profile_without_solving_or_exposing_it(self):
+        job_id=self.submit().json()['id']
+        claimed,lease=self.store.claim();self.assertEqual(claimed,job_id)
+        run_worker(str(self.store.path),job_id,lease)
+        url='/api/engine/jobs/'+job_id+'/pass-preflight'
+        with patch('bb.engine_methods.solve',side_effect=AssertionError('solver must not run')):
+            response=self.client.get(url,headers=self.headers())
+        self.assertEqual(response.status_code,200,response.text)
+        report=response.json()
+        self.assertEqual(report['schema_version'],'bb-engine-pass-preflight/1.0')
+        self.assertTrue(report['current_profile_matches_saved_job'])
+        self.assertEqual(sum(report['possible_pass_evidence'].values())+report['source_rows_excluded'],
+                         report['source_rows_in_period'])
+        self.assertFalse(report['future_result_guaranteed'])
+        self.assertFalse(report['transfer_approved'])
+        self.assertNotIn('segment_decisions',response.text)
+        self.assertEqual(self.client.get(url,headers=self.headers('unit-b')).status_code,404)
+        self.assertEqual(self.client.get(url).status_code,401)
+
     def test_job_build_commit_is_recorded_only_when_render_provides_a_full_hash(self):
         with patch.dict(os.environ,{'RENDER_GIT_COMMIT':'a'*40}):
             job=self.submit().json()
