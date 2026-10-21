@@ -66,7 +66,7 @@ def resolve_policy(profile,scenario,config,daily_rest_parameters):
     if selected:config['max_whole_duty_minutes']=selected['max_whole_duty_minutes']
     values={k:deepcopy(config.get(k)) for k in ('min_shift','min_free_days','calendar_mode','week_break',
         'min_daily_rest','min_weekly_rest','oncall_cap_28d','break_length','break_threshold',
-        'max_continuous_active','max_staff_on_duty','duty_profile')}
+        'max_continuous_active','max_staff_on_duty','duty_profile','break_policy')}
     result=dict(version=VERSION,profile_id=profile['profile_id'],
                 business_id=profile.get('business_id'),data_use=profile.get('data_use'),
                 profile_source=deepcopy(profile.get('review_provenance',profile.get('source'))),

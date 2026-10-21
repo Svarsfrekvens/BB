@@ -19,7 +19,7 @@ def check_arithmetic(case, solution):
     ORIGIN = datetime.fromisoformat(case["origin"])
     staff = {p["id"]: p for p in case["staff"]}
     needs = {n["id"]: n for n in case["needs"]}
-    WITH_BREAKS = True
+    WITH_BREAKS = case['config'].get('break_policy','SOLVER_PLACED') != 'EXPLICIT_NO_BREAK_SCENARIO'
     CALENDAR_MODE = case['config']['calendar_mode']
     assert CALENDAR_MODE == 'rolling'
     source_ids = {r["id"] for r in original["references"]["import"]["segments"]}
@@ -213,6 +213,11 @@ def check_arithmetic(case, solution):
         short = [o for o in occasions if 0 <= o["start"] < H and o["end"] - o["start"] < case["config"]["min_shift"]]
         if short:
             errors.append({"rule": "whole_occasion_under4h", "person": person, "ids": [o["id"] for o in short]})
+        if not WITH_BREAKS:
+            for o in occasions:
+                if 0 <= o['start'] < H and all(r['code']=='Ar' for r in o['rows']) and o['end']-o['start']>780:
+                    errors.append(dict(rule='active_only_duty_over13h',person=person,occasion=o['id'],
+                                       actual_minutes=o['end']-o['start']))
         maximum=case['config'].get('max_whole_duty_minutes')
         if maximum is not None:
             for o in occasions:
@@ -411,7 +416,7 @@ def check_arithmetic(case, solution):
         "original_work_reference_by_person": source_work_reference,
         "target_definition": "Known imported Ar, after this variant's break rule; not contractual SSG or a verified original planned schedule",
         "contract_capacity_claim": "NOT_MADE",
-        "break_rule_status": "CHECKED_IN_SCOPE" if WITH_BREAKS else "BROKEN_INTENTIONALLY_OMITTED_TEST",
+        "break_rule_status": "CHECKED_IN_SCOPE" if WITH_BREAKS else "EXPLICIT_NO_BREAK_EXPERIMENT_NOT_LEGAL_APPROVAL",
         "omitted_break_rule_violations": omitted_break_rule_violations,
         "ordinary_net_minutes": sum(p["worked_net_minutes"] for p in people.values() if p["ordinary"]),
         "temporary_net_minutes": sum(p["worked_net_minutes"] for p in people.values() if not p["ordinary"]),

@@ -43,6 +43,11 @@ def check_case(case):
         raise ValueError('Referensmetodens väggtidsmodell stöder inte en sommartidsomställning i denna horisont.')
     if cfg['min_free_days'] < 9 or cfg['min_shift'] < 240:
         raise ValueError('Beslutade minimikrav på fridagar eller helt arbetspass får inte försvagas.')
+    break_policy=cfg.get('break_policy','SOLVER_PLACED')
+    if break_policy not in ('SOLVER_PLACED','EXPLICIT_NO_BREAK_SCENARIO'):
+        raise ValueError('Okänd rastprofil.')
+    if break_policy=='EXPLICIT_NO_BREAK_SCENARIO' and case['references']['import'].get('breaks'):
+        raise ValueError('Scenario utan rast får inte innehålla registrerade referensraster.')
     if 'max_whole_duty_minutes' in cfg and (type(cfg['max_whole_duty_minutes']) is not int or cfg['max_whole_duty_minutes'] not in (1200,1440)):
         raise ValueError('Högsta hela passlängd måste vara 1200 eller 1440 minuter.')
     if not case['staff'] or len(case['staff']) > 80 or len(case['needs']) > 4000:
@@ -72,6 +77,11 @@ def check_case(case):
     for c in case['candidates']:
         if c['person'] not in staff or c['min_length'] < cfg['min_shift'] or not(0 <= c['day'] < 28) or c['lo'] >= c['hi']:
             raise ValueError('Ogiltig kandidat eller personkoppling.')
+        if break_policy=='EXPLICIT_NO_BREAK_SCENARIO' and (
+            c['max_length'] > 780 or c['min_length'] > c['max_length'] or
+            c['lo'] < c['day']*1440 or c['hi'] > (c['day']+1)*1440 or
+            c['hi']-c['lo'] < c['min_length']):
+            raise ValueError('Arbetspass utan jour måste rymmas inom 4–13 timmar på en dag.')
 
 
 def validate_case(case, result):
@@ -92,9 +102,9 @@ def validate_case(case, result):
     checks = {
         'source_integrity': ('Kända källbehov, P1, fasta segment och personkopplingar är bevarade.', {'original_need_records_changed','known_actual_P1_work_missing','fixed_segment_modified_or_missing','duplicate_segment_id','unknown_or_invalid_candidate','unit_integrity','duplicate_mapped_segment','missing_or_extra_unit_recipient','work_during_confirmed_absence'}),
         'ordinary_net': ('Ordinarie Ar-netto kontrollerat separat per person.', {'retained_original_worked_net','target_not_matched_to_original_known_Ar'}),
-        'whole_duty_minimum': ('Minimilängd för hela källpassgrupper och nya/kortade pass kontrollerad.', {'whole_occasion_under4h','candidate_bounds_or_length'}),
+        'whole_duty_minimum': ('Minimilängd för hela källpassgrupper och nya/kortade pass kontrollerad.', {'whole_occasion_under4h','candidate_bounds_or_length','active_only_duty_over13h'}),
         'rolling_free_days': ('Lediga kalenderdagar kontrollerade i varje rullande 28-dagarsfönster med känd P1.', {'free_calendar_days9'}),
-        'breaks': ('Föreslagna raster och aktiv tid utan rast kontrollerade separat.', {'active_continuous_over5h','break_length','break_outside_contiguous_Ar','overlapping_breaks','fixed_break_chain_membership'}),
+        'breaks': ('Föreslagna raster och aktiv tid utan rast kontrollerade separat.', {'active_continuous_over5h','break_length','break_outside_contiguous_Ar','overlapping_breaks','fixed_break_chain_membership','unexpected_break_in_authorized_without_breaks_test'}),
         'inter_duty_rest': ('Kända vilogap mellan arbetstillfällen kontrollerade; ersätter inte full 24-timmarskontroll.', {'daily_rest11h','same_person_overlapping_Ar_Jo_segments'}),
         'weekly_rest': ('Sammanhängande vila i profilens fasta veckor kontrollerad.', {'fixed_Monday_weekly_rest36h'}),
         'rolling_jour_cap': ('Jourtak kontrollerat i rullande 28-dagarsfönster med känd historik.', {'rolling28day_Jo48h'}),
@@ -121,6 +131,8 @@ def validate_case(case, result):
     ]
     if rest['status']=='UNKNOWN':
         unknowns.append(dict(rule_id='daily_rest_24h',message=rest_message))
+    if case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO':
+        unknowns.append(dict(rule_id='no_break_applicability',message='Scenario utan rast är ett uttryckligt modellantagande; avtals- och laglig tillämplighet är inte verifierad.'))
     for item in case.get('integration',{}).get('unknowns',[]):
         unknowns.append(item if isinstance(item,dict) else {'rule_id':'input_limitation','message':str(item)})
     for row in summary['inherited_conditional_Jo_issues']:
@@ -151,13 +163,14 @@ def _normalize(case, raw, validation):
         return out
     def source_people():
         out={}; imported=case['references']['import']['segments']; cfg=case['config']
+        no_breaks=cfg.get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO'
         for pid,p in people.items():
             rows=[r for r in imported if r['person']==pid]
             spans=union([(max(0,r['start']),min(case['horizon'],r['end'])) for r in rows if r['code']=='Ar' and clip(r['start'],r['end'])])
             gross=sum(b-a for a,b in spans)
             # Explicitly the reviewed mathematical break reference, not a claim
             # that exported source cells already had these unpaid breaks.
-            br=cfg['break_length']*sum(max(0,(b-a-cfg['max_continuous_active']+cfg['max_continuous_active']+cfg['break_length']-1)//(cfg['max_continuous_active']+cfg['break_length'])) for a,b in spans)
+            br=0 if no_breaks else cfg['break_length']*sum(max(0,(b-a-cfg['max_continuous_active']+cfg['max_continuous_active']+cfg['break_length']-1)//(cfg['max_continuous_active']+cfg['break_length'])) for a,b in spans)
             occupied={d for d in range(28) if any(r['start']<(d+1)*1440 and r['end']>d*1440 for r in rows)}
             out[pid]={'net_minutes':gross-br,'gross_minutes':gross,'jour_minutes':sum(clip(a,b) for a,b in union([(r['start'],r['end']) for r in rows if r['code']=='Jo'])), 'break_minutes':br,'free_days':28-len(occupied)}
         return out
@@ -231,9 +244,10 @@ def _normalize(case, raw, validation):
     last_feasible=next((s['status'] for s in reversed(raw.get('stages',[])) if s['status'] in {'FEASIBLE','OPTIMAL'}),None)
     solver_status=last_feasible if 'segments' in raw else (raw.get('stages') or [{}])[-1].get('status','UNKNOWN')
     assumptions=[{'id':k,'message':str(v)} for k,v in case.get('scenario_override',{}).items()]
-    assumptions.append({'id':'before_break_reference','message':'Före-netto använder scenariots matematiska minimiantal raster enligt rastprofilen, inte verifierade registrerade betalda timmar.', 'source':case.get('scenario_override',{}).get('ordinary_reference','Explicit rule profile applied to imported Ar intervals')})
+    no_breaks=case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO'
+    assumptions.append({'id':'before_break_reference','message':('Ingen rast dras av i detta separata modellspecifika scenario; originalfilen har inga registrerade rasttider.' if no_breaks else 'Före-netto använder scenariots matematiska minimiantal raster enligt rastprofilen, inte verifierade registrerade betalda timmar.'), 'source':case.get('scenario_override',{}).get('ordinary_reference','Explicit rule profile applied to imported Ar intervals')})
     assumptions.extend({'id':u['rule_id'],'message':u['message']} for u in validation.get('unknowns',[]))
-    result={'schema_version':'bb-engine-run/1.0','review_required':True,'business_schedule_approved':False,'method':METHOD,'solver_status':solver_status,
+    result={'schema_version':'bb-engine-run/1.0','review_required':True,'business_schedule_approved':False,'method':'joint-shifts-no-break-experiment/v0' if no_breaks else METHOD,'solver_status':solver_status,
             'period':meta.get('period',{'id':'P2','start':case['origin'][:10],'end':(datetime.fromisoformat(case['end'])-timedelta(days=1)).date().isoformat(),'timezone':'Europe/Stockholm'}),
             'before':totals(before_people,False),'after':totals(after_people,True),'persons':persons,
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,
@@ -246,7 +260,7 @@ def _normalize(case, raw, validation):
             'cost_effect':_cost(case,before_people,after_people),
             'daily_rest_parameters':deepcopy(case.get('daily_rest_parameters')),
             'rule_policy':deepcopy(case.get('rule_policy')),
-            'time_accounting':{'before_break_reference':{'kind':'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
+            'time_accounting':{'before_break_reference':{'kind':'EXPLICIT_NO_BREAK_EXPERIMENT' if no_breaks else 'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'NONE_IN_EXPLICIT_EXPERIMENT' if no_breaks else 'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
     return result

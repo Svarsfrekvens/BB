@@ -18,6 +18,7 @@ from .workload_objectives import add_weekly_peak, export_weekly_workload
 
 def build(case, objective_mode="coverage_then_temporary"):
     cfg=case['config'];H=case['horizon'];step=cfg['shift_step'];K=len(case['staff'])
+    no_breaks=cfg.get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO'
     start_date=datetime.fromisoformat(case['origin'])
     assert H==28*1440 and start_date.weekday()==0 and start_date.hour==start_date.minute==0 and cfg['week_break']=='MONDAY 00:00', 'This implementation requires a Monday-aligned 28-day period; adapt calendar before other period layouts.'
     assert H%1440==0 and all(p['all_task_skills'] for p in case['staff']), 'Heterogeneous eligibility needs a different encoding; never pool silently.'
@@ -43,7 +44,7 @@ def build(case, objective_mode="coverage_then_temporary"):
             fixed_net[person]+=hi-lo
             for t in range(lo,hi):fixed_supply[t]+=1
             gross_intervals.append(model.NewFixedSizeIntervalVar(lo,hi-lo,''))
-            if b-a>cfg['break_threshold']:
+            if not no_breaks and b-a>cfg['break_threshold']:
                 # Minimum count satisfying active chunks within the explicit profile limit; all
                 # locations are jointly decided with tasks and variable shifts.
                 count=(b-a-cfg['max_continuous_active']+cfg['max_continuous_active']+cfg['break_length']-1)//(cfg['max_continuous_active']+cfg['break_length'])
@@ -69,11 +70,14 @@ def build(case, objective_mode="coverage_then_temporary"):
         length=model.NewIntVar(0,c['max_length']//step,'length');br=model.NewBoolVar('break');bs=model.NewIntVar(lo,hi,'break_start')
         model.Add(e-s==length);model.Add(length>=c['min_length']//step).OnlyEnforceIf(pr)
         model.Add(length==0).OnlyEnforceIf(pr.Not());model.Add(s==lo).OnlyEnforceIf(pr.Not())
-        model.Add(length*step>cfg['break_threshold']).OnlyEnforceIf(br);model.Add(length*step<=cfg['break_threshold']).OnlyEnforceIf(br.Not())
-        model.Add(bs*step>=s*step+cfg['min_work_before_break']).OnlyEnforceIf(br)
-        model.Add(bs*step<=s*step+cfg['max_continuous_active']).OnlyEnforceIf(br)
-        model.Add(bs*step+cfg['break_length']<=e*step-cfg['min_work_after_break']).OnlyEnforceIf(br)
-        model.Add(e*step-(bs*step+cfg['break_length'])<=cfg['max_continuous_active']).OnlyEnforceIf(br)
+        if no_breaks:
+            model.Add(br==0)
+        else:
+            model.Add(length*step>cfg['break_threshold']).OnlyEnforceIf(br);model.Add(length*step<=cfg['break_threshold']).OnlyEnforceIf(br.Not())
+            model.Add(bs*step>=s*step+cfg['min_work_before_break']).OnlyEnforceIf(br)
+            model.Add(bs*step<=s*step+cfg['max_continuous_active']).OnlyEnforceIf(br)
+            model.Add(bs*step+cfg['break_length']<=e*step-cfg['min_work_after_break']).OnlyEnforceIf(br)
+            model.Add(e*step-(bs*step+cfg['break_length'])<=cfg['max_continuous_active']).OnlyEnforceIf(br)
         model.Add(bs==lo).OnlyEnforceIf(br.Not())
         net=length*step-cfg['break_length']*br
         variables.append(dict(c=c,pr=pr,s=s,e=e,br=br,bs=bs,net=net))
