@@ -121,6 +121,10 @@ class BusinessEngineTests(unittest.TestCase):
         self.assertTrue(report['current_profile_matches_saved_job'])
         self.assertEqual(sum(report['possible_pass_evidence'].values())+report['source_rows_excluded'],
                          report['source_rows_in_period'])
+        self.assertEqual(len(report['unverified_source_segment_ids']),
+                         report['possible_pass_evidence']['unverified'])
+        self.assertEqual(len(set(report['unverified_source_segment_ids'])),
+                         len(report['unverified_source_segment_ids']))
         self.assertFalse(report['future_result_guaranteed'])
         self.assertFalse(report['transfer_approved'])
         self.assertNotIn('segment_decisions',response.text)
