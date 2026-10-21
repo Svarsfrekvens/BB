@@ -433,6 +433,13 @@ def run_worker(path: str, job_id: str, lease: str):
         if row["method_hash"] and row["method_hash"] != method_fingerprint():
             store.failure(job_id, lease, "METHOD_CHANGED", "Beräkningskoden ändrades efter att körningen skapades. Starta en ny körning med aktuellt underlag.")
             return
+        # The commit captured at submission can only describe the solver if the
+        # worker is still running that same build when it starts the job.
+        if row["build_commit"]:
+            worker_commit = os.environ.get("RENDER_GIT_COMMIT", "").strip().lower()
+            if worker_commit != row["build_commit"]:
+                store.failure(job_id, lease, "BUILD_CHANGED", "Beräkningstjänstens byggversion ändrades innan körningen startade. Starta en ny körning med aktuellt underlag.")
+                return
         request = json.loads(row["request_json"])
         profile = json.loads(row["profile_json"])
         from .engine_methods import prepare, solve

@@ -4,7 +4,7 @@
 
 Render tjänst `srv-dagip8740ujc73fcnt00` (`bemanningsbalans-motor`) rapporterade live-deploy `dep-dbb7alc9v7es73adigjg` från `Svarsfrekvens/BB`, grenen `pilot-snapshot-2026-09-15`, full commit `99a156b97f60e589f838c88a8bc9645402138852`. Detta är Render-deploymetadata, inte bara API-versionen `1.0.0`. Den separata mappen/repon `bemanningsbalans-motor` är **inte** tjänstens deploykälla.
 
-Den här ändringen är endast förberedd på en gren. Dokumentet påstår inte att ändringen är driftsatt. Render-beviset gäller tjänstens live-version vid kontrollen, inte automatiskt varje äldre jobb. Äldre jobb utan sparad byggcommit ska fortsatt ha okänd byggversion; metodfingeravtryck och tidigare deploytider är inte samma sak som bevis för ett enskilt historiskt jobb.
+Detta är en historisk läskontroll, inte ett påstående om tjänstens aktuella driftsversion. Render-beviset gäller tjänstens live-version vid kontrollen, inte automatiskt varje äldre jobb. Äldre jobb utan sparad byggcommit ska fortsatt ha okänd byggversion; metodfingeravtryck och tidigare deploytider är inte samma sak som bevis för ett enskilt historiskt jobb.
 
 ## Nytt privat läskontrakt, endast efter installation
 
@@ -12,7 +12,7 @@ Den här ändringen är endast förberedd på en gren. Dokumentet påstår inte 
 
 SHA-256-regeln för `input_hash` är UTF-8-kodad JSON med sorterade nycklar, kompakta separatorer, `ensure_ascii=False` och `allow_nan=False`. En konsument ska jämföra **den sparade begäran**, inte rekonstruera historisk indata från dagens arbetskopia. `source_archive` finns inte i motorbegäran och får inte läggas till här.
 
-Nya jobb lagrar `RENDER_GIT_COMMIT` som `build_commit` endast om variabeln innehåller en full 40-teckens SHA-1. Saknas den blir fältet `null`; ett metodfingeravtryck får aldrig etiketten byggcommit. Befintliga jobb får `null` och ändras inte retroaktivt.
+Nya jobb lagrar `RENDER_GIT_COMMIT` som `build_commit` endast om variabeln innehåller en full 40-teckens SHA-1. Saknas den blir fältet `null`; ett metodfingeravtryck får aldrig etiketten byggcommit. Jobbet stoppas om en annan byggcommit kör arbetaren. Befintliga jobb får `null` och ändras inte retroaktivt.
 
 ## Pass och raster i nya svar
 

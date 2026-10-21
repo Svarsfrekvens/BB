@@ -116,6 +116,20 @@ class BusinessEngineTests(unittest.TestCase):
         self.assertEqual(read.status_code,200)
         self.assertEqual(read.json()['build_commit'],'a'*40)
 
+    def test_job_does_not_run_under_a_different_build_commit(self):
+        with patch.dict(os.environ,{'RENDER_GIT_COMMIT':'a'*40}):
+            job=self.submit().json()
+        job_id,lease=self.store.claim()
+        self.assertEqual(job_id,job['id'])
+        with patch.dict(os.environ,{'RENDER_GIT_COMMIT':'b'*40}):
+            run_worker(str(self.store.path),job_id,lease)
+        read=self.client.get('/api/engine/jobs/'+job_id,headers=self.headers())
+        self.assertEqual(read.status_code,200)
+        saved=read.json()
+        self.assertEqual(saved['status'],'failed')
+        self.assertEqual(saved['error']['code'],'BUILD_CHANGED')
+        self.assertIsNone(saved['result'])
+
     def test_client_cannot_choose_foreign_profile_or_override_context(self):
         self.assertEqual(self.submit('unit-a',self.bodies['unit-b']).status_code,422)
         body=deepcopy(self.bodies['unit-a']);body['profile_path']='/tmp/anything';body['engine_context']={'business_id':'unit-b'}
