@@ -33,6 +33,7 @@ def add_person_constraints(case,model,variables):
    pr=model.NewBoolVar('recipient_'+u['id']+'_'+person);options.append((person,pr));model.AddHint(pr,int(person==hinted))
   model.AddExactlyOne([pr for _,pr in options]);choices.append(dict(unit=u,options=options))
  breaks=model._fixed_breaks
+ whole=model._whole_duty_choices
  unit_breaks={u['id']:sum(cfg['break_length'] for b in breaks if b['unit_id']==u['id']) for u in units}
  immutable_breaks={p:sum(cfg['break_length'] for b in breaks if b['person']==p and b['unit_id'] is None) for p in staff}
  for person,p in staff.items():
@@ -41,7 +42,9 @@ def add_person_constraints(case,model,variables):
   # Net ordinary time excludes Jo, outcomes and P1. Break deductions follow
   # assigned unit recipients; fixed/nonmovable deductions are person-specific.
   fixed_ar=sum(max(0,min(H,r['end'])-max(0,r['start'])) for r in rows if r['code']=='Ar')
-  net=fixed_ar-immutable_breaks[person]+sum((u['ar_p2_minutes']-unit_breaks[u['id']])*pr for u,pr in optional)+sum(v['net'] for v in vv)
+  net=fixed_ar-immutable_breaks[person]+sum((u['ar_p2_minutes']-unit_breaks[u['id']])*pr for u,pr in optional)+sum(v['net'] for v in vv)+sum(
+   sum(r['end']-r['start'] for r in ch['c']['parts'] if r['code']=='Ar')*ch['pr']
+   for ch in whole if ch['c']['person']==person)
   if p['ordinary']:model.Add(net==p['target_net'])
   fixed_days={d for d in range(-H//1440,H//1440) if any(r['start']<(d+1)*1440 and r['end']>d*1440 for r in rows)}
   occupied={}
@@ -49,6 +52,7 @@ def add_person_constraints(case,model,variables):
    if day in fixed_days:occupied[day]=1;continue
    active=[pr for u,pr in optional if u['start']<(day+1)*1440 and u['end']>day*1440]
    active += [v['pr'] for v in vv if v['c']['day']==day]
+   active += [ch['pr'] for ch in whole if ch['c']['person']==person and ch['c']['start']<(day+1)*1440 and ch['c']['end']>day*1440]
    if not active:occupied[day]=0
    else:
     b=model.NewBoolVar('occupied_'+person+'_'+str(day));model.AddMaxEquality(b,active);occupied[day]=b
@@ -66,9 +70,12 @@ def add_person_constraints(case,model,variables):
   events=[]
   for id,rr in groups.items():events.append(dict(start=min(r['start'] for r in rr),end=max(r['end'] for r in rr),present=1,label=id,rest_after=max(cfg['min_daily_rest'],max(r['end'] for r in rr)-min(r['start'] for r in rr)) if any(r['code']=='Jo' for r in rr) and max(r['end'] for r in rr)-min(r['start'] for r in rr)>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']))
   events += [dict(start=u['start'],end=u['end'],present=pr,label=u['id'],rest_after=max(cfg['min_daily_rest'],u['end']-u['start']) if any(r['code']=='Jo' for r in u['rows']) and u['end']-u['start']>profile['compensation_trigger_minutes'] else cfg['min_daily_rest']) for u,pr in optional]
+  events += [dict(start=ch['c']['start'],end=ch['c']['end'],present=ch['pr'],label=ch['c']['id'],
+                  rest_after=max(cfg['min_daily_rest'],ch['c']['end']-ch['c']['start']),combined_jour=True)
+             for ch in whole if ch['c']['person']==person]
   combined={key for key,rr in groups.items() if {'Ar','Jo'}<={r['code'] for r in rr}}
   combined.update(u['id'] for u,pr in optional if {'Ar','Jo'}<={r['code'] for r in u['rows']})
-  for event in events:event['combined_jour']=event['label'] in combined
+  for event in events:event['combined_jour']=event.get('combined_jour',event['label'] in combined)
   # Original P2 duties have no minimum-length exemption. Frozen history and
   # incoming duties retain their known times, matching the independent check.
   for event in events:
@@ -121,6 +128,7 @@ def add_person_constraints(case,model,variables):
   # piecewise-linear clipped duration, including starts/end shifted by H.
   fixed_jo=[(r['start'],r['end']) for r in rows if r['code']=='Jo']
   optional_jo=[(r['start'],r['end'],pr) for u,pr in optional for r in u['rows'] if r['code']=='Jo']
+  optional_jo += [(r['start'],r['end'],ch['pr']) for ch in whole if ch['c']['person']==person for r in ch['c']['parts'] if r['code']=='Jo']
   cap_end=max([H]+[b for a,b in fixed_jo]+[b for a,b,pr in optional_jo])
   endpoints={0,H,cap_end}
   for a,b in fixed_jo+[(a,b) for a,b,_ in optional_jo]:

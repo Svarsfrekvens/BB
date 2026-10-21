@@ -87,8 +87,19 @@ def build(case, objective_mode="coverage_then_temporary"):
         absence.append(model.NewIntervalVar(e*step,dayhi-e*step,dayhi,''));absence_d.append(1)
         absence.append(model.NewOptionalFixedSizeIntervalVar(bs*step,cfg['break_length'],br,''));absence_d.append(1)
         for t in range(daylo,dayhi):possible[t]+=1
+    whole_choices=[]
+    for c in case.get('whole_duty_candidates',[]):
+        pr=model.NewBoolVar('whole_duty_'+c['id'])
+        whole_choices.append(dict(c=c,pr=pr))
+        for part in c['parts']:
+            if part['code']!='Ar':continue
+            a,b=part['start'],part['end']
+            gross_intervals.append(model.NewOptionalFixedSizeIntervalVar(a,b-a,pr,''))
+            absence.append(model.NewOptionalFixedSizeIntervalVar(a,b-a,pr.Not(),''));absence_d.append(1)
+            for t in range(a,b):possible[t]+=1
     model.AddCumulative(gross_intervals,[1]*len(gross_intervals),cfg['max_staff_on_duty'])
     model._fixed_breaks=breakvars
+    model._whole_duty_choices=whole_choices
     add_person_constraints(case,model,variables)
     background=[K-fixed_supply[t]-possible[t] for t in range(H)]
     assert min(background)>=0
@@ -153,7 +164,9 @@ def build(case, objective_mode="coverage_then_temporary"):
                 for h,host in t['hosts']:model.AddHint(h,int(previous.get('shared_host')==host))
     count=sum(t['pr']*t['n'].get('weight',1) for t in tasks)
     minutes=sum(t['pr']*t['n']['duration']*t['n']['count'] for t in tasks)
-    temp=model._fixed_temporary_objective+sum(v['net'] for v in variables if not staff[v['c']['person']]['ordinary'])
+    temp=model._fixed_temporary_objective+sum(v['net'] for v in variables if not staff[v['c']['person']]['ordinary'])+sum(
+        sum(p['end']-p['start'] for p in ch['c']['parts'] if p['code']=='Ar')*ch['pr']
+        for ch in whole_choices if not staff[ch['c']['person']]['ordinary'])
     total=sum(v['net'] for v in variables)
     assert not cfg.get('capacity_without_ssg'), 'This workload experiment preserves the existing ordinary per-person targets.'
     peak=add_weekly_peak(case,model,variables,breakvars)
@@ -200,6 +213,13 @@ def solve(case, output=None, seconds=60, workers=1, seed=41, det=30, objective_m
             if last.Value(v['pr']):
                 segments.append(dict(id=v['c']['id'],person=v['c']['person'],start=last.Value(v['s'])*step,end=last.Value(v['e'])*step,type='AKTIVT_ARBETE',code='Ar',locked_reason=None))
                 if last.Value(v['br']):breaks.append(dict(person=v['c']['person'],start=last.Value(v['bs'])*step,end=last.Value(v['bs'])*step+case['config']['break_length'],frozen_chain=False))
+        for ch in model._whole_duty_choices:
+            if last.Value(ch['pr']):
+                for index,part in enumerate(ch['c']['parts'],1):
+                    segments.append(dict(id=f"{ch['c']['id']}:{index}",person=ch['c']['person'],
+                        start=part['start'],end=part['end'],code=part['code'],
+                        type='SOVANDE_JOUR' if part['code']=='Jo' else 'AKTIVT_ARBETE',
+                        locked_reason=None))
         recipients={r['unit_id']:r['new_person'] for r in reassignments}
         for b in fb:
             breaks.append(dict(person=recipients.get(b['unit_id'],b['person']),start=last.Value(b['start'])*step,end=last.Value(b['start'])*step+case['config']['break_length'],frozen_chain=True,chain_start=b['chain_start'],chain_end=b['chain_end']))

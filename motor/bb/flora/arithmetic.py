@@ -25,6 +25,8 @@ def check_arithmetic(case, solution):
     source_ids = {r["id"] for r in original["references"]["import"]["segments"]}
     # Trust only the importer's reviewed grouping, never a solver-supplied label.
     whole_duty_ids = {r["id"]: r["whole_duty_id"] for r in original["references"]["import"]["segments"] if r.get("whole_duty_id")}
+    whole_duty_ids.update({f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[])
+                           for i in range(1,4)})
     whole_duty_ids.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
                           for p in (case.get('integration',{}).get('planned_oncall_replacements',[]) +
                                     case.get('integration',{}).get('planned_active_replacements',[]))})
@@ -147,9 +149,22 @@ def check_arithmetic(case, solution):
     if expected_fixed - actual_keys:
         errors.append({"rule": "fixed_segment_modified_or_missing", "count": len(expected_fixed - actual_keys)})
     candidates = {c["id"]: c for c in case["candidates"]}
+    whole_parts={f"{c['id']}:{i}":(c,part) for c in case.get('whole_duty_candidates',[])
+                 for i,part in enumerate(c['parts'],1)}
+    for c in case.get('whole_duty_candidates',[]):
+        ids={f"{c['id']}:{i}" for i in range(1,4)}
+        found=ids & set(segment_by_id)
+        if found and found!=ids:
+            errors.append(dict(rule='incomplete_whole_duty_candidate',candidate=c['id']))
+        for sid in found:
+            part=whole_parts[sid][1];row=segment_by_id[sid]
+            expected_type='SOVANDE_JOUR' if part['code']=='Jo' else 'AKTIVT_ARBETE'
+            if any((row.get('person')!=c['person'],row.get('start')!=part['start'],
+                    row.get('end')!=part['end'],row.get('code')!=part['code'],row.get('type')!=expected_type)):
+                errors.append(dict(rule='invalid_whole_duty_candidate',candidate=c['id'],segment=sid))
     fixed_ids = {r["id"] for r in case["fixed_segments"]}
     for r in segments:
-        if r["id"] in fixed_ids:
+        if r["id"] in fixed_ids or r['id'] in whole_parts:
             continue
         c = candidates.get(r["id"])
         if not c or r["person"] != c["person"] or r["code"] != "Ar":

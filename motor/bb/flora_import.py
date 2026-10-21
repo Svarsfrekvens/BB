@@ -431,6 +431,19 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                                max_length=_integer(window["max_length"],"Längsta kandidatpass",240),
                                original_start=old["start"] if old else None,
                                original_end=old["end"] if old else None))
+    whole_duty_candidates=[]
+    for hypothesis in profile.get('whole_duty_candidates',[]):
+        if hypothesis.get('purpose')!='LOCAL_MODEL_EXPERIMENT' or not hypothesis.get('source'):
+            _fail('Ny hel passkandidat kräver uttrycklig experimentmarkering och källa.')
+        if hypothesis.get('person_id') not in staff_raw:
+            _fail('Hel passkandidat avser okänd person.')
+        parts=hypothesis.get('parts')
+        if not isinstance(parts,list) or len(parts)!=3:
+            _fail('Hel passkandidat kräver tre tidsatta Ar–Jo–Ar-delar.')
+        whole_duty_candidates.append(dict(id=hypothesis['id'],person=hypothesis['person_id'],
+            start=minute(hypothesis['start']),end=minute(hypothesis['end']),
+            parts=[dict(code=part['code'],start=minute(part['start']),end=minute(part['end']))
+                   for part in parts],purpose=hypothesis['purpose'],source=hypothesis['source']))
     needs_raw = _index(raw.get("customer_needs"), "need_id", "Kundbehov")
     p2_needs = {nid: row for nid, row in needs_raw.items()
                 if 0 <= minute(row.get("date")) < horizon}
@@ -555,7 +568,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        scenario=deepcopy(scenario))
     return dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
                 staff=staff,fixed_segments=sorted(fixed,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),
-                candidates=candidates,needs=needs,source_needs=source_needs,
+                candidates=candidates,whole_duty_candidates=whole_duty_candidates,
+                needs=needs,source_needs=source_needs,
                 references={"import":dict(segments=sorted(imported,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),breaks=breaks,placements=[])},
                 config=config,issues=deepcopy(profile.get("issues",[])),
                 sources=[deepcopy(profile.get("source",{}))],scenario_override=override,

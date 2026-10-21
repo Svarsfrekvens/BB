@@ -56,6 +56,8 @@ def longest_free(lo, hi, occupied):
 
 def occasions(case, raw):
     trusted = {r['id']: r.get('whole_duty_id') for r in case['references']['import']['segments']}
+    trusted.update({f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[])
+                    for i in range(1,4)})
     trusted.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
                     for p in (case.get('integration',{}).get('planned_oncall_replacements',[]) +
                                     case.get('integration',{}).get('planned_active_replacements',[]))})

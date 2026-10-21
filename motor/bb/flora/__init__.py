@@ -56,6 +56,9 @@ def check_case(case):
         rows = case[key]
         if len({r['id'] for r in rows}) != len(rows):
             raise ValueError('Dubbla ID i '+key+'.')
+    whole=case.get('whole_duty_candidates',[])
+    if len({r.get('id') for r in whole}) != len(whole):
+        raise ValueError('Dubbla ID i hela passkandidater.')
     staff = {p['id']:p for p in case['staff']}
     for p in staff.values():
         if p.get('all_task_skills') is not True or p.get('day') != 'JA' or p.get('evening') != 'JA':
@@ -82,6 +85,36 @@ def check_case(case):
             c['lo'] < c['day']*1440 or c['hi'] > (c['day']+1)*1440 or
             c['hi']-c['lo'] < c['min_length']):
             raise ValueError('Arbetspass utan jour måste rymmas inom 4–13 timmar på en dag.')
+    generated={r['id'] for r in case['fixed_segments']}|{c['id'] for c in case['candidates']}
+    possible_by_person={p:[] for p in staff}
+    for c in case['candidates']:
+        possible_by_person[c['person']].append((c['lo'],c['hi']))
+    for c in whole:
+        parts=c.get('parts',[])
+        if break_policy!='EXPLICIT_NO_BREAK_SCENARIO' or not isinstance(c.get('id'),str) or not c['id'] or c['person'] not in staff:
+            raise ValueError('Helt jourpass kräver egen giltig kandidat och explicit scenario utan rast.')
+        if c['end']-c['start']!=1440 or not 0<=c['start']<c['end']<=case['horizon'] or [r.get('code') for r in parts]!=['Ar','Jo','Ar']:
+            raise ValueError('Jourkandidat måste vara ett helt 24-timmarspass Ar–Jo–Ar.')
+        if not staff[c['person']].get('sleeping_oncall')=='JA' or any(
+            type(r.get('start')) is not int or type(r.get('end')) is not int or r['start']>=r['end'] for r in parts):
+            raise ValueError('Jourkandidat saknar behörig person eller giltiga tider.')
+        if parts[0]['start']!=c['start'] or parts[-1]['end']!=c['end'] or any(
+            a['end']!=b['start'] for a,b in zip(parts,parts[1:])):
+            raise ValueError('Jourkandidat har lucka, överlapp eller ofullständiga passgränser.')
+        duty_profile=cfg['duty_profile'];jo=parts[1]
+        longest_night=max((max(0,min(jo['end'],(day+1)*1440+duty_profile['night_end_minute'])-
+                           max(jo['start'],day*1440+duty_profile['night_start_minute']))
+                           for day in range(c['start']//1440-1,c['end']//1440+1)),default=0)
+        if longest_night<duty_profile['night_jour_min_minutes']:
+            raise ValueError('Jourkandidat saknar minst fem timmar sammanhängande nattjour.')
+        if c['id'] in generated or any(f"{c['id']}:{i}" in generated for i in range(1,4)):
+            raise ValueError('Jourkandidat krockar med befintligt schemarad-ID.')
+        generated.update(f"{c['id']}:{i}" for i in range(1,4))
+        possible_by_person[c['person']].extend((r['start'],r['end']) for r in parts if r['code']=='Ar')
+    for person,spans in possible_by_person.items():
+        for i,(a,b) in enumerate(spans):
+            if any(max(a,x)<min(b,y) for x,y in spans[i+1:]):
+                raise ValueError('Överlappande möjliga arbetstider för samma person stöds inte i experimentet.')
 
 
 def validate_case(case, result):
@@ -100,7 +133,7 @@ def validate_case(case, result):
     checked['exports']['daily_rest_24h.json'] = rest
     by_rule = {v['rule'] for v in violations}
     checks = {
-        'source_integrity': ('Kända källbehov, P1, fasta segment och personkopplingar är bevarade.', {'original_need_records_changed','known_actual_P1_work_missing','fixed_segment_modified_or_missing','duplicate_segment_id','unknown_or_invalid_candidate','unit_integrity','duplicate_mapped_segment','missing_or_extra_unit_recipient','work_during_confirmed_absence'}),
+        'source_integrity': ('Kända källbehov, P1, fasta segment och personkopplingar är bevarade.', {'original_need_records_changed','known_actual_P1_work_missing','fixed_segment_modified_or_missing','duplicate_segment_id','unknown_or_invalid_candidate','unit_integrity','duplicate_mapped_segment','missing_or_extra_unit_recipient','work_during_confirmed_absence','incomplete_whole_duty_candidate','invalid_whole_duty_candidate'}),
         'ordinary_net': ('Ordinarie Ar-netto kontrollerat separat per person.', {'retained_original_worked_net','target_not_matched_to_original_known_Ar'}),
         'whole_duty_minimum': ('Minimilängd för hela källpassgrupper och nya/kortade pass kontrollerad.', {'whole_occasion_under4h','candidate_bounds_or_length','active_only_duty_over13h'}),
         'rolling_free_days': ('Lediga kalenderdagar kontrollerade i varje rullande 28-dagarsfönster med känd P1.', {'free_calendar_days9'}),
@@ -216,6 +249,7 @@ def _normalize(case, raw, validation):
     # touching times and source_ref are never used to invent a whole pass.
     unit_by_row={sid:u['id'] for u in case.get('reassignable_temporary_units',[]) for sid in u['segment_ids']}
     candidate_ids={c['id'] for c in case.get('candidates',[])}
+    whole_part_ids={f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[]) for i in range(1,4)}
     def pass_identity(row):
         if row.get('whole_duty_id'):
             return 'reviewed:'+row['whole_duty_id'], 'PROFILE_WHOLE_DUTY_ID'
@@ -223,6 +257,8 @@ def _normalize(case, raw, validation):
             return 'unit:'+unit_by_row[row['id']], 'REVIEWED_REASSIGNABLE_UNIT'
         if row['id'] in candidate_ids:
             return 'generated:'+row['id'], 'MODEL_CANDIDATE_SHIFT'
+        if row['id'] in whole_part_ids:
+            return 'generated:'+whole_part_ids[row['id']], 'MODEL_WHOLE_DUTY_CANDIDATE'
         return None, 'UNVERIFIED'
     segments=[{'segment_id':r['id'],'person_id':mapped('person',r['person']),'start':stamp(r['start']),'end':stamp(r['end']),'code':r['code'],
                'pass_id':pass_identity(r)[0], 'pass_id_basis':pass_identity(r)[1],

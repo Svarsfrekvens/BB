@@ -84,6 +84,12 @@ def add_weekly_peak(case, model, variables, fixed_breaks):
         day = v['c']['day']
         assert 0 <= day < 28 and day * 1440 <= v['c']['lo'] <= v['c']['hi'] <= (day + 1) * 1440
         terms[v['c']['person'], day // 7].append(v['net'])
+    for ch in model._whole_duty_choices:
+        for week in range(4):
+            lo, hi = week * 10080, (week + 1) * 10080
+            ar = sum(clip_duration(r['start'],r['end'],lo,hi)
+                     for r in ch['c']['parts'] if r['code']=='Ar')
+            if ar:terms[ch['c']['person'],week].append(ar*ch['pr'])
     weekly = {}
     for key, exprs in terms.items():
         value = model.NewIntVar(0, 10080, f'weekly_Ar_net_{key[0]}_{key[1]}')

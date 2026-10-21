@@ -50,6 +50,23 @@ def sample():
 
 
 class ImportTest(unittest.TestCase):
+    def test_future_whole_duty_requires_explicit_experiment_source(self):
+        raw,profile=sample()
+        profile['whole_duty_candidates']=[dict(id='hypothesis-1',person_id='person-a',
+            purpose='LOCAL_MODEL_EXPERIMENT',source='Fictional isolated test',
+            start='2027-02-02T09:00',end='2027-02-03T09:00',parts=[
+                dict(code='Ar',start='2027-02-02T09:00',end='2027-02-02T22:00'),
+                dict(code='Jo',start='2027-02-02T22:00',end='2027-02-03T06:00'),
+                dict(code='Ar',start='2027-02-03T06:00',end='2027-02-03T09:00')])]
+        case=prepare_case(raw,profile)
+        self.assertEqual(case['whole_duty_candidates'][0]['end']-
+                         case['whole_duty_candidates'][0]['start'],1440)
+        self.assertEqual([p['code'] for p in case['whole_duty_candidates'][0]['parts']],
+                         ['Ar','Jo','Ar'])
+        del profile['whole_duty_candidates'][0]['source']
+        with self.assertRaisesRegex(FloraImportError,'källa'):
+            prepare_case(raw,profile)
+
     def test_uploaded_values_and_generic_period_ids(self):
         raw,profile=sample(); result=prepare_case(raw,profile)
         self.assertEqual(result["origin"],"2027-01-29T00:00")

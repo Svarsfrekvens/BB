@@ -15,6 +15,23 @@ def no_break_case(minutes):
     return case
 
 
+def whole_jour_candidate_case():
+    case = no_break_case(780)
+    case['staff'][0]['sleeping_oncall'] = 'JA'
+    case['staff'][0]['target_net'] = 960
+    case['candidates'] = []
+    parts = [dict(code='Ar',start=540,end=1320),
+             dict(code='Jo',start=1320,end=1800),
+             dict(code='Ar',start=1800,end=1980)]
+    case['whole_duty_candidates'] = [dict(id='whole-night-X',person='employee-X',
+                                           start=540,end=1980,parts=parts)]
+    case['references']['import']['segments'] = [
+        dict(id=f'source-night-{i}',person='employee-X',start=part['start'],end=part['end'],
+             code=part['code'],type='SOVANDE_JOUR' if part['code']=='Jo' else 'AKTIVT_ARBETE')
+        for i,part in enumerate(parts,1)]
+    return case
+
+
 class NoBreakDutyExperiment(unittest.TestCase):
     def test_four_six_seven_eight_and_thirteen_hour_active_duties(self):
         for hours in (4, 6, 7, 8, 13):
@@ -68,6 +85,42 @@ class NoBreakDutyExperiment(unittest.TestCase):
         self.assertEqual(result['after']['jour_minutes'], 480)
         self.assertEqual(result['after']['break_minutes'], 0)
         self.assertFalse(result['schedule']['breaks'])
+
+    def test_new_whole_jour_candidate_is_selected_as_one_pass(self):
+        case=whole_jour_candidate_case()
+        result=solve_case(case,seconds=2,workers=1)
+        self.assertEqual(result['solver_status'],'OPTIMAL')
+        self.assertEqual(result['validation']['checked_status'],'PASS')
+        self.assertEqual(result['after']['ordinary_net_minutes'],960)
+        self.assertEqual(result['after']['jour_minutes'],480)
+        self.assertEqual(result['after']['break_minutes'],0)
+        self.assertEqual(result['after']['fully_covered_needs'],1)
+        self.assertEqual({r['pass_id'] for r in result['schedule']['segments']},
+                         {'generated:whole-night-X'})
+        self.assertEqual([r['code'] for r in result['schedule']['segments']],['Ar','Jo','Ar'])
+        raw=copy.deepcopy(result['raw_solution'])
+        raw['segments']=[r for r in raw['segments'] if r['id']!='whole-night-X:2']
+        self.assertIn('incomplete_whole_duty_candidate',
+                      {v['rule'] for v in validate_case(case,raw)['violations']})
+
+    def test_sick_time_cannot_become_a_whole_duty_candidate(self):
+        case=whole_jour_candidate_case()
+        case['whole_duty_candidates'][0]['parts'][1]['code']='St'
+        with self.assertRaisesRegex(ValueError,'Ar–Jo–Ar'):
+            solve_case(case,seconds=1)
+
+    def test_whole_candidate_requires_night_jour_and_obeys_rolling_cap(self):
+        case=whole_jour_candidate_case()
+        case['whole_duty_candidates'][0]['parts']=[
+            dict(code='Ar',start=540,end=600),dict(code='Jo',start=600,end=1080),
+            dict(code='Ar',start=1080,end=1980)]
+        with self.assertRaisesRegex(ValueError,'nattjour'):
+            solve_case(case,seconds=1)
+        case=whole_jour_candidate_case()
+        case['config']['oncall_cap_28d']=300
+        result=solve_case(case,seconds=2,workers=1)
+        self.assertEqual(result['solver_status'],'INFEASIBLE')
+        self.assertFalse(result['schedule']['segments'])
 
     def test_validator_catches_inserted_break_and_long_active_duty(self):
         case = no_break_case(780)
