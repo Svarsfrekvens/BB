@@ -408,6 +408,11 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         segment = dict(id=new_id, person=person_id, start=a, end=b, code=code,
                        type="SOVANDE_JOUR" if code == "Jo" else "AKTIVT_ARBETE",
                        locked_reason="EXPLICIT_PLANNED_ACTIVITY_SCENARIO")
+        # An explicit plan replaces exactly this reviewed source interval.
+        # Carry its approved whole-duty identity with distinct provenance;
+        # never infer one from the generated row ID or touching clock times.
+        if segments[sid].get("whole_duty_id"):
+            segment["whole_duty_id"] = segments[sid]["whole_duty_id"]
         segments[new_id] = segment
         fixed.append(segment)
         (planned_oncall if code == "Jo" else planned_active).append(deepcopy(plan))

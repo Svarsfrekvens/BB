@@ -267,7 +267,10 @@ def _normalize(case, raw, validation):
     whole_part_ids={f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[]) for i in range(1,4)}
     def pass_identity(row):
         if row.get('whole_duty_id'):
-            return 'reviewed:'+row['whole_duty_id'], 'PROFILE_WHOLE_DUTY_ID'
+            basis=('PLANNED_REPLACEMENT_OF_REVIEWED_DUTY'
+                   if row.get('locked_reason')=='EXPLICIT_PLANNED_ACTIVITY_SCENARIO'
+                   else 'PROFILE_WHOLE_DUTY_ID')
+            return 'reviewed:'+row['whole_duty_id'], basis
         if row['id'] in unit_by_row:
             return 'unit:'+unit_by_row[row['id']], 'REVIEWED_REASSIGNABLE_UNIT'
         if row['id'] in candidate_ids:
@@ -289,6 +292,7 @@ def _normalize(case, raw, validation):
                        'anchor_segment_id':anchor['id'] if anchor else None,
                        'anchor_status':'UNIQUE_CONTAINING_SEGMENT' if anchor else 'UNRESOLVED',
                        'pass_id':pass_identity(anchor)[0] if anchor else None})
+    period_duties=[s for s in segments if s['minutes_in_period']>0 and s['code'] in ('Ar','Jo','Kl','Öv')]
     interventions=[{'need_id':mapped('need',r['id']),'person_id':mapped('person',r['person']),'start':stamp(int((datetime.fromisoformat(r['start'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)),
                     'end':stamp(int((datetime.fromisoformat(r['end'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)), 'customer_id':mapped('customer',r['customer']),
                     'source_ref':meta.get('need_source_refs',{}).get(r['id'],needs[r['id']].get('source_row'))} for r in validation.get('certificates',{}).get('executors',[])]
@@ -304,6 +308,8 @@ def _normalize(case, raw, validation):
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,
             'transfer_contract':{'version':'bb-engine-transfer-anchors/1.0',
                                  'pass_ids_complete':solver_status in {'FEASIBLE','OPTIMAL'} and bool(segments) and all(s['pass_id'] is not None for s in segments),
+                                 'period_duty_pass_ids_complete':solver_status in {'FEASIBLE','OPTIMAL'} and bool(period_duties) and all(s['pass_id'] is not None for s in period_duties),
+                                 'period_duty_rows_without_pass_id':sum(s['pass_id'] is None for s in period_duties),
                                  'break_anchors_complete':all(b['anchor_segment_id'] is not None and b['pass_id'] is not None for b in breaks),
                                  'approval_inherited':False},
             'solver':{'status':solver_status,'phases':raw.get('stages',[]),'wall_seconds':raw.get('total_seconds'),'build_seconds':raw.get('build_seconds'),'model':raw.get('model'),'parameters':raw.get('parameters')},

@@ -98,6 +98,8 @@ class NoBreakDutyExperiment(unittest.TestCase):
         self.assertEqual({r['pass_id'] for r in result['schedule']['segments']},
                          {'generated:whole-night-X'})
         self.assertEqual([r['code'] for r in result['schedule']['segments']],['Ar','Jo','Ar'])
+        self.assertTrue(result['transfer_contract']['period_duty_pass_ids_complete'])
+        self.assertEqual(result['transfer_contract']['period_duty_rows_without_pass_id'],0)
         raw=copy.deepcopy(result['raw_solution'])
         raw['segments']=[r for r in raw['segments'] if r['id']!='whole-night-X:2']
         self.assertIn('incomplete_whole_duty_candidate',

@@ -28,6 +28,24 @@ def fixture():
 
 
 class PlannedOncallTest(unittest.TestCase):
+    def test_reviewed_source_duty_identity_reaches_explicit_replacements(self):
+        raw,profile=fixture()
+        without=prepare_case(raw,profile)
+        self.assertFalse(any(r.get('whole_duty_id') for r in without['fixed_segments']
+                             if 'PLAN' in r['id']))
+        for row in raw['schedule_segments'][3:]:
+            row['sequence_id']='test-duty'
+            profile['segment_decisions'][row['segment_id']]['whole_duty_id']='test-duty'
+        reviewed=prepare_case(raw,profile)
+        planned=[r for r in reviewed['fixed_segments'] if 'PLAN' in r['id']]
+        self.assertEqual(len(planned),2)
+        self.assertEqual({r.get('whole_duty_id') for r in planned},{'test-duty'})
+        self.assertEqual({r['locked_reason'] for r in planned},
+                         {'EXPLICIT_PLANNED_ACTIVITY_SCENARIO'})
+        self.assertEqual({r['code'] for r in planned},{'Jo'})
+        self.assertEqual([r['source_code'] for r in raw['schedule_segments'][3:]],
+                         ['St','Jo','St'])
+
     def test_reviewed_active_morning_does_not_change_source_or_net_target(self):
         raw,profile=fixture()
         before=prepare_case(raw,profile)
