@@ -497,6 +497,25 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
             _fail(f"Behov {nid}: ny fast/flyttbar-markering motsäger granskad profil.")
         lo = (a//1440)*1440+decision["flex_start_minute"] if flex else a
         hi = (a//1440)*1440+decision["flex_end_minute"] if flex else b
+        extension = decision.get("approved_window_extension")
+        extension_provenance = None
+        if extension is not None:
+            if (not isinstance(extension, dict) or flex or
+                set(extension) != {"original_window_start", "original_window_end",
+                                   "approved_window_end", "decision_id", "decision_source"} or
+                extension["original_window_start"] != row.get("window_start") or
+                extension["original_window_end"] != row.get("window_end") or
+                any(not isinstance(extension[key], str) or not extension[key].strip()
+                    for key in ("decision_id", "decision_source"))):
+                _fail(f"Behov {nid}: fönsterundantaget saknar giltigt beslut eller matchande original.")
+            approved_end = need_time(extension["approved_window_end"])
+            if not b < approved_end <= min(b + 120, (a//1440+1)*1440):
+                _fail(f"Behov {nid}: det beslutade fönstret måste vara en begränsad förlängning samma dag.")
+            hi = approved_end
+            extension_provenance = dict(decision_id=extension["decision_id"],
+                                        decision_source=extension["decision_source"],
+                                        original_window_end=b,approved_window_end=approved_end,
+                                        added_minutes=approved_end-b)
         domains = [[lo,hi-duration]]
         if flex and decision.get("retain_original_start") and not lo <= a <= hi-duration:
             domains.append([a,a])
@@ -513,6 +532,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                       required_skills=", ".join(dict.fromkeys(value for value in (row.get("profession_raw"),row.get("delegated_profession_raw")) if value)),
                       description_present=bool(desc),description_review=decision.get("description_review"),
                       review_reason=decision.get("review_reason"))
+        if extension_provenance:
+            source["approved_window_extension"] = extension_provenance
         source_needs.append(deepcopy(source))
         source.update(members=[engine_id],weight=1,exclusive=decision["exclusive"],
                       parallel_permission=decision["parallel_permission"])

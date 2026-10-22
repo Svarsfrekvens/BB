@@ -195,6 +195,11 @@ def validate_case(case, result):
         unknowns.append(dict(rule_id='daily_rest_24h',message=rest_message))
     if case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO':
         unknowns.append(dict(rule_id='no_break_applicability',message='Scenario utan rast är ett uttryckligt modellantagande; avtals- och laglig tillämplighet är inte verifierad.'))
+    extended=[n for n in case.get('source_needs',[]) if 'approved_window_extension' in n]
+    if extended:
+        unknowns.append(dict(rule_id='approved_test_window_extension',
+                             message=f'{len(extended)} källfönster har beslutade testundantag; originaltiderna är bevarade och skarp tillämpning kräver separat granskning.',
+                             need_ids=[n['source_row'] for n in extended]))
     for item in case.get('integration',{}).get('unknowns',[]):
         unknowns.append(item if isinstance(item,dict) else {'rule_id':'input_limitation','message':str(item)})
     for row in summary['inherited_conditional_Jo_issues']:
@@ -317,6 +322,13 @@ def _normalize(case, raw, validation):
     if case['config'].get('sequential_individual_customers'):
         assumptions.append({'id':'sequential_individual_customers',
                             'message':'Samma medarbetare tidsplacerar individuella insatser för olika kunder efter varandra; undantagna icke-individuella kund-ID kommer från den skyddade profilen.'})
+    window_exceptions=[{'need_id':mapped('need',need['id']),
+                        **need['approved_window_extension']}
+                       for need in case['source_needs'] if 'approved_window_extension' in need]
+    if window_exceptions:
+        assumptions.append({'id':'approved_test_window_extensions',
+                            'message':'Beslutade tidsfönsterundantag gäller endast detta test. Uppladdade originaltider är oförändrade.',
+                            'decisions':window_exceptions})
     assumptions.append({'id':'before_break_reference','message':('Ingen rast dras av i detta separata modellspecifika scenario; originalfilen har inga registrerade rasttider.' if no_breaks else 'Före-netto använder scenariots matematiska minimiantal raster enligt rastprofilen, inte verifierade registrerade betalda timmar.'), 'source':case.get('scenario_override',{}).get('ordinary_reference','Explicit rule profile applied to imported Ar intervals')})
     assumptions.extend({'id':u['rule_id'],'message':u['message']} for u in validation.get('unknowns',[]))
     method=('joint-shifts-person-bound-no-break/v1' if case['config'].get('sequential_individual_customers')

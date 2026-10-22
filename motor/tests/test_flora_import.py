@@ -50,6 +50,41 @@ def sample():
 
 
 class ImportTest(unittest.TestCase):
+    def test_explicit_window_extension_preserves_raw_and_records_decision(self):
+        raw,profile=sample()
+        original=deepcopy(raw)
+        profile['need_decisions']['source-need']['approved_window_extension']={
+            'original_window_start':'09:00','original_window_end':'11:00',
+            'approved_window_end':'11:03','decision_id':'synthetic-decision',
+            'decision_source':'Reviewed test decision'}
+        case=prepare_case(raw,profile)
+        self.assertEqual(raw,original)
+        self.assertEqual(case['needs'][0]['domains'],[[540,633]])
+        self.assertEqual(case['source_needs'][0]['domains'],[[540,633]])
+        self.assertEqual(case['needs'][0]['original_window_end'],660)
+        self.assertEqual(case['needs'][0]['approved_window_extension']['added_minutes'],3)
+        self.assertEqual(case['import_provenance']['upload']['customer_needs'][0]['window_end'],'11:00')
+
+    def test_window_extension_requires_exact_source_and_provenance(self):
+        valid={'original_window_start':'09:00','original_window_end':'11:00',
+               'approved_window_end':'11:03','decision_id':'synthetic-decision',
+               'decision_source':'Reviewed test decision'}
+        for change in ({'original_window_end':'11:01'}, {'decision_id':''},
+                       {'approved_window_end':'11:00'}, {'approved_window_end':'13:01'},
+                       {'approved_window_end':'09:00'}):
+            with self.subTest(change=change):
+                raw,profile=sample()
+                profile['need_decisions']['source-need']['approved_window_extension']={**valid,**change}
+                with self.assertRaises(FloraImportError):
+                    prepare_case(raw,profile)
+        raw,profile=sample()
+        profile['need_decisions']['source-need']['flex']=True
+        profile['need_decisions']['source-need']['flex_start_minute']=540
+        profile['need_decisions']['source-need']['flex_end_minute']=660
+        profile['need_decisions']['source-need']['approved_window_extension']=valid
+        with self.assertRaises(FloraImportError):
+            prepare_case(raw,profile)
+
     def test_future_whole_duty_requires_explicit_experiment_source(self):
         raw,profile=sample()
         profile['whole_duty_candidates']=[dict(id='hypothesis-1',person_id='person-a',

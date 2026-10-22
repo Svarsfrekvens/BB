@@ -26,3 +26,11 @@ profile produces a new job identity; previous runs and approval state remain
 unchanged. The model does not widen any source need window or create staff
 availability. A source-window exception requires its own documented decision
 and separate input/profile version.
+
+A protected need decision may carry `approved_window_extension` with the
+original start/end, approved end, decision ID and decision source. The importer
+requires an exact match to the uploaded time fields and permits only a bounded
+same-day extension. It keeps the uploaded fields and original end in provenance,
+adds the decision to the runnable domain and reports it in result assumptions
+and open observations. This is intended for explicitly reviewed test cases;
+the app must not infer or supply an extension on behalf of the business.
