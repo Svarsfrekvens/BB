@@ -15,6 +15,7 @@ from .common import merge, days, runs
 
 from .person_constraints import add_person_constraints, export_reassignments
 from .workload_objectives import add_weekly_peak, export_weekly_workload
+from .person_tasks import add_person_task_assignments
 
 def build(case, objective_mode="coverage_then_temporary"):
     cfg=case['config'];H=case['horizon'];step=cfg['shift_step'];K=len(case['staff'])
@@ -136,6 +137,8 @@ def build(case, objective_mode="coverage_then_temporary"):
         for t in tasks:
             if t['n']['exclusive'] or t['n']['original']//1440!=day:continue
             model.AddCumulative(intervals+[t['interval']],demands+[t['n']['count']],K)
+    if cfg.get('sequential_individual_customers'):
+        add_person_task_assignments(case, model, variables, tasks)
     # Hints from previous independent proposal, accepted only within this case's domains.
     prior=case.get('search_hint') or case.get('references',{}).get('astra_previous') or {'segments':[],'breaks':[],'placements':[]};prior_rows={r['id']:r for r in prior['segments']};prior_recipients={r['unit_id']:r['new_person'] for r in prior.get('temporary_unit_reassignments',[])}
     for v in variables:
@@ -226,9 +229,12 @@ def solve(case, output=None, seconds=60, workers=1, seed=41, det=30, objective_m
         placements=[]
         for t in tasks:
             if not last.Value(t['pr']):continue
-            placements.append(dict(id=t['n']['id'],start=last.Value(t['st']),
+            placement=dict(id=t['n']['id'],start=last.Value(t['st']),
                 fragments=[dict(start=last.Value(st),duration=dur) for st,dur in t['parts']],
-                shared_host=next((host for h,host in t['hosts'] if last.Value(h)),None)))
+                shared_host=next((host for h,host in t['hosts'] if last.Value(h)),None))
+            if case['config'].get('sequential_individual_customers'):
+                placement['assigned_people']=sorted(person for person,chosen in t['assigned_people'] if last.Value(chosen))
+            placements.append(placement)
         result.update(segments=segments,breaks=breaks,placements=placements)
         sig=json.dumps([segments,breaks,result['placements']],sort_keys=True).encode();result['signature']=hashlib.sha256(sig).hexdigest()
     if output is not None:Path(output).write_text(json.dumps(result,ensure_ascii=False,indent=2))

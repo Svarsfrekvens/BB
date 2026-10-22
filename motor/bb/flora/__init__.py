@@ -74,6 +74,16 @@ def check_case(case):
             raise ValueError('Behovets varaktighet eller antal personer är okänt/ogiltigt.')
         if not n.get('domains') or any(a > b or a < 0 or b+n['duration'] > case['horizon'] for a,b in n['domains']):
             raise ValueError('Behovet ryms inte i ett tillåtet fönster: '+n['id'])
+    sequential=cfg.get('sequential_individual_customers',False)
+    if type(sequential) is not bool:
+        raise ValueError('Personbunden kundordning måste vara ett uttryckligt booleskt profilbeslut.')
+    if sequential:
+        groups=cfg.get('non_individual_customer_ids')
+        known={n['customer'] for n in case['needs']}
+        if (break_policy!='EXPLICIT_NO_BREAK_SCENARIO' or not isinstance(groups,list) or
+            any(not isinstance(value,str) or not value for value in groups) or
+            len(groups)!=len(set(groups)) or not set(groups)<=known):
+            raise ValueError('Personbunden kundordning kräver giltiga, uttryckligt undantagna grupp-ID och no-break-scenario.')
     for r in case['fixed_segments']:
         if r['person'] not in staff or type(r['start']) is not int or type(r['end']) is not int or r['start'] >= r['end']:
             raise ValueError('Ogiltigt känt schemasegment.')
@@ -156,10 +166,14 @@ def validate_case(case, result):
         'inter_duty_rest': ('Kända vilogap mellan arbetstillfällen kontrollerade; ersätter inte full 24-timmarskontroll.', {'daily_rest11h','same_person_overlapping_Ar_Jo_segments'}),
         'weekly_rest': ('Sammanhängande vila i profilens fasta veckor kontrollerad.', {'fixed_Monday_weekly_rest36h'}),
         'rolling_jour_cap': ('Jourtak kontrollerat i rullande 28-dagarsfönster med känd historik.', {'rolling28day_Jo48h'}),
-        'mathematical_assignments': ('Minutvis utförartäckning och handlingens exklusivitet kontrollerade.', {'executor_coverage','shopping_overlap','need_window','need_outside_period','duplicate_need_id','unknown_placed_need'}),
+        'mathematical_assignments': ('Minutvis utförartäckning och handlingens exklusivitet kontrollerade.', {'executor_coverage','shopping_overlap','need_window','need_outside_period','duplicate_need_id','unknown_placed_need','invalid_person_assignment','same_person_different_customers'}),
         'capacity_limit': ('Profilens samtidiga personalnärvaro kontrollerad.', {'max2_active_staff'}),
     }
     rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
+    if case['config'].get('sequential_individual_customers'):
+        names={'invalid_person_assignment','same_person_different_customers','executor_coverage','shopping_overlap'}
+        rules.append(dict(rule_id='sequential_individual_customers',status='FAIL' if by_rule & names else 'PASS',
+                          message='Personbundna individuella insatser för olika kunder sker efter varandra.'))
     counts = {status:sum(row['status']==status for row in rest['windows']) for status in ('PASS','FAIL','UNKNOWN')}
     rest_message = (f"Fast dygnsvilokontroll: {counts['PASS']} dygn uppfyllda, {counts['FAIL']} avvikelser, "
                     f"{counts['UNKNOWN']} dygn kräver periodunderlag eller undantagsprövning. "
@@ -300,9 +314,14 @@ def _normalize(case, raw, validation):
     solver_status=last_feasible if 'segments' in raw else (raw.get('stages') or [{}])[-1].get('status','UNKNOWN')
     assumptions=[{'id':k,'message':str(v)} for k,v in case.get('scenario_override',{}).items()]
     no_breaks=case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO'
+    if case['config'].get('sequential_individual_customers'):
+        assumptions.append({'id':'sequential_individual_customers',
+                            'message':'Samma medarbetare tidsplacerar individuella insatser för olika kunder efter varandra; undantagna icke-individuella kund-ID kommer från den skyddade profilen.'})
     assumptions.append({'id':'before_break_reference','message':('Ingen rast dras av i detta separata modellspecifika scenario; originalfilen har inga registrerade rasttider.' if no_breaks else 'Före-netto använder scenariots matematiska minimiantal raster enligt rastprofilen, inte verifierade registrerade betalda timmar.'), 'source':case.get('scenario_override',{}).get('ordinary_reference','Explicit rule profile applied to imported Ar intervals')})
     assumptions.extend({'id':u['rule_id'],'message':u['message']} for u in validation.get('unknowns',[]))
-    result={'schema_version':'bb-engine-run/1.0','review_required':True,'business_schedule_approved':False,'method':'joint-shifts-no-break-experiment/v0' if no_breaks else METHOD,'solver_status':solver_status,
+    method=('joint-shifts-person-bound-no-break/v1' if case['config'].get('sequential_individual_customers')
+            else 'joint-shifts-no-break-experiment/v0' if no_breaks else METHOD)
+    result={'schema_version':'bb-engine-run/1.0','review_required':True,'business_schedule_approved':False,'method':method,'solver_status':solver_status,
             'period':meta.get('period',{'id':'P2','start':case['origin'][:10],'end':(datetime.fromisoformat(case['end'])-timedelta(days=1)).date().isoformat(),'timezone':'Europe/Stockholm'}),
             'before':totals(before_people,False),'after':totals(after_people,True),'persons':persons,
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,

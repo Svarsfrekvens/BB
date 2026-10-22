@@ -19,6 +19,8 @@ def check_arithmetic(case, solution):
     ORIGIN = datetime.fromisoformat(case["origin"])
     staff = {p["id"]: p for p in case["staff"]}
     needs = {n["id"]: n for n in case["needs"]}
+    sequential = case['config'].get('sequential_individual_customers',False)
+    non_individual = set(case['config'].get('non_individual_customer_ids',[]))
     WITH_BREAKS = case['config'].get('break_policy','SOLVER_PLACED') != 'EXPLICIT_NO_BREAK_SCENARIO'
     CALENDAR_MODE = case['config']['calendar_mode']
     assert CALENDAR_MODE == 'rolling'
@@ -301,11 +303,21 @@ def check_arithmetic(case, solution):
     if len(placed) != len(solution.get("placements", [])):
         errors.append({"rule": "duplicate_need_id"})
     at = defaultdict(list)
+    provided_assignments = {}
     for id, placement in placed.items():
         if id not in needs:
             errors.append({"rule": "unknown_placed_need", "id": id})
             continue
         n = needs[id]
+        if sequential:
+            assigned_people = placement.get('assigned_people')
+            if (not isinstance(assigned_people,list) or len(assigned_people)!=n['count'] or
+                any(not isinstance(person,str) for person in assigned_people) or
+                len(set(assigned_people))!=len(assigned_people) or
+                any(person not in staff for person in assigned_people)):
+                errors.append({'rule':'invalid_person_assignment','id':id})
+                assigned_people=[]
+            provided_assignments[id]=assigned_people
         if not any(a <= placement["start"] <= b for a, b in n["domains"]):
             errors.append({"rule": "need_window", "id": id})
         if placement["start"] < 0 or placement["start"] + n["duration"] > H:
@@ -321,6 +333,7 @@ def check_arithmetic(case, solution):
     previous = {}
     hist = Counter()
     deficit = 0
+    cross_customer_minutes = Counter()
     for t in range(H):
         ids = at[t]
         free = {p for p, av in available.items() if av[t]}
@@ -330,13 +343,14 @@ def check_arithmetic(case, solution):
         assigned = {}
         load = Counter()
         for id in sorted(ids, key=lambda n: (not needs[n]["exclusive"], n)):
-            chosen = sorted(free, key=lambda p: (load[p], p not in previous.get(id, []), p))[:needs[id]["count"]]
+            chosen = (provided_assignments[id] if sequential else
+                      sorted(free, key=lambda p: (load[p], p not in previous.get(id, []), p))[:needs[id]["count"]])
             assigned[id] = chosen
-            if len(chosen) < needs[id]["count"]:
+            if len(chosen) < needs[id]["count"] or any(person not in free for person in chosen):
                 failures[id].append(t)
             for p in chosen:
                 load[p] += 1
-            if needs[id]["exclusive"]:
+            if needs[id]["exclusive"] and not sequential:
                 free.difference_update(chosen)
         per_person = defaultdict(list)
         for id, pp in assigned.items():
@@ -346,6 +360,9 @@ def check_arithmetic(case, solution):
             hist[len(ids_for_p)] += 1
             if len(ids_for_p) > 1 and any(needs[id]["exclusive"] for id in ids_for_p):
                 errors.append({"rule": "shopping_overlap", "person": p, "minute": t, "ids": ids_for_p})
+            if sequential and len({needs[id]['customer'] for id in ids_for_p
+                                   if needs[id]['customer'] not in non_individual})>1:
+                cross_customer_minutes[p]+=1
         keys_now = {(id, p) for id, pp in assigned.items() for p in pp}
         for key in list(open_execution):
             if key not in keys_now:
@@ -368,6 +385,10 @@ def check_arithmetic(case, solution):
         overlaps.append({"person": p, "start": stamp(t), "end": stamp(H), "count": len(ids), "tasks": [{"id": id, "customer": needs[id]["customer"], "title": needs[id]["title"]} for id in ids]})
     if failures:
         errors.append({"rule": "executor_coverage", "failed_needs": len(failures), "deficit_clock_minutes": deficit})
+    if cross_customer_minutes:
+        errors.append({'rule':'same_person_different_customers',
+                       'person_minutes':sum(cross_customer_minutes.values()),
+                       'minutes_by_person':dict(sorted(cross_customer_minutes.items()))})
     
     compensation = []
     comp_unknown = []
