@@ -328,6 +328,17 @@ def _normalize(case, raw, validation):
     solver_status=last_feasible if 'segments' in raw else (raw.get('stages') or [{}])[-1].get('status','UNKNOWN')
     assumptions=[{'id':k,'message':str(v)} for k,v in case.get('scenario_override',{}).items()]
     no_breaks=case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO'
+    # Legacy scenario prose must not contradict the effective run configuration.
+    assumptions=[a for a in assumptions if a['id'] not in ('breaks','net_targets_minutes')]
+    assumptions.append({'id':'breaks','message':('Ingen rast i detta uttryckliga historiska test.' if no_breaks else
+                        'Rastvillkor enligt körningens config.'),'effective_policy':case['config'].get('break_policy'),
+                        'effective_break_minutes':0 if no_breaks else case['config']['break_length']})
+    assumptions.append({'id':'net_targets_minutes','message':'Exakta ordinarie mål i denna körning; inte verifierad avtalskapacitet.',
+                        'values':{mapped('person',p['id']):p['target_net'] for p in case['staff'] if p['ordinary']}})
+    flex=[mapped('need',n['id']) for n in case['source_needs'] if n.get('flex')]
+    if flex:
+        assumptions.append({'id':'profile_flexible_domains','message':'Profilens tidigare flexibla testdomäner används separat från oförändrade källintervall. Detta exportbevis ger inget nytt verksamhetsgodkännande.',
+                            'status':'HISTORICAL_SCENARIO','need_ids':flex})
     if case['config'].get('sequential_individual_customers'):
         assumptions.append({'id':'sequential_individual_customers',
                             'message':'Samma medarbetare tidsplacerar individuella insatser för olika kunder efter varandra; undantagna icke-individuella kund-ID kommer från den skyddade profilen.'})
@@ -345,6 +356,17 @@ def _normalize(case, raw, validation):
     result={'schema_version':'bb-engine-run/1.0','review_required':True,'business_schedule_approved':False,'method':method,'solver_status':solver_status,
             'period':meta.get('period',{'id':'P2','start':case['origin'][:10],'end':(datetime.fromisoformat(case['end'])-timedelta(days=1)).date().isoformat(),'timezone':'Europe/Stockholm'}),
             'before':totals(before_people,False),'after':totals(after_people,True),'persons':persons,
+            # Effective model domains are separate from immutable source intervals.
+            # A profile may retain a source start alongside a reviewed flexible window.
+            'placement_domain_contract':{
+                'version':'bb-placement-domains/1.0',
+                'profile_id':meta.get('profile_id'),
+                'profile_hash':meta.get('profile_sha256'),
+                'input_hash':meta.get('input_sha256'),
+                'needs':[{'need_id':mapped('need',n['id']),
+                          'start_intervals':[{'earliest':stamp(a),'latest':stamp(b)} for a,b in n['domains']]}
+                         for n in case['source_needs']]
+            } if all(meta.get(k) for k in ('profile_id','profile_sha256','input_sha256')) else None,
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,
             'need_window_contract':{'version':'bb-need-window/1.0','needs':[
                 {'need_id':mapped('need',n['id']),'window_semantics':n.get('window_semantics'),
