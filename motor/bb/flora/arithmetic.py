@@ -320,6 +320,19 @@ def check_arithmetic(case, solution):
             provided_assignments[id]=assigned_people
         if not any(a <= placement["start"] <= b for a, b in n["domains"]):
             errors.append({"rule": "need_window", "id": id})
+        if not n.get("flex") and n.get("window_semantics") in ("EXECUTION_WINDOW", "START_WINDOW"):
+            source_start, source_end = n["source_window_start"], n["source_window_end"]
+            extension = n.get("approved_window_extension")
+            if extension:
+                if (isinstance(extension, dict) and extension.get("original_window_end") == source_end
+                    and type(extension.get("approved_window_end")) is int
+                    and source_end < extension["approved_window_end"] <= min(source_end + 120, (source_start // 1440 + 1) * 1440)
+                    and extension.get("decision_id") and extension.get("decision_source")):
+                    source_end = extension["approved_window_end"]
+                else:
+                    errors.append({"rule": "need_window", "id": id, "source": "invalid_window_extension"})
+            if placement["start"] < source_start or (placement["start"] + n["duration"] > source_end if n["window_semantics"] == "EXECUTION_WINDOW" else placement["start"] > source_end):
+                errors.append({"rule": "need_window", "id": id, "source": "source_window_semantics"})
         if placement["start"] < 0 or placement["start"] + n["duration"] > H:
             errors.append({"rule": "need_outside_period", "id": id})
             continue

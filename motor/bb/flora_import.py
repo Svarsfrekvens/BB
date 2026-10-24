@@ -490,7 +490,14 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         count = _integer(count,f"Behov {nid} antal personer",1)
         if flag is not None and count != (2 if flag is True else 1):
             _fail(f"Behov {nid}: antal personer motsäger originalets dubbelbemanningsfält.")
-        if duration > b-a:
+        # The source interval is immutable. Its meaning must be stated either on
+        # the row or by the reviewed, source-bound profile decision.
+        semantics = row.get("window_semantics") or decision.get("window_semantics")
+        if semantics not in ("EXECUTION_WINDOW", "START_WINDOW"):
+            _fail(f"Behov {nid}: tidsfönstrets betydelse är okänd; ett granskat beslut krävs.")
+        if row.get("window_semantics") is not None and decision.get("window_semantics") != semantics:
+            _fail(f"Behov {nid}: tidsfönstrets betydelse matchar inte den granskade profilen.")
+        if semantics == "EXECUTION_WINDOW" and duration > b-a:
             _fail(f"Behov {nid}: hela durationen ryms inte i originalfönstret; ingen automatisk korrigering görs.")
         flex = decision["flex"]
         if row.get("fixed_or_flexible") not in (None,"flexible" if flex else "fixed"):
@@ -516,8 +523,9 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                                         decision_source=extension["decision_source"],
                                         original_window_end=b,approved_window_end=approved_end,
                                         added_minutes=approved_end-b)
-        domains = [[lo,hi-duration]]
-        if flex and decision.get("retain_original_start") and not lo <= a <= hi-duration:
+        latest_start = hi-duration if semantics == "EXECUTION_WINDOW" else hi
+        domains = [[lo,latest_start]]
+        if flex and decision.get("retain_original_start") and not lo <= a <= latest_start:
             domains.append([a,a])
         if any(y<x for x,y in domains):
             _fail(f"Behov {nid}: durationen ryms inte i profilens beslutade arbetsfönster.")
@@ -527,6 +535,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         need_ids[engine_id] = nid
         source = dict(id=engine_id,source_row=nid,customer=row["customer_id"],title=row.get("activity"),
                       duration=duration,count=count,domains=domains,original=a,original_window_end=b,
+                      window_semantics=semantics,source_window_start=a,source_window_end=b,
                       flex=flex,previous_class=decision.get("previous_class"),
                       historical_status=row.get("status_raw"),
                       required_skills=", ".join(dict.fromkeys(value for value in (row.get("profession_raw"),row.get("delegated_profession_raw")) if value)),

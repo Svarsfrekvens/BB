@@ -74,6 +74,11 @@ def check_case(case):
             raise ValueError('Behovets varaktighet eller antal personer är okänt/ogiltigt.')
         if not n.get('domains') or any(a > b or a < 0 or b+n['duration'] > case['horizon'] for a,b in n['domains']):
             raise ValueError('Behovet ryms inte i ett tillåtet fönster: '+n['id'])
+        semantics=n.get('window_semantics')
+        if semantics is not None and semantics not in ('EXECUTION_WINDOW','START_WINDOW'):
+            raise ValueError('Okänd tidsfönsterbetydelse: '+n['id'])
+        if semantics is not None and (type(n.get('source_window_start')) is not int or type(n.get('source_window_end')) is not int or n['source_window_end']<=n['source_window_start']):
+            raise ValueError('Källfönstrets tider saknas: '+n['id'])
     sequential=cfg.get('sequential_individual_customers',False)
     if type(sequential) is not bool:
         raise ValueError('Personbunden kundordning måste vara ett uttryckligt booleskt profilbeslut.')
@@ -314,6 +319,10 @@ def _normalize(case, raw, validation):
     period_duties=[s for s in segments if s['minutes_in_period']>0 and s['code'] in ('Ar','Jo','Kl','Öv')]
     interventions=[{'need_id':mapped('need',r['id']),'person_id':mapped('person',r['person']),'start':stamp(int((datetime.fromisoformat(r['start'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)),
                     'end':stamp(int((datetime.fromisoformat(r['end'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)), 'customer_id':mapped('customer',r['customer']),
+                    'window_semantics':needs[r['id']].get('window_semantics'),
+                    'source_window_start':stamp(needs[r['id']]['source_window_start']) if 'source_window_start' in needs[r['id']] else None,
+                    'source_window_end':stamp(needs[r['id']]['source_window_end']) if 'source_window_end' in needs[r['id']] else None,
+                    'duration_minutes':needs[r['id']]['duration'],'personnel_count':needs[r['id']]['count'],
                     'source_ref':meta.get('need_source_refs',{}).get(r['id'],needs[r['id']].get('source_row'))} for r in validation.get('certificates',{}).get('executors',[])]
     last_feasible=next((s['status'] for s in reversed(raw.get('stages',[])) if s['status'] in {'FEASIBLE','OPTIMAL'}),None)
     solver_status=last_feasible if 'segments' in raw else (raw.get('stages') or [{}])[-1].get('status','UNKNOWN')
@@ -337,6 +346,12 @@ def _normalize(case, raw, validation):
             'period':meta.get('period',{'id':'P2','start':case['origin'][:10],'end':(datetime.fromisoformat(case['end'])-timedelta(days=1)).date().isoformat(),'timezone':'Europe/Stockholm'}),
             'before':totals(before_people,False),'after':totals(after_people,True),'persons':persons,
             'schedule':{'segments':segments,'breaks':breaks,'interventions':interventions},'validation':validation,
+            'need_window_contract':{'version':'bb-need-window/1.0','needs':[
+                {'need_id':mapped('need',n['id']),'window_semantics':n.get('window_semantics'),
+                 'source_window_start':stamp(n['source_window_start']) if 'source_window_start' in n else None,
+                 'source_window_end':stamp(n['source_window_end']) if 'source_window_end' in n else None,
+                 'duration_minutes':n['duration'],'personnel_count':n['count']}
+                for n in case['source_needs']]},
             'transfer_contract':{'version':'bb-engine-transfer-anchors/1.0',
                                  'pass_ids_complete':solver_status in {'FEASIBLE','OPTIMAL'} and bool(segments) and all(s['pass_id'] is not None for s in segments),
                                  'period_duty_pass_ids_complete':solver_status in {'FEASIBLE','OPTIMAL'} and bool(period_duties) and all(s['pass_id'] is not None for s in period_duties),

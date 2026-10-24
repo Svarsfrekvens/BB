@@ -44,6 +44,7 @@ def sample():
                                            min_length=240,max_length=600,source_segment_id="active-row")],
                    need_decisions={"source-need":dict(engine_id="engine-need",expected={k:need[k] for k in semkeys},
                         description=need["source_fields"]["Beskrivning"],flex=False,exclusive=True,
+                        window_semantics="EXECUTION_WINDOW",
                         parallel_permission="EXCLUSIVE_ONLY",previous_class="ORIGINAL_WINDOW")},
                    business_rules_expected=[],reference_breaks=[],reassignable_units=[],issues=[])
     return raw,profile
@@ -114,6 +115,31 @@ class ImportTest(unittest.TestCase):
                 profile['whole_duty_candidates']=[hypothesis]
                 with self.assertRaises(FloraImportError):
                     prepare_case(raw,profile)
+    def test_explicit_start_window_keeps_source_and_full_duration(self):
+        raw, profile = sample()
+        need = raw["customer_needs"][0]
+        need.update(window_start="13:00", window_end="13:20", duration_minutes=60,
+                    window_semantics="START_WINDOW")
+        profile["need_decisions"]["source-need"]["window_semantics"] = "START_WINDOW"
+        case = prepare_case(raw, profile)
+        task = case["needs"][0]
+        self.assertEqual(task["domains"], [[780, 800]])
+        self.assertEqual(task["source_window_start"], 780)
+        self.assertEqual(task["source_window_end"], 800)
+        self.assertEqual(task["duration"], 60)
+        self.assertEqual(task["count"], 1)
+        self.assertEqual(case["source_needs"][0]["window_semantics"], "START_WINDOW")
+        self.assertEqual(raw["customer_needs"][0]["window_end"], "13:20")
+
+        profile["need_decisions"]["source-need"]["window_semantics"] = "EXECUTION_WINDOW"
+        with self.assertRaisesRegex(FloraImportError, "matchar inte"):
+            prepare_case(raw, profile)
+        need.pop("window_semantics")
+        with self.assertRaisesRegex(FloraImportError, "hela durationen"):
+            prepare_case(raw, profile)
+        profile["need_decisions"]["source-need"].pop("window_semantics")
+        with self.assertRaisesRegex(FloraImportError, "betydelse är okänd"):
+            prepare_case(raw, profile)
 
     def test_uploaded_values_and_generic_period_ids(self):
         raw,profile=sample(); result=prepare_case(raw,profile)
