@@ -29,9 +29,9 @@ def sample(business='synthetic-a'):
             for role,value in [('day',True),('evening',True),('sleeping_oncall',False),('awake_night',False)]})
     candidate = dict(id='c1', employee_id='p1', start=a, end=b, work=[[a,b]], jour=[], variable=False,
         mode='CROP_SOURCE', is_original=False, is_new_or_shortened=True, staffing_type='ORDINARY_SOURCE')
-    needs = [dict(id='n1', customer_id='k1', earliest=a+30, latest_end=a+90, duration=30, count=1, count_confirmed=1,
+    needs = [dict(id='n1', customer_id='k1', earliest=a+30, latest_end=a+90, duration=30, count=1, count_confirmed=1, window_semantics='EXECUTION_WINDOW',
         eligible_employee_ids=['p1'], required_skills_confirmed=[], movable=True, locked_start=None, blockers=[]),
-        dict(id='n2', customer_id='k1', earliest=a+90, latest_end=a+150, duration=30, count=1, count_confirmed=1,
+        dict(id='n2', customer_id='k1', earliest=a+90, latest_end=a+150, duration=30, count=1, count_confirmed=1, window_semantics='EXECUTION_WINDOW',
         eligible_employee_ids=[], required_skills_confirmed=[], movable=True, locked_start=None,
         blockers=['PERMISSION_NOT_VERIFIED'])]
     case = dict(schema_version='bb-availability-case/1.0', period=dict(lo=lo, hi=hi, start='2026-06-01T00:00',

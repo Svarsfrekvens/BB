@@ -184,6 +184,10 @@ def normalize(case, raw, validation):
                     staffing_type='ordinary' if people[duty['employee_id']]['staffing_type'] == 'ORDINARY_SOURCE' else 'temporary',
                     source_ref=deepcopy(duty.get('source_refs', [])), minutes_in_period=overlap(a, b, lo, hi)))
     interventions = [dict(need_id=a['need_id'], person_id=a['employee_id'], start=_stamp(a['start'], zone), end=_stamp(a['end'], zone),
+        window_semantics=needs[a['need_id']]['window_semantics'],
+        source_window_start=needs[a['need_id']]['original_submitted_row']['window_start'],
+        source_window_end=needs[a['need_id']]['original_submitted_row']['window_end'],
+        duration_minutes=needs[a['need_id']]['duration'],personnel_count=needs[a['need_id']]['count'],
         customer_id=needs[a['need_id']].get('customer_id'), source_ref=needs[a['need_id']].get('source_ref')) for a in raw['assignments']]
     policy = shared_principles()
     policy.update(profile_id=integration['profile_id'], business_id=integration['business_id'],
@@ -194,6 +198,11 @@ def normalize(case, raw, validation):
         persons=[dict(person_id=pid, alias=p.get('alias'), before=before[pid], after=after.get(pid),
             weekly_net_minutes=None, minimum_rolling_free_days=None) for pid, p in people.items()],
         schedule=dict(segments=segments, breaks=[], interventions=interventions), validation=validation,
+        need_window_contract=dict(version='bb-need-window/1.0',needs=[dict(
+            need_id=n['id'],window_semantics=n['window_semantics'],
+            source_window_start=n['original_submitted_row']['window_start'],
+            source_window_end=n['original_submitted_row']['window_end'],
+            duration_minutes=n['duration'],personnel_count=n['count']) for n in case['needs']]),
         transfer_contract=dict(version='bb-engine-transfer-anchors/1.0',
             pass_ids_complete=(feasible and bool(segments) and len({d['id'] for d in after_duties})==len(after_duties)
                                and all(s['pass_id'] for s in segments)),

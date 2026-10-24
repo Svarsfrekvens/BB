@@ -708,7 +708,10 @@ def validate(data, result):
             duration = need.get("duration")
             if duration is None:
                 unknown("need_timing", "Duration is unknown", need_id=nid)
-            if duration is not None and earliest + duration > latest:
+            semantics = need.get("window_semantics")
+            if semantics not in ("EXECUTION_WINDOW", "START_WINDOW"):
+                issue("need_timing", "Window meaning lacks a reviewed decision", need_id=nid)
+            if duration is not None and semantics == "EXECUTION_WINDOW" and earliest + duration > latest:
                 issue("need_timing", "Input duration cannot fit its window", need_id=nid)
             locked = need.get("locked_start")
             # The user's latest decision permits choosing a start inside the
@@ -718,8 +721,8 @@ def validate(data, result):
                 a, b = record["start"], record["end"]
                 if duration is not None and b - a != duration:
                     issue("need_timing", "Assigned duration differs from the original/scenario duration", need_id=nid, employee_id=employee_id)
-                if a < earliest or b > latest:
-                    issue("need_timing", "Whole activity is outside its original/scenario execution window", need_id=nid, employee_id=employee_id)
+                if a < earliest or (b > latest if semantics == "EXECUTION_WINDOW" else a > latest):
+                    issue("need_timing", "Activity is outside its reviewed window semantics", need_id=nid, employee_id=employee_id)
                 if b <= lo or a >= hi:
                     issue("need_timing", "Assigned activity does not overlap P2; boundary-crossing activities must remain whole and overlap the selected period", need_id=nid, employee_id=employee_id)
                 if locked is not None and a != _minute(locked, origin):

@@ -26,6 +26,39 @@ def fixture():
 
 
 class FloraMethodTest(unittest.TestCase):
+    def test_start_window_real_solver_and_independent_validator(self):
+        case=fixture();n=case['needs'][0]
+        n.update(duration=60,domains=[[800,800]],original=780,
+                 source_window_start=780,source_window_end=800,
+                 original_window_end=800,window_semantics='START_WINDOW',flex=False)
+        case['source_needs']=[copy.deepcopy(n)]
+        case['candidates'][0].update(lo=660,hi=900,min_length=240,max_length=240)
+        case['references']['import']['segments'][0].update(start=660,end=900)
+        out=solve_case(case,seconds=2,workers=1)
+        self.assertEqual(out['after']['fully_covered_needs'],1)
+        intervention=out['schedule']['interventions'][0]
+        self.assertEqual(intervention['window_semantics'],'START_WINDOW')
+        self.assertEqual(intervention['source_window_start'],'2026-05-11T13:00+02:00')
+        self.assertEqual(intervention['source_window_end'],'2026-05-11T13:20+02:00')
+        self.assertEqual(intervention['duration_minutes'],60)
+        self.assertEqual(intervention['personnel_count'],1)
+        self.assertEqual(out['need_window_contract']['needs'][0]['window_semantics'],'START_WINDOW')
+        self.assertTrue(intervention['start'].startswith('2026-05-11T13:20'))
+        self.assertTrue(intervention['end'].startswith('2026-05-11T14:20'))
+        self.assertEqual(out['validation']['checked_status'],'PASS')
+        invalid=copy.deepcopy(out['raw_solution'])
+        invalid['placements'][0]['start']=805
+        self.assertTrue(any(v['rule']=='need_window' for v in validate_case(case,invalid)['violations']))
+        short=copy.deepcopy(case)
+        short['candidates'][0].update(lo=600,hi=840)
+        short['references']['import']['segments'][0].update(start=600,end=840)
+        self.assertEqual(solve_case(short,seconds=2,workers=1)['after']['fully_covered_needs'],0)
+        two=copy.deepcopy(case);two['needs'][0]['count']=2;two['source_needs'][0]['count']=2
+        self.assertEqual(solve_case(two,seconds=2,workers=1)['after']['fully_covered_needs'],0)
+        forbidden=copy.deepcopy(case);forbidden['staff'][0]['all_task_skills']=False
+        with self.assertRaisesRegex(ValueError,'behörighet'):
+            solve_case(forbidden,seconds=2,workers=1)
+
     @classmethod
     def setUpClass(cls):
         cls.case=fixture()

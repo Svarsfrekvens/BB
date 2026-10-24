@@ -288,6 +288,10 @@ def check_arithmetic(case, solution):
         n = needs[id]
         if not any(a <= placement["start"] <= b for a, b in n["domains"]):
             errors.append({"rule": "need_window", "id": id})
+        if not n.get("flex") and n.get("window_semantics") in ("EXECUTION_WINDOW", "START_WINDOW"):
+            source_start, source_end = n["source_window_start"], n["source_window_end"]
+            if placement["start"] < source_start or (placement["start"] + n["duration"] > source_end if n["window_semantics"] == "EXECUTION_WINDOW" else placement["start"] > source_end):
+                errors.append({"rule": "need_window", "id": id, "source": "source_window_semantics"})
         if placement["start"] < 0 or placement["start"] + n["duration"] > H:
             errors.append({"rule": "need_outside_period", "id": id})
             continue

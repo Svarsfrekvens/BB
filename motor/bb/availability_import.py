@@ -145,11 +145,14 @@ def check_case(case):
         if candidate.get('staffing_type') != people[candidate['employee_id']]['staffing_type']:
             raise ValueError('Passdomänens personaltyp stämmer inte med personen.')
     for need in case['needs']:
+        semantics = need.get('window_semantics')
         if (type(need.get('duration')) is not int or need['duration'] <= 0
                 or type(need.get('count')) is not int or need['count'] < 1
                 or need.get('count_confirmed') is None
                 or type(need.get('earliest')) is not int or type(need.get('latest_end')) is not int
-                or need['earliest'] + need['duration'] > need['latest_end']):
+                or semantics not in ('EXECUTION_WINDOW', 'START_WINDOW')
+                or need['earliest'] >= need['latest_end']
+                or (semantics == 'EXECUTION_WINDOW' and need['earliest'] + need['duration'] > need['latest_end'])):
             raise ValueError('Behovets varaktighet, antal eller effektiva tidsfönster är inte granskat: ' + need['id'])
         eligible = need.get('eligible_employee_ids')
         if not isinstance(eligible, list) or set(eligible) - set(people):
@@ -229,6 +232,10 @@ def prepare_case(raw, profile, scenario=None):
         current=effective[need['id']]
         if any(need.get(key)!=value for key,value in current.items()):
             raise ValueError('Behovets granskade modell skiljer sig från uppladdningen och beslutade rättningar: '+need['id'])
+        if need.get('window_semantics') not in ('EXECUTION_WINDOW', 'START_WINDOW'):
+            raise ValueError('Tidsfönstrets betydelse behöver ett granskat profilbeslut: '+need['id'])
+        if row.get('window_semantics') is not None and row['window_semantics'] != need['window_semantics']:
+            raise ValueError('Tidsfönstrets betydelse matchar inte källraden och profilen: '+need['id'])
         if need.get('required_profession_source') != row.get('profession_raw'):
             raise ValueError('Behovets källbelagda yrkeskrav har ändrats: '+need['id'])
         need.update(current)

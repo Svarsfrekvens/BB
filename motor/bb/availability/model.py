@@ -571,12 +571,17 @@ def build_model(data, diagnostic_only=False):
             raise ModelInputError(f"{nid}: personnel count must be a positive source-supported integer")
         if need.get("count_confirmed") is not None and need["count_confirmed"] != need["count"]:
             raise ModelInputError(f"{nid}: confirmed personnel count contradicts the represented count")
-        if need["duration"] <= 0 or need["earliest"] + need["duration"] > need["latest_end"]:
+        semantics = need.get("window_semantics")
+        if semantics not in ("EXECUTION_WINDOW", "START_WINDOW"):
+            raise ModelInputError(f"{nid}: window meaning requires a reviewed decision")
+        latest_start = need["latest_end"] - need["duration"] if semantics == "EXECUTION_WINDOW" else need["latest_end"]
+        latest_start = min(latest_start, hi - need["duration"])
+        if need["duration"] <= 0 or need["earliest"] > latest_start:
             raise ModelInputError(f"{nid}: impossible duration/window; no automatic repair")
         if overlap(need["earliest"], need["latest_end"], lo, hi) == 0:
             raise ModelInputError(f"{nid}: execution window does not intersect selected P2; no silent period remapping")
         coverage = model.NewBoolVar(nid + "_fully_covered")
-        start = model.NewIntVar(need["earliest"], need["latest_end"] - need["duration"], nid + "_start")
+        start = model.NewIntVar(need["earliest"], latest_start, nid + "_start")
         blockers = list(need.get("blockers", []))
         if need.get("movable") is False and need.get("locked_start") is None:
             blockers.append("LOCKED_PLAN_START_UNKNOWN")
@@ -607,7 +612,7 @@ def build_model(data, diagnostic_only=False):
                     for index, block in enumerate(duty["work"]):
                         a, b = block["reference"]
                         source = duty["source"]
-                        if source.get("mode") != "SHIFT_COMPLETE" and (b < need["earliest"] + need["duration"] or a > need["latest_end"] - need["duration"]):
+                        if source.get("mode") != "SHIFT_COMPLETE" and (b < need["earliest"] + need["duration"] or a > latest_start):
                             continue
                         context["support_count"] += 1
                         if context["support_count"] > budget["max_supports"]:
@@ -622,7 +627,7 @@ def build_model(data, diagnostic_only=False):
                         context["supports"].append({"need_id": nid, "employee_id": employee_id, "candidate_id": source["id"], "presence": support, "start": start, "duration": need["duration"]})
                 for fixed in frozen_by_person[employee_id]:
                     for index, (a, b) in enumerate(merged_intervals(fixed.get("work", []))):
-                        if overlap(a, b, lo, hi) == 0 or b < need["earliest"] + need["duration"] or a > need["latest_end"] - need["duration"]:
+                        if overlap(a, b, lo, hi) == 0 or b < need["earliest"] + need["duration"] or a > latest_start:
                             continue
                         context["support_count"] += 1
                         if context["support_count"] > budget["max_supports"]:

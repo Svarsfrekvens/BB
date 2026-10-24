@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
 from bb.api import app
-from bb.availability_import import check_case, prepare_case, source_identity
+from bb.availability_import import check_case, prepare_case, source_identity, minute
 from bb.availability import solve_case, validate_case
 from bb.engine_methods import prepare
 from bb.flora_jobs import JobStore, run_worker
@@ -16,6 +16,44 @@ from availability_fixtures import sample
 
 
 class AvailabilityMethodTests(unittest.TestCase):
+    def test_start_window_uses_source_interval_and_full_staffed_duration(self):
+        request, profile = sample()
+        raw = request['input']
+        row = raw['customer_needs'][0]
+        row.update(window_start='2026-06-01T13:00', window_end='2026-06-01T13:20',
+                   duration_minutes=60, window_semantics='START_WINDOW')
+        raw['schedule_segments'][0].update(start='2026-06-01T11:00',end='2026-06-01T15:00')
+        profile['source_identity'] = source_identity(raw)
+        case = profile['reviewed_case']
+        start = minute('2026-06-01T13:00','Europe/Stockholm')
+        end = start+20
+        case['needs'][0].update(earliest=start,latest_end=end,duration=60,window_semantics='START_WINDOW')
+        case['candidates'][0].update(start=start-120,end=start+120,work=[[start-120,start+120]])
+        case['source_schedule_segments'][0].update(start=raw['schedule_segments'][0]['start'],end=raw['schedule_segments'][0]['end'])
+        case['employees'][0]['allowed_presence_windows']=[dict(start=start-120,end=start+120,status='VERIFIED')]
+        prepared=prepare(profile,request)
+        result=solve_case(prepared,seconds=2,workers=1)
+        self.assertEqual(result['after']['fully_covered_needs'],1)
+        item=next(i for i in result['schedule']['interventions'] if i['need_id']=='n1')
+        self.assertEqual(item['window_semantics'],'START_WINDOW')
+        self.assertEqual(item['source_window_end'],'2026-06-01T13:20')
+        self.assertEqual(item['duration_minutes'],60)
+        self.assertLessEqual(item['start'],'2026-06-01T13:20+02:00')
+        self.assertGreater(item['end'],'2026-06-01T13:20+02:00')
+        self.assertEqual(result['validation']['violations'],[])
+        self.assertEqual(result['need_window_contract']['needs'][0]['window_semantics'],'START_WINDOW')
+        invalid=deepcopy(result['raw_solution'])
+        assigned=next(a for a in invalid['assignments'] if a['need_id']=='n1')
+        assigned['start']=end+1;assigned['end']=end+61
+        self.assertTrue(any(v['rule_id']=='need_timing' for v in validate_case(prepared,invalid)['violations']))
+
+        profile['reviewed_case']['needs'][0]['window_semantics']='EXECUTION_WINDOW'
+        with self.assertRaisesRegex(ValueError,'effektiva tidsfönster'):
+            prepare(profile,request)
+        row.pop('window_semantics');profile['source_identity']=source_identity(raw)
+        with self.assertRaisesRegex(ValueError,'tidsfönster'):
+            prepare(profile,request)
+
     def test_fresh_solver_retains_unknown_need_and_vacancy_without_inventing_staff(self):
         request, profile = sample()
         before = deepcopy((request, profile))
