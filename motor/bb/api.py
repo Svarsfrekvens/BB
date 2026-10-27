@@ -142,3 +142,7 @@ app.include_router(flora_router)
 # Shared API with explicit server-owned business/profile bindings.
 from .engine_api import router as engine_router
 app.include_router(engine_router)
+
+# Historical receipts use separate storage and never enter the job queue.
+from .historical_results import router as historical_router
+app.include_router(historical_router)
