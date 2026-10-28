@@ -708,7 +708,15 @@ def validate(data, result):
             duration = need.get("duration")
             if duration is None:
                 unknown("need_timing", "Duration is unknown", need_id=nid)
-            if duration is not None and earliest + duration > latest:
+            semantics = need.get("window_semantics")
+            if semantics not in (None, "START_WINDOW", "EXECUTION_WINDOW"):
+                issue("need_timing", "Unknown window semantics", need_id=nid)
+            if semantics is not None:
+                left, right = need.get("source_window_start"), need.get("source_window_end")
+                if (type(left) is not int or type(right) is not int or right <= left
+                        or earliest != _minute(left, origin) or latest != _minute(right, origin)):
+                    issue("need_timing", "Effective window contradicts typed source evidence", need_id=nid)
+            if duration is not None and semantics != "START_WINDOW" and earliest + duration > latest:
                 issue("need_timing", "Input duration cannot fit its window", need_id=nid)
             locked = need.get("locked_start")
             # The user's latest decision permits choosing a start inside the
@@ -718,8 +726,10 @@ def validate(data, result):
                 a, b = record["start"], record["end"]
                 if duration is not None and b - a != duration:
                     issue("need_timing", "Assigned duration differs from the original/scenario duration", need_id=nid, employee_id=employee_id)
-                if a < earliest or b > latest:
+                if a < earliest or (a > latest if semantics == "START_WINDOW" else b > latest):
                     issue("need_timing", "Whole activity is outside its original/scenario execution window", need_id=nid, employee_id=employee_id)
+                if semantics is not None and (a < lo or b > hi):
+                    issue("need_timing", "Typed activity must fit entirely in P2", need_id=nid, employee_id=employee_id)
                 if b <= lo or a >= hi:
                     issue("need_timing", "Assigned activity does not overlap P2; boundary-crossing activities must remain whole and overlap the selected period", need_id=nid, employee_id=employee_id)
                 if locked is not None and a != _minute(locked, origin):

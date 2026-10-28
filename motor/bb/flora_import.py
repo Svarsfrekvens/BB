@@ -15,6 +15,7 @@ from math import isfinite
 import re
 from typing import Any
 from zoneinfo import ZoneInfo
+from . import need_windows
 
 
 class FloraImportError(ValueError):
@@ -466,16 +467,36 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         count = _integer(count,f"Behov {nid} antal personer",1)
         if flag is not None and count != (2 if flag is True else 1):
             _fail(f"Behov {nid}: antal personer motsäger originalets dubbelbemanningsfält.")
-        if duration > b-a:
+        try:
+            semantics = need_windows.resolve(row.get("window_semantics"), decision.get("window_semantics"))
+        except ValueError as exc:
+            _fail(str(exc))
+        if semantics != "START_WINDOW" and duration > b-a:
             _fail(f"Behov {nid}: hela durationen ryms inte i originalfönstret; ingen automatisk korrigering görs.")
         flex = decision["flex"]
         if row.get("fixed_or_flexible") not in (None,"flexible" if flex else "fixed"):
             _fail(f"Behov {nid}: ny fast/flyttbar-markering motsäger granskad profil.")
         lo = (a//1440)*1440+decision["flex_start_minute"] if flex else a
         hi = (a//1440)*1440+decision["flex_end_minute"] if flex else b
-        domains = [[lo,hi-duration]]
-        if flex and decision.get("retain_original_start") and not lo <= a <= hi-duration:
-            domains.append([a,a])
+        if semantics is None:
+            # Unchanged numerical legacy interpretation; no typed contract asserted.
+            domains = [[lo, hi-duration]]
+            if flex and decision.get("retain_original_start") and not lo <= a <= hi-duration:
+                domains.append([a, a])
+        else:
+            try:
+                first, last = need_windows.bounds(semantics, a, b, duration, 0, horizon)
+            except ValueError as exc:
+                _fail(str(exc))
+            # Existing profile restrictions may narrow, never widen a typed source window.
+            profile_last = hi if semantics == "START_WINDOW" else hi-duration
+            domains = [[max(lo, first), min(profile_last, last)]]
+            if domains[0][0] > domains[0][1]:
+                domains = []
+            if flex and decision.get("retain_original_start") and first <= a <= last and not any(x <= a <= y for x,y in domains):
+                domains.append([a,a])
+            if not domains:
+                _fail(f"Behov {nid}: profilens tillåtna starttider ryms inte i det typade källfönstret.")
         if any(y<x for x,y in domains):
             _fail(f"Behov {nid}: durationen ryms inte i profilens beslutade arbetsfönster.")
         engine_id = decision.get("engine_id",nid)
@@ -489,6 +510,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                       required_skills=", ".join(dict.fromkeys(value for value in (row.get("profession_raw"),row.get("delegated_profession_raw")) if value)),
                       description_present=bool(desc),description_review=decision.get("description_review"),
                       review_reason=decision.get("review_reason"))
+        if semantics is not None:
+            source.update(window_semantics=semantics, source_window_start=a, source_window_end=b)
         source_needs.append(deepcopy(source))
         source.update(members=[engine_id],weight=1,exclusive=decision["exclusive"],
                       parallel_permission=decision["parallel_permission"])
@@ -553,6 +576,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        planned_oncall_replacements=planned_oncall,
                        planned_active_replacements=planned_active,
                        scenario=deepcopy(scenario))
+    need_windows.complete(source_needs)
     return dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
                 staff=staff,fixed_segments=sorted(fixed,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),
                 candidates=candidates,needs=needs,source_needs=source_needs,

@@ -288,6 +288,14 @@ def check_arithmetic(case, solution):
         n = needs[id]
         if not any(a <= placement["start"] <= b for a, b in n["domains"]):
             errors.append({"rule": "need_window", "id": id})
+        semantics = n.get("window_semantics")
+        if semantics is not None:
+            left, right = n.get("source_window_start"), n.get("source_window_end")
+            if (semantics not in ("START_WINDOW", "EXECUTION_WINDOW")
+                    or type(left) is not int or type(right) is not int or right <= left
+                    or placement["start"] < left
+                    or (placement["start"] > right if semantics == "START_WINDOW" else placement["start"] + n["duration"] > right)):
+                errors.append({"rule": "need_window", "id": id, "source": "source_window_semantics"})
         if placement["start"] < 0 or placement["start"] + n["duration"] > H:
             errors.append({"rule": "need_outside_period", "id": id})
             continue

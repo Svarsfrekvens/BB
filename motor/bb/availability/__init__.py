@@ -4,6 +4,7 @@ Input domains are reviewed facts. Each invocation searches a fresh model and
 exports a separately validated proposal; source vacancy is demand, not staff.
 """
 from copy import deepcopy
+from .. import need_windows
 from datetime import datetime, timezone
 from time import perf_counter
 from zoneinfo import ZoneInfo
@@ -184,6 +185,7 @@ def normalize(case, raw, validation):
                     staffing_type='ordinary' if people[duty['employee_id']]['staffing_type'] == 'ORDINARY_SOURCE' else 'temporary',
                     source_ref=deepcopy(duty.get('source_refs', [])), minutes_in_period=overlap(a, b, lo, hi)))
     interventions = [dict(need_id=a['need_id'], person_id=a['employee_id'], start=_stamp(a['start'], zone), end=_stamp(a['end'], zone),
+        **need_windows.placement(needs[a['need_id']], lambda t: _stamp(t, zone)),
         customer_id=needs[a['need_id']].get('customer_id'), source_ref=needs[a['need_id']].get('source_ref')) for a in raw['assignments']]
     policy = shared_principles()
     policy.update(profile_id=integration['profile_id'], business_id=integration['business_id'],
@@ -217,6 +219,7 @@ def normalize(case, raw, validation):
             status='UNKNOWN_PAID_TIME_NOT_VERIFIED', explanation='Rastavräkning saknas; Ar-tid får inte bli verifierad betald nettotid eller kostnadsbesparing.'),
         rule_policy=policy, provenance=dict(source_identity=integration['source_identity'], source_file_sha256=integration['source_file_sha256'],
             profile_source=integration['profile_source'], decisions=integration['decisions'], old_solver_result_reused=False))
+    result.update(need_windows.export(case['needs'], lambda n: n['id'], lambda t: _stamp(t, zone)))
     if 'concurrency_policy' in case:
         result['concurrency'] = dict(policy=deepcopy(case['concurrency_policy']),
             **deepcopy(validation['details'].get('concurrency', {})))

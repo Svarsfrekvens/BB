@@ -5,6 +5,7 @@ Changed workspaces need a new explicit review, never a fallback to another unit.
 The private case contains domains and decisions, never a saved solver result.
 """
 from copy import deepcopy
+from . import need_windows
 from datetime import datetime, timedelta
 from hashlib import sha256
 import json
@@ -144,13 +145,17 @@ def check_case(case):
             raise ValueError('En passdomän saknar verifierad personkoppling.')
         if candidate.get('staffing_type') != people[candidate['employee_id']]['staffing_type']:
             raise ValueError('Passdomänens personaltyp stämmer inte med personen.')
+    need_windows.complete(case['needs'])
     for need in case['needs']:
         if (type(need.get('duration')) is not int or need['duration'] <= 0
                 or type(need.get('count')) is not int or need['count'] < 1
                 or need.get('count_confirmed') is None
                 or type(need.get('earliest')) is not int or type(need.get('latest_end')) is not int
-                or need['earliest'] + need['duration'] > need['latest_end']):
+                or need['earliest'] >= need['latest_end']
+                or (need.get('window_semantics') != 'START_WINDOW' and need['earliest'] + need['duration'] > need['latest_end'])):
             raise ValueError('Behovets varaktighet, antal eller effektiva tidsfönster är inte granskat: ' + need['id'])
+        if need.get('window_semantics') is not None:
+            need_windows.bounds(need['window_semantics'], need['earliest'], need['latest_end'], need['duration'], case['period']['lo'], case['period']['hi'])
         eligible = need.get('eligible_employee_ids')
         if not isinstance(eligible, list) or set(eligible) - set(people):
             raise ValueError('Behovet har en okänd utförarkoppling: ' + need['id'])
@@ -182,6 +187,11 @@ def prepare_case(raw, profile, scenario=None):
     case = deepcopy(profile.get('reviewed_case'))
     if not isinstance(case, dict):
         raise ValueError('Den privata profilen saknar ett granskat tillgänglighetsunderlag.')
+    source_needs = {r['need_id']: r for r in raw['customer_needs']}
+    for need in case['needs']:
+        semantics = need_windows.resolve(source_needs.get(need['id'], {}).get('window_semantics'), need.get('window_semantics'))
+        if semantics is not None:
+            need['window_semantics'] = semantics
     check_case(case)
     policy = case.get('concurrency_policy')
     if policy and (policy['business_id'] != profile.get('business_id')
@@ -231,6 +241,15 @@ def prepare_case(raw, profile, scenario=None):
             raise ValueError('Behovets granskade modell skiljer sig från uppladdningen och beslutade rättningar: '+need['id'])
         if need.get('required_profession_source') != row.get('profession_raw'):
             raise ValueError('Behovets källbelagda yrkeskrav har ändrats: '+need['id'])
+        if need.get('window_semantics') is not None:
+            left, right = minute(row['window_start'], zone), minute(row['window_end'], zone)
+            # v1 exports exact source bounds/duration/count, not hidden temporal overlays.
+            if (current['earliest'] != left or current['latest_end'] != right
+                    or current['duration'] != row['duration_minutes'] or current['count'] != row['personnel_count_candidate']):
+                raise ValueError('Typade behovsfönster med ändrade källvärden kräver ett annat uttryckligt kontrakt.')
+            if case['period'].get('timezone') != zone:
+                raise ValueError('Tidszon i profilen och det typade underlaget skiljer sig.')
+            need.update(source_window_start=left, source_window_end=right)
         need.update(current)
         need['source_ref'] = row.get('source_ref')
         need['original_submitted_row'] = deepcopy(row)

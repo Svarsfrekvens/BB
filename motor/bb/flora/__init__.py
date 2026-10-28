@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from math import isfinite
 from zoneinfo import ZoneInfo
 
+from .. import need_windows
 from .arithmetic import check_arithmetic
 from .daily_rest import assess as assess_daily_rest
 from .optimizer import solve as _solve
@@ -57,6 +58,7 @@ def check_case(case):
             raise ValueError('Verifierad gemensam insatsbehörighet och dag/kvällsbehörighet krävs; okänt får inte bli JA.')
         if type(p.get('ordinary')) is not bool or (p['ordinary'] and (type(p.get('target_net')) is not int or p['target_net'] < 0)):
             raise ValueError('Verifierad personaltyp och individuellt ordinarie nettomål krävs.')
+    need_windows.complete(case['source_needs'])
     for n in case['needs']:
         if type(n.get('exclusive')) is not bool or not n.get('parallel_permission'):
             raise ValueError('Behovets samplaneringsbeslut och exklusivitet måste vara uttryckliga.')
@@ -64,6 +66,11 @@ def check_case(case):
             raise ValueError('Behovets varaktighet eller antal personer är okänt/ogiltigt.')
         if not n.get('domains') or any(a > b or a < 0 or b+n['duration'] > case['horizon'] for a,b in n['domains']):
             raise ValueError('Behovet ryms inte i ett tillåtet fönster: '+n['id'])
+        semantics = n.get('window_semantics')
+        if semantics is not None:
+            first, last = need_windows.bounds(semantics, n.get('source_window_start'), n.get('source_window_end'), n['duration'], 0, case['horizon'])
+            if any(a < first or b > last for a,b in n['domains']):
+                raise ValueError('Startdomänen motsäger det typade källfönstret: '+n['id'])
     for r in case['fixed_segments']:
         if r['person'] not in staff or type(r['start']) is not int or type(r['end']) is not int or r['start'] >= r['end']:
             raise ValueError('Ogiltigt känt schemasegment.')
@@ -227,6 +234,7 @@ def _normalize(case, raw, validation):
                        'pass_id':pass_identity(anchor)[0] if anchor else None})
     interventions=[{'need_id':mapped('need',r['id']),'person_id':mapped('person',r['person']),'start':stamp(int((datetime.fromisoformat(r['start'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)),
                     'end':stamp(int((datetime.fromisoformat(r['end'])-datetime.fromisoformat(case['origin'])).total_seconds()//60)), 'customer_id':mapped('customer',r['customer']),
+                    **need_windows.placement(needs[r['id']], stamp),
                     'source_ref':meta.get('need_source_refs',{}).get(r['id'],needs[r['id']].get('source_row'))} for r in validation.get('certificates',{}).get('executors',[])]
     last_feasible=next((s['status'] for s in reversed(raw.get('stages',[])) if s['status'] in {'FEASIBLE','OPTIMAL'}),None)
     solver_status=last_feasible if 'segments' in raw else (raw.get('stages') or [{}])[-1].get('status','UNKNOWN')
@@ -249,6 +257,7 @@ def _normalize(case, raw, validation):
             'time_accounting':{'before_break_reference':{'kind':'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
+    result.update(need_windows.export(case['source_needs'], lambda n: mapped('need', n['id']), stamp))
     return result
 
 
