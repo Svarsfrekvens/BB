@@ -9,7 +9,7 @@ import re
 from fastapi import APIRouter, HTTPException, Request
 
 from .business_profiles import (BusinessProfileError, INPUT_SCHEMAS, binding_for,
-                                profile_for, scope_for)
+                                profile_for, selected_profile, request_contract, scope_for)
 from .flora_api import json_body
 from .flora_jobs import IdempotencyConflict, JobInputError, get_manager, normalize_request
 from .rule_policy import shared_principles
@@ -45,7 +45,8 @@ async def capabilities(request: Request):
         binding = binding_for(owner)
         # Read the profile as well: an environment variable alone is not readiness.
         metadata = {**binding, 'dataset_id': request.query_params.get('dataset_id')}
-        profile, _, _, context = profile_for(owner, {'input': {'metadata': metadata}})
+        profile, ph, _, context = selected_profile(owner, metadata['dataset_id'])
+        request_contract(owner, metadata['dataset_id'], profile, ph)
         report.update(business_id=context['business_id'], data_use=context['data_use'],
                       profile_status='CONFIGURED_INPUT_REVIEW_REQUIRED')
         if profile.get('engine_strategy') == 'reviewed-availability/1.0':
@@ -61,8 +62,9 @@ async def create_job(request: Request):
     try:
         # The shared route matches the app gateway's bounded 8 MiB transfer.
         # The legacy Flora endpoint retains its existing 6 MiB limit.
-        body = normalize_request(await json_body(request, max_body=8*1024*1024))
-        profile, profile_hash, scope, context = profile_for(owner, body)
+        raw_body = await json_body(request, max_body=8*1024*1024)
+        profile, profile_hash, scope, context = profile_for(owner, raw_body)
+        body = normalize_request(raw_body)
         # Fail changed dates/IDs/missing decisions before a job is queued. This
         # pure adapter never runs the solver or changes the submitted workbook.
         from .engine_methods import prepare
@@ -147,3 +149,30 @@ async def read_pass_preflight(job_id: str, request: Request):
     except (ValueError, KeyError, TypeError) as exc:
         raise HTTPException(422, {'code': 'PROFILE_PREFLIGHT_INCOMPLETE',
                                  'message': 'Profilen kan inte förkontrolleras mot sparad körningsindata.'}) from exc
+
+
+@router.get('/api/engine/profile-attestation')
+async def profile_attestation(request: Request):
+    """Authenticated server-to-server, owner scoped, allowlisted read-only proof."""
+    from hashlib import sha256
+    from pathlib import Path
+    import json
+    from .profile_encoding import decode_profile
+    from .flora_jobs import digest
+    owner = verified_owner(request)
+    dataset = request.query_params.get('dataset_id')
+    try:
+        profile, ph, _, context = selected_profile(owner, dataset)
+        contract = request_contract(owner, dataset, profile, ph)
+        binding = binding_for(owner)
+        raw = Path(binding['dataset_profiles'][dataset]).read_bytes()
+        if digest(decode_profile(json.loads(raw))) != ph:
+            raise BusinessProfileError('PROFILE_BINDING_MISMATCH', 'Profilen ändrades under läskontrollen.', 503)
+        return dict(schema_version='bb-profile-attestation/1.0', profile_file_sha256=sha256(raw).hexdigest(),
+                    profile_hash=ph, profile_id=context['profile_id'], business_id=context['business_id'],
+                    dataset_id=dataset, period=contract['period'], data_use=context['data_use'],
+                    motor_commit=os.environ.get('RENDER_GIT_COMMIT'), contract_version=contract['version'])
+    except BusinessProfileError as exc:
+        raise profile_error(exc) from exc
+    except (OSError, ValueError, TypeError) as exc:
+        raise HTTPException(503, {'code':'PROFILE_CONFIGURATION_UNAVAILABLE'}) from exc

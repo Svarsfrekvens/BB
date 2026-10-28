@@ -8,6 +8,7 @@ import json
 import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
+from .grouping import occasions as duty_occasions, global_limit, VERIFIED
 
 
 def check_arithmetic(case, solution):
@@ -24,14 +25,7 @@ def check_arithmetic(case, solution):
     WITH_BREAKS = case['config'].get('break_policy','SOLVER_PLACED') != 'EXPLICIT_NO_BREAK_SCENARIO'
     CALENDAR_MODE = case['config']['calendar_mode']
     assert CALENDAR_MODE == 'rolling'
-    source_ids = {r["id"] for r in original["references"]["import"]["segments"]}
-    # Trust only the importer's reviewed grouping, never a solver-supplied label.
-    whole_duty_ids = {r["id"]: r["whole_duty_id"] for r in original["references"]["import"]["segments"] if r.get("whole_duty_id")}
-    whole_duty_ids.update({f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[])
-                           for i in range(1,4)})
-    whole_duty_ids.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
-                          for p in (case.get('integration',{}).get('planned_oncall_replacements',[]) +
-                                    case.get('integration',{}).get('planned_active_replacements',[]))})
+    grouped = duty_occasions(case, solution)
     units = {u["id"]: u for u in case["reassignable_temporary_units"]}
     errors = []
     inherited = []
@@ -221,27 +215,24 @@ def check_arithmetic(case, solution):
             errors.append({"rule": "retained_original_worked_net", "person": person, "target": p["target_net"], "actual": sum(av)})
         if not p["all_task_skills"]:
             errors.append({"rule": "uniform_skills_unconfirmed", "person": person})
-        groups = defaultdict(list)
-        for r in rows:
-            if r["code"] in {"Ar", "Jo", "Kl", "Öv"}:
-                groups[whole_duty_ids.get(r["id"]) or (r["id"].rsplit("-", 1)[0] if r["id"] in source_ids else r["id"])].append(r)
-        occasions = sorted([{"id": id, "start": min(r["start"] for r in rr), "end": max(r["end"] for r in rr), "rows": rr} for id, rr in groups.items()], key=lambda occasion: (occasion["start"], occasion["end"]))
+        occasions = sorted([o for o in grouped if o['person'] == person], key=lambda o:(o['start'],o['end']))
+        verified_occasions = [o for o in occasions if o['grouping_status'] == VERIFIED]
         all_occasions[person] = occasions
-        short = [o for o in occasions if 0 <= o["start"] < H and o["end"] - o["start"] < case["config"]["min_shift"]]
+        short = [o for o in verified_occasions if 0 <= o["start"] < H and o["end"] - o["start"] < case["config"]["min_shift"]]
         if short:
             errors.append({"rule": "whole_occasion_under4h", "person": person, "ids": [o["id"] for o in short]})
         if not WITH_BREAKS:
-            for o in occasions:
+            for o in verified_occasions:
                 if 0 <= o['start'] < H and all(r['code']=='Ar' for r in o['rows']) and o['end']-o['start']>780:
                     errors.append(dict(rule='active_only_duty_over13h',person=person,occasion=o['id'],
                                        actual_minutes=o['end']-o['start']))
-        maximum=case['config'].get('max_whole_duty_minutes')
+        maximum=global_limit(case)
         if maximum is not None:
-            for o in occasions:
+            for o in verified_occasions:
                 if 0<=o['start']<H and o['end']-o['start']>maximum:
                     errors.append(dict(rule='whole_duty_over_selected_limit',person=person,
                                        occasion=o['id'],actual_minutes=o['end']-o['start'],limit_minutes=maximum))
-        gaps = [right["start"] - left["end"] for left, right in zip(occasions, occasions[1:]) if 0 <= right["start"] < H]
+        gaps = [right["start"] - left["end"] for left, right in zip(occasions, occasions[1:]) if 0 <= right["start"] < H and left["grouping_status"] == VERIFIED and right["grouping_status"] == VERIFIED]
         if any(g < case["config"]["min_daily_rest"] for g in gaps):
             errors.append({"rule": "daily_rest11h", "person": person, "gaps": [g for g in gaps if g < case["config"]["min_daily_rest"]]})
         occupied = {d for d in range(-H//1440,H//1440) if any(r["start"] < (d + 1) * 1440 and r["end"] > d * 1440 for r in rows)}
@@ -260,7 +251,7 @@ def check_arithmetic(case, solution):
             weeks.append(max(best, hi - pos))
         if any(v < case["config"]["min_weekly_rest"] for v in weeks):
             errors.append({"rule": "fixed_Monday_weekly_rest36h", "person": person, "weeks": weeks})
-        for o in occasions:
+        for o in verified_occasions:
             if not (o["end"] > 0 and o["start"] < H and profile["long_jour_min_minutes"] <= o["end"] - o["start"] <= profile["max_reassigned_minutes"]):
                 continue
             best = 0
@@ -413,11 +404,17 @@ def check_arithmetic(case, solution):
             if not (o["end"] + span > 0 and o["start"] < H and {r["code"] for r in o["rows"]} == {"Ar", "Jo"}):
                 continue
             record = {"person": person, "occasion": o["id"], "start": stamp(o["start"]), "end": stamp(o["end"]), "span_minutes": span}
+            if o['grouping_status'] != VERIFIED:
+                comp_unknown.append(dict(record, status='UNKNOWN', reason='UNVERIFIED_GROUPING'))
+                continue
             if span > profile["max_reassigned_minutes"]:
                 long_25.append(record)
             if span > profile["compensation_trigger_minutes"]:
                 if index + 1 < len(occasions):
                     nxt = occasions[index + 1]
+                    if nxt['grouping_status'] != VERIFIED:
+                        comp_unknown.append(dict(record, status='UNKNOWN', reason='UNVERIFIED_GROUPING'))
+                        continue
                     gap = nxt["start"] - o["end"]
                     checked_compensation.append(dict(record, next_occasion=nxt["id"], next_start=stamp(nxt["start"]), actual_rest_minutes=gap, reference_required_minutes=span, margin_minutes=gap-span))
                     if gap < span:
@@ -456,7 +453,9 @@ def check_arithmetic(case, solution):
     summary = {
         "status": "WORKLOAD_BALANCE_LIMITED_SCENARIO_NOT_APPROVED",
         "calendar_mode_assumption": CALENDAR_MODE,
-        "source_cell_grouping_status": "EXPLICIT_UNVERIFIED_ENVELOPE_ASSUMPTION",
+        "source_cell_grouping_status": "UNVERIFIED_GROUPING",
+        "duty_grouping": [{k:v for k,v in o.items() if k != "rows"} | {"segment_ids":[r["id"] for r in o["rows"]]} for o in grouped],
+        "unverified_group_count": sum(o["grouping_status"] != VERIFIED for o in grouped),
         "source_file": "computed_result",
         "source_sha256": hashlib.sha256(json.dumps(solution,sort_keys=True).encode()).hexdigest(),
         "scope_check_pass": not errors,

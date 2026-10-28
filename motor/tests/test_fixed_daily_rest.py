@@ -17,20 +17,28 @@ def row(key,start,end,code='Ar',person='person-a'):
     return dict(id=key,person=person,start=start,end=end,code=code)
 
 
+def assess_explicit_fixture(case, raw):
+    # These arithmetic fixtures explicitly declare separate reviewed duties.
+    # Absence of evidence is tested independently; production never adds this.
+    case = deepcopy(case)
+    case['references']['import']['segments'] = [dict(r, whole_duty_id='reviewed-'+r['id']) for r in raw['segments']]
+    return assess(case, raw)
+
+
 class FixedDailyRestTests(unittest.TestCase):
     def test_contiguous_not_total_rest_and_exact_eleven_hours(self):
         c=sample()
-        bad=assess(c,{'segments':[row('duty-1',360,1080)]})
+        bad=assess_explicit_fixture(c,{'segments':[row('duty-1',360,1080)]})
         self.assertEqual(bad['windows'][0]['longest_rest_minutes'],360)
         self.assertEqual(bad['status'],'FAIL')  # 6 + 6 hours is not 11 continuous.
-        good=assess(c,{'segments':[row('duty-1',660,1440)]})
+        good=assess_explicit_fixture(c,{'segments':[row('duty-1',660,1440)]})
         self.assertEqual(good['windows'][0]['longest_rest_minutes'],660)
         self.assertEqual(good['status'],'PASS')
-        self.assertEqual(assess(c,{'segments':[row('duty-1',659,1440)]})['status'],'FAIL')
+        self.assertEqual(assess_explicit_fixture(c,{'segments':[row('duty-1',659,1440)]})['status'],'FAIL')
 
     def test_fixed_boundary_changes_outcome_and_edges_are_unknown(self):
         c=sample({'person-a':180})
-        out=assess(c,{'segments':[row('duty-1',420,960)]})
+        out=assess_explicit_fixture(c,{'segments':[row('duty-1',420,960)]})
         middle=next(r for r in out['windows'] if r['start']=='2026-05-11T03:00')
         self.assertEqual(middle['longest_rest_minutes'],660)
         self.assertEqual(middle['status'],'PASS')
@@ -49,7 +57,7 @@ class FixedDailyRestTests(unittest.TestCase):
     def test_jour_and_overtime_never_count_as_rest(self):
         for code in ('Jo','Kl','Öv'):
             with self.subTest(code=code):
-                out=assess(sample(),{'segments':[row('duty-1',360,1080,code)]})
+                out=assess_explicit_fixture(sample(),{'segments':[row('duty-1',360,1080,code)]})
                 self.assertEqual(out['windows'][0]['longest_rest_minutes'],360)
                 self.assertEqual(out['status'],'FAIL')
 
@@ -64,7 +72,7 @@ class FixedDailyRestTests(unittest.TestCase):
     def test_combined_jour_conditions_do_not_approve_unverified_exception(self):
         c=sample()
         rows=[row('night-1',0,360,'Jo'),row('night-2',360,1440)]
-        c['references']['import']['segments']=deepcopy(rows)
+        c['references']['import']['segments']=[dict(r,whole_duty_id='reviewed-night') for r in rows]
         out=assess(c,{'segments':rows})
         self.assertEqual(out['windows'][0]['longest_rest_minutes'],0)
         self.assertEqual(out['windows'][0]['status'],'UNKNOWN')
@@ -83,7 +91,7 @@ class FixedDailyRestTests(unittest.TestCase):
         c=sample()
         rows=[row('night-1',0,299,'Jo'),row('night-2',299,600),
               row('night-3',600,900,'Jo'),row('night-4',900,1440)]
-        c['references']['import']['segments']=deepcopy(rows)
+        c['references']['import']['segments']=[dict(r,whole_duty_id='reviewed-night') for r in rows]
         out=assess(c,{'segments':rows})
         duty=out['conditional_jour_duties'][0]
         self.assertEqual(duty['longest_night_jour_minutes'],299)
@@ -98,7 +106,7 @@ class FixedDailyRestTests(unittest.TestCase):
         rows=[row('NEW-person-a-2026-05-11',720,960),
               row('NEW-person-a-2026-05-12',2160,2400)]
         result=assess(sample(),{'segments':rows})
-        self.assertEqual(result['status'],'PASS')
+        self.assertEqual(result['status'],'UNKNOWN')
         self.assertEqual([r['longest_rest_minutes'] for r in result['windows']],[720,720])
 
     def test_optional_exception_only_applies_when_selected_for_same_person(self):
@@ -112,7 +120,7 @@ class FixedDailyRestTests(unittest.TestCase):
         observed=[]
         for business,minute in [('Flora',0),('Galaxen',360),('Vintergatan',1080)]:
             c=sample({'person-a':minute});c['business_id']=business;before=deepcopy(c)
-            out=assess(c,{'segments':[row('day-1',360,1080)]})
+            out=assess_explicit_fixture(c,{'segments':[row('day-1',360,1080)]})
             observed.append(out['status'])
             self.assertEqual(c,before)
             self.assertFalse(out['other_business_decisions_inherited'])

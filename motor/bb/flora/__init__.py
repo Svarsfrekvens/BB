@@ -174,7 +174,10 @@ def validate_case(case, result):
         'mathematical_assignments': ('Minutvis utförartäckning och handlingens exklusivitet kontrollerade.', {'executor_coverage','shopping_overlap','need_window','need_outside_period','duplicate_need_id','unknown_placed_need','invalid_person_assignment','same_person_different_customers'}),
         'capacity_limit': ('Profilens samtidiga personalnärvaro kontrollerad.', {'max2_active_staff'}),
     }
-    rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
+    rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'UNKNOWN' if summary['unverified_group_count'] and k in ('whole_duty_minimum','inter_duty_rest') else 'PASS','message':message} for k,(message,names) in checks.items()]
+    for row in rules:
+        if row['status'] == 'UNKNOWN':
+            row.update(reason='UNVERIFIED_GROUPING', message='Helt pass kan inte verifieras för samtliga berörda segment; teknisk gruppering är inte passbevis.')
     if case['config'].get('sequential_individual_customers'):
         names={'invalid_person_assignment','same_person_different_customers','executor_coverage','shopping_overlap'}
         rules.append(dict(rule_id='sequential_individual_customers',status='FAIL' if by_rule & names else 'PASS',
@@ -185,10 +188,13 @@ def validate_case(case, result):
                     f"Dygnsbryt saknas för {len(rest['missing_person_ids'])} medarbetare. "
                     "Jour räknas inte som vila. Villkor för långa jourpass redovisas separat i kontrollintyget.")
     rules.append(dict(rule_id='daily_rest_24h',status=rest['status'],message=rest_message))
-    if case['config'].get('max_whole_duty_minutes') is not None:
-        rules.append(dict(rule_id='whole_duty_maximum',status='FAIL' if 'whole_duty_over_selected_limit' in by_rule else 'PASS',
-                          message='Hela planerade arbetstillfällen kontrollerade mot vald maxlängd.',
-                          limit_minutes=case['config']['max_whole_duty_minutes']))
+    from .grouping import global_limit
+    maximum = global_limit(case)
+    rules.append(dict(rule_id='whole_duty_maximum',
+                      status='UNKNOWN' if maximum is None else 'FAIL' if 'whole_duty_over_selected_limit' in by_rule else 'UNKNOWN' if summary['unverified_group_count'] else 'PASS',
+                      reason='NOT_SELECTED' if maximum is None else 'UNVERIFIED_GROUPING' if summary['unverified_group_count'] else 'VERSIONED_DECISION',
+                      message='Global maxpass kräver versionsbundet beslut och verifierade hela pass.',
+                      limit_minutes=maximum))
     unknowns = [
         {'rule_id':'jour_compensation_applicability','message':'Referensprofilens kompensationsantagande och individuella undantag är inte verifierade verksamhetsbeslut.'},
         {'rule_id':'practical_concurrency','message':'Tillåten samplanering verifierar inte praktisk aktiv medverkan, plats eller förflyttning.'},
@@ -196,6 +202,7 @@ def validate_case(case, result):
         {'rule_id':'untimed_support','message':'Otidsatt journal-, kontaktpersons-, samordnar-, APT- och överlämningstid kan inte antas vara noll.'},
         {'rule_id':'complete_period_edges','message':'Efterföljande okänd historik och passhöljen kan inte godkännas som hela verifierade arbetstillfällen.'},
     ]
+    unknowns.extend({'rule_id':r['rule_id'],'message':r['message']} for r in rules if r['status']=='UNKNOWN')
     if rest['status']=='UNKNOWN':
         unknowns.append(dict(rule_id='daily_rest_24h',message=rest_message))
     if case['config'].get('break_policy')=='EXPLICIT_NO_BREAK_SCENARIO':
@@ -209,7 +216,7 @@ def validate_case(case, result):
         unknowns.append(item if isinstance(item,dict) else {'rule_id':'input_limitation','message':str(item)})
     for row in summary['inherited_conditional_Jo_issues']:
         unknowns.append({'rule_id':'inherited_jour_window','message':'Ärvd jourkedja saknar verifierad planprofil.', 'detail':row})
-    rules.extend({'rule_id':u['rule_id'],'status':'UNKNOWN','message':u['message']} for u in unknowns if u['rule_id']!='daily_rest_24h')
+    rules.extend({'rule_id':u['rule_id'],'status':'UNKNOWN','message':u['message']} for u in unknowns if u['rule_id'] not in {r['rule_id'] for r in rules})
     return {'overall':'FAIL' if violations else 'UNKNOWN','validator':'independent-minute-certificate/v1',
             'rules':rules,'violations':violations,'unknowns':unknowns,
             'historical':[],

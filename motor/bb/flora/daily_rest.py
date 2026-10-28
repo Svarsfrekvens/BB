@@ -54,25 +54,7 @@ def longest_free(lo, hi, occupied):
     return best
 
 
-def occasions(case, raw):
-    trusted = {r['id']: r.get('whole_duty_id') for r in case['references']['import']['segments']}
-    trusted.update({f"{c['id']}:{i}":c['id'] for c in case.get('whole_duty_candidates',[])
-                    for i in range(1,4)})
-    trusted.update({p['id']:p['source_segment_id'].rsplit('-',1)[0]
-                    for p in (case.get('integration',{}).get('planned_oncall_replacements',[]) +
-                                    case.get('integration',{}).get('planned_active_replacements',[]))})
-    groups = defaultdict(list)
-    for r in raw.get('segments', []):
-        if r['code'] in WORK_CODES:
-            # Only source segment suffixes describe a common source cell.
-            # Generated IDs contain dates; stripping their final component
-            # would incorrectly merge different days into one monthly duty.
-            key = trusted.get(r['id']) or (r['id'].rsplit('-', 1)[0] if r['id'] in trusted else r['id'])
-            groups[(r['person'], key)].append(r)
-    return [dict(person=p, id=key, start=min(r['start'] for r in rows),
-                 end=max(r['end'] for r in rows), rows=rows,
-                 combined_jour={'Ar', 'Jo'} <= {r['code'] for r in rows})
-            for (p, key), rows in sorted(groups.items())]
+from .grouping import occasions, VERIFIED
 
 
 def assess(case, raw):
@@ -99,6 +81,8 @@ def assess(case, raw):
                 status, reason = 'UNKNOWN', 'UNSUPPORTED_REST_POLICY'
             elif not inside or lo < case['config'].get('known_from', 0) or hi > case['config'].get('known_to', case['horizon']):
                 status, reason = 'UNKNOWN', 'PERIOD_EDGE_OR_BOUNDARY_SCOPE'
+            elif any(d['grouping_status'] != VERIFIED and d['start'] < hi and d['end'] > lo for d in own):
+                status, reason = 'UNKNOWN', 'UNVERIFIED_GROUPING'
             elif minutes >= required:
                 status, reason = 'PASS', 'CONTIGUOUS_REST_VERIFIED'
             elif possible:
@@ -131,15 +115,16 @@ def assess(case, raw):
                 night.append((max(r['start'], day*1440+1320), min(r['end'], (day+1)*1440+480)))
         night_minutes = max((b-a for a,b in merge(night)), default=0)
         until = d['end']+span
-        others = [o for o in duties if o['person']==d['person'] and o['id']!=d['id']]
+        others = [o for o in duties if o['person']==d['person'] and o is not d]
         interrupted = any(o['start'] < until and o['end'] > d['end'] for o in others)
         rest_status = 'FAIL' if interrupted else 'UNKNOWN' if until > min(case['config'].get('known_to',case['horizon']),case['horizon']) else 'PASS'
         exceptions.append(dict(person_id=d['person'], duty_id=d['id'], start=stamp(d['start']), end=stamp(d['end']),
                                span_minutes=span, contract_reference='Bransch E § 5 mom. 6 b/c (conditional)',
                                longest_night_jour_minutes=night_minutes,
-                               night_jour_status='PASS' if night_minutes>=300 else 'FAIL',
-                               max_24h_status='PASS' if span<=1440 else 'FAIL',
-                               compensation_required_until=stamp(until), compensation_status=rest_status,
+                               grouping_status=d['grouping_status'],
+                               night_jour_status='UNKNOWN' if d['grouping_status'] != VERIFIED else 'PASS' if night_minutes>=300 else 'FAIL',
+                               max_24h_status='UNKNOWN' if d['grouping_status'] != VERIFIED else 'PASS' if span<=1440 else 'FAIL',
+                               compensation_required_until=stamp(until), compensation_status='UNKNOWN' if d['grouping_status'] != VERIFIED else rest_status,
                                applicability='UNKNOWN',
                                reason='Numeriska villkor kontrollerade; ingen lokal undantagstillämplighet har antagits.'))
     status = 'FAIL' if violations else 'UNKNOWN' if missing or not supported or any(r['status']=='UNKNOWN' for r in records) else 'PASS'

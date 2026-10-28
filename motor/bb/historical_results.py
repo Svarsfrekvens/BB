@@ -16,7 +16,7 @@ from hashlib import sha256
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .business_profiles import binding_for, profile_for, scope_for, BusinessProfileError
+from .business_profiles import binding_for, selected_profile, scope_for, BusinessProfileError
 from .engine_api import verified_owner
 from .flora_api import json_body
 from .flora_jobs import canonical, digest, now
@@ -90,8 +90,7 @@ def artefact(owner, artifact_id):
     if (digest(raw) != entry['input_hash'] or raw['metadata'].get('dataset_id') != entry['dataset_id']
             or raw['metadata'].get('source_file_sha256') != source_hash):
         reject()
-    profile, profile_hash, scope, context = profile_for(owner, {'input': {'metadata': {
-        'business_id': binding['business_id'], 'data_use': 'development', 'dataset_id': entry['dataset_id']}}})
+    profile, profile_hash, scope, context = selected_profile(owner, entry['dataset_id'])
     if (profile_hash != entry['profile_hash'] or context['profile_id'] != entry['profile_id']
             or profile.get('engine_strategy') not in (None, 'flora-reassignment/1.0')):
         reject()
