@@ -1,5 +1,51 @@
 # Flora – gemensamt tidsbeslut, 2026-10-29
 
+## Gällande status efter Patricias uttryckliga intervallbeslut
+
+**Den tidigare spärren som krävde separat exakt start för 775 förekomster är borttagen.** Beslut `PATRICIA-FLORA-TIMING-20261029-v2` ersätter v1:s krav i denna fråga. Hela insatsen ska rymmas i originalets EXECUTION_WINDOW: `start >= window_start`, `start + duration <= window_end`. Senaste start är `window_end - duration`. Ett 10-minutersbehov i 08:00–09:00 får starta 08:00–08:50.
+
+Alla 775 tidigare blockerade intervall har fått serverbunden behörighet. Totalt finns **1 275 behov med valbar start inom originalintervallet och 176 med en enda möjlig start**. Ingen separat originalstart efterfrågas för dessa intervall. Motorns äldre fält `original` betyder fortsatt intervallstart; det är inte ett verifierat originalplaceringsbevis och används inte för att legitimera flytt.
+
+**Separat kvarstår 132 explicita händelsevillkor i nio tidigare granskningsgrupper.** Dessa är inte kvarvarande krav på exakta starter:
+
+| Källvillkor | Antal | Befintliga grupper | Kvarvarande information |
+|---|---:|---|---|
+| Medicin ges endast när kunden är på väg att lägga sig | 28 | FL-TID-G039, G040 | Styrkt koppling till läggdagshändelsen; intervallet är redan godkänt. |
+| Erbjud vatten då kunden går ut och röker | 84 | FL-TID-G142–G147 | Styrkt koppling till rökhändelsen; ingen fritt vald minut får påstås uppfylla villkoret. |
+| Kontrollera dörren då kunden gått till jobbet | 20 | FL-TID-G139 | Styrkt relation till avfärden. |
+
+Källtexten bevaras genom den exakta källbindningen. Händelserna har inte egna verifierade tider eller modellerade länkar i aktuellt underlag. Därför stoppas ett fullständigt jobb med **HTTP 422 / INPUT_REVIEW_REQUIRED / NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132** före jobbhanteraren. Detta bevarar användarens uttryckliga undantag för individuella beroenden. Lösningen är en händelsekoppling eller ett uttryckligt besked om hur just villkoret gäller i planeringen, inte 132 nya exakta starttider. Generella hänvisningar till läkemedelslista används inte längre som skäl att kräva en extra klocktid; ordination och utförandekrav bevaras oförändrade.
+
+De 63 påminnelsernas intervall tillåts: 15 slutar senast vid separat aktivitet kl. 19 och 48 senast vid aktivitet kl. 11. Aktivitetstiden blir inte påminnelsens start. Ingen måltid delas upp och ingen förberedelse flyttas över dygnsgränsen genom antagande.
+
+### Kod och riktade kontroller i denna ändring
+
+- `motor/bb/flora_timing_decisions.json`: versionsbundet ersättningsbeslut, behörighet för exakt de 775 tidigare blockerade ID:na och separata källbundna händelsevillkor. Ingen runtimeklassning på aktivitetstitlar.
+- `motor/bb/flora_timing_decisions.py`: ny förväntad beslutshash och överföring/återkontroll av händelsevillkoret med befintlig hashkontrollerad serverbindning.
+- `motor/bb/need_windows.py`: skiljer saknad tidsbehörighet från ett uttryckligt ännu olöst händelseberoende. Klienten får inte ta bort villkoret eller godkänna det själv.
+- `motor/tests/test_flora_timing_decisions.py`, `test_flora_original_windows.py`, `run_flora_timing_checks.py`: uppdaterade för ändrat beslut och felutfall samt riktade nya prov.
+
+**22 motorprov PASS**, inklusive första start, senaste start med avslut exakt på slutgränsen, avvisning före/efter intervallet, avvisning av 21 minuter i ett 20-minutersintervall, tillåten 20-minutersinsats i samma intervall, bevarande av händelsevillkor och avvisning av borttaget/förfalskat servervillkor. De berörda tidigare proven kördes om eftersom versionsbunden profil och förkontroll ändrats; ingen bred omkörning av äldre sviter.
+
+**Två parserkontroller PASS** mot faktisk frontend `95b9c43ee92751397ddd066b2379e28a54a33df9`, med ny rå solverfri motorexport helt utan fältöversättning. Tillåten placering går igenom parser och arbetskopiefunktion i minnet; avslut utanför intervallet avvisas. Ingen persistens, nättrafik eller ny browserrunda. Äldre giltigt webbläsarprov återanvänds.
+
+Bevis: samtliga **1 451 behov**, ursprungliga intervall/durationer/personalantal, båda källreferenserna, `source_basis` och **292 originalsegment** är oförändrade. Source_basis kanonisk SHA är fortsatt `01649303aed407c00f9d6cd66db36de3567fe5815a725cef9e717012359cd789`. De 286 analysutvidgningarna och åtta K3-undantagen förblir inaktiva. Vakter visar noll solveranrop, verkliga jobb, registreringar eller databasanslutningar. Aktivitetspatchen ingår inte.
+
+Beslutets kanoniska SHA: `c07413cddfed163067812b739b6970e5da86342e394f09cc9efb3f19f3457da0`.
+Effektiv profilhash: `0cebc45b73bcf40bffe209795da15ef660b36842fe03b2139a060ddaa1e93eb7`.
+Rå syntetisk resultatexport SHA: `bd634c021fc6842014a7d868fb6bde87be8130e3229a826fa5737ff1f02f3f49`.
+
+Leverans: `/workspace/deliveries/BB_FLORA_EXECUTION_INTERVAL_DECISION_20261029/`, med motor-/parserbevis och privat medlemslista för de nio återstående händelsegrupperna. Slutcommit finns i DELIVERY.json. Tidigare leveranser lämnas oförändrade som historik.
+
+### Nästa steg och installationsgräns
+
+Intervallrättningen är kodmässigt färdig och kontrollerad. Ingen ny bekräftelse av intervallregeln behövs. Fullständigt Flora-prov är ännu inte verifierat eller körklart eftersom de tre konkreta händelsekopplingarna ovan saknar underlag. Den tidigare beställningen av exakta tider för 775 förekomster är **återkallad**; den ska inte skickas eller besvaras.
+
+Efter att händelsevillkoren kan bindas: kontrollera endast ändrade beroenden, frys installationscommit/profilhash och begär separat installations-/körmandat med isolering och kostnadsgräns. Den rapporterade rollbackbasen är fortsatt `d60b518922040771016a6335f8d1310a6fbe249a`, ej på nytt liveverifierad här. Den lokala föregångaren till denna kodändring är `2ae3cf7d093717a14d5a0c6494018f5f932ac0a9`. Ingen push, merge, installation, deploy, solver eller verklig jobbsubmission har gjorts. VC ska fortfarande granska ett senare förslag före godkännande; kodprov visar inte genomförbar optimering.
+
+## Historik före ersättningsbeslutet – inte aktuell spärr eller beställning
+
+
 **Kodbindningen är färdig och riktat provad. Ett verkligt Flora-förslag är inte beräknat och full körning är fortfarande spärrad för kvarvarande tidsluckor.**
 
 Arbetet fortsätter från `e92b1b040f2bfa66d06cb1e621697014d267fa29` på `codex/original-motor-need-window-contract-20261029`. Slutlig lokal commit anges i leveransens DELIVERY.json. Aktuell frontend är `95b9c43ee92751397ddd066b2379e28a54a33df9`, inte den äldre c6d2c810-basen. Ingen push, installation, deploy, merge, solver eller verklig jobbsubmission.

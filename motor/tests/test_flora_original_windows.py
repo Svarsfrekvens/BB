@@ -130,7 +130,7 @@ class OriginalWindowTests(unittest.TestCase):
         # Pure placement boundary validation, no fictitious full schedule.
         from bb.need_windows import check_joint
         for start in [n['original'],n['original_window_end']-n['duration']]:
-            with self.assertRaisesRegex(ValueError,'NEED_TIMING_DECISION_REQUIRED'):
+            with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED'):
                 check_joint(self.case,{'placements':[{'id':n['id'],'start':start}]})
 
     def test_server_selection_and_preflight_stop_before_manager(self):
@@ -146,7 +146,7 @@ class OriginalWindowTests(unittest.TestCase):
                 response=client.post('/api/engine/jobs',json={'input':self.raw},headers={'Authorization':'Bearer synthetic-local-token','X-BB-Job-Owner':owner,'Idempotency-Key':'STOP/BEFORE_MANAGER'})
             self.assertEqual(response.status_code,422)
             self.assertEqual(response.json()['detail']['code'],'INPUT_REVIEW_REQUIRED')
-            self.assertIn('NEED_TIMING_DECISION_REQUIRED: 775',response.json()['detail']['message'])
+            self.assertIn('NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132',response.json()['detail']['message'])
 
     def test_input_and_original_profile_unchanged(self):
         original=deepcopy((self.raw,self.old))
@@ -158,9 +158,9 @@ class OriginalWindowTests(unittest.TestCase):
         p={'profile_id':'other'}
         self.assertIs(bind_profile(p,'other'),p)
 
-    def test_remaining_775_locks_stop_before_job_or_result(self):
-        with self.assertRaisesRegex(ValueError,'NEED_TIMING_DECISION_REQUIRED: 775'):
+    def test_remaining_132_event_conditions_stop_before_job_or_result(self):
+        with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132'):
             prepare(self.bound,normalize_request({'input':self.raw}))
-        with self.assertRaisesRegex(ValueError,'NEED_TIMING_DECISION_REQUIRED: 775'):
+        with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132'):
             _normalize(self.case,{}, {})
         self.assertEqual(sum(n['source_window_end']-n['source_window_start']==n['duration'] for n in self.case['needs']),176)

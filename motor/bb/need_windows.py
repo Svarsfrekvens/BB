@@ -86,6 +86,7 @@ def check_joint(case, raw=None):
     if timing_rules and set(exported_ids) != set(timing_rules):
         raise ValueError('TIMING_DECISION_BINDING_MISMATCH: modellens behovsmängd har ändrats.')
     unresolved_locks = []
+    unresolved_dependencies = []
     for i, n in sources.items():
         if any(n.get(k) != models[i].get(k) for k in fields):
             raise ValueError('NEED_WINDOW_CONTRACT_INVALID: kontraktet motsäger det modellerade behovet.')
@@ -100,12 +101,19 @@ def check_joint(case, raw=None):
             # Neither an analysis classification nor interval boundaries prove
             # an approved start or permission to move within that interval.
             unresolved_locks.append(i)
+        if timing is not None and timing.get('unresolved_dependency'):
+            unresolved_dependencies.append(i)
         if not n.get('domains') or any(a < first or b > last or a > b for a, b in n['domains']):
             raise ValueError('Startdomänen motsäger det typade källfönstret: '+i)
     if unresolved_locks:
         raise ValueError('NEED_TIMING_DECISION_REQUIRED: '
                          +str(len(unresolved_locks))
                          +' behov saknar verifierad låst starttid eller uttryckligt flyttbeslut. Intervall är inte flytträtt.')
+    if unresolved_dependencies:
+        raise ValueError('NEED_DEPENDENCY_EVIDENCE_REQUIRED: '
+                         +str(len(unresolved_dependencies))
+                         +' behov har uttryckliga händelsevillkor utan verifierad koppling. '
+                         'Utförandeintervallet är godkänt; separat exakt start krävs inte.')
     if raw is not None:
         placed = indexed(raw.get('placements', []))
         for i, p in placed.items():

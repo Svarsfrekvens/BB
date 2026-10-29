@@ -14,9 +14,9 @@ from run_flora_original_windows import MemorySink
 
 
 @contextlib.contextmanager
-def synthetic_timing(policy='MOVABLE_WITHIN_SOURCE_WINDOW'):
+def synthetic_timing(policy='MOVABLE_WITHIN_SOURCE_WINDOW', duration=10, dependency=None):
     """A separate fictional decision; never substitutes into Flora's profile."""
-    body,p=flora_fixture(None,10);body['input']['vc_answers']=[]
+    body,p=flora_fixture(None,duration);body['input']['vc_answers']=[]
     p['source_identity']=source_identity(body['input']);p['source_file_sha256']=body['input']['metadata']['source_file_sha256']
     n=body['input']['customer_needs'][0]
     evidence=dict(version='flora-original-window-binding/1.0',binding_id='synthetic-window-binding',profile_id=p['profile_id'],
@@ -30,6 +30,8 @@ def synthetic_timing(policy='MOVABLE_WITHIN_SOURCE_WINDOW'):
         window_evidence_hash=jobs.digest(evidence),window_binding_id=evidence['binding_id'],
         **{k:evidence[k] for k in ('source_identity','source_file_sha256','profile_id','dataset_id','period')},
         groups=[dict(group_id='SYNTHETIC-G1',policy=policy,category='SYNTHETIC_UNBOUND_TASK',reason='EXPLICIT_SYNTHETIC_PERMISSION',need_ids=[n['need_id']])])
+    if dependency:
+        decision['groups'][0]['unresolved_dependency'] = dependency
     with patch.object(window,'PROFILE_ID',p['profile_id']),patch.object(window,'EVIDENCE_HASH',jobs.digest(evidence)),patch.object(window,'_load_evidence',return_value=evidence),\
          patch.object(timing,'PROFILE_ID',p['profile_id']),patch.object(timing,'DECISION_HASH',jobs.digest(decision)),patch.object(timing,'_load',return_value=decision):
         bound=window.bind_profile(p,body['input']['metadata']['dataset_id'])
@@ -45,9 +47,9 @@ class TimingDecisionTests(unittest.TestCase):
 
     def test_common_decision_exact_partition_and_no_inherited_exceptions(self):
         policies=Counter(d['timing_authorization']['policy'] for d in self.bound['need_decisions'].values())
-        self.assertEqual(dict(policies),{'MOVABLE_WITHIN_SOURCE_WINDOW':500,'REVIEW_REQUIRED':775,'UNIQUE_SOURCE_START':176})
-        categories=Counter(d['timing_authorization']['category'] for d in self.bound['need_decisions'].values() if d['timing_authorization']['policy']=='REVIEW_REQUIRED')
-        self.assertEqual(dict(categories),{'MEAL_LOCKED':92,'MEDICATION_LOCKED':516,'EVENT_DEPENDENT':104,'REMINDER_BEFORE_FIXED_EVENT':63})
+        self.assertEqual(dict(policies),{'MOVABLE_WITHIN_SOURCE_WINDOW':1275,'UNIQUE_SOURCE_START':176})
+        deps=Counter(d['timing_authorization'].get('unresolved_dependency') for d in self.bound['need_decisions'].values())
+        self.assertEqual(dict(deps),{None:1319,'BEDTIME_EVENT':28,'DEPARTURE_EVENT':20,'SMOKING_EVENT':84})
         for d in self.bound['need_decisions'].values():self.assertIs(d['flex'],False)
         self.assertEqual(self.bound['window_binding'],window._load_evidence())
         self.assertEqual(len(self.bound['window_binding']['inactive_flex_need_ids']),286)
@@ -101,6 +103,52 @@ class TimingDecisionTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError,'TIMING_DECISION_BINDING_MISMATCH'):need_windows.check_joint(bad)
             bad=deepcopy(case);bad['integration'].pop('timing_binding')
             with self.assertRaisesRegex(ValueError,'TIMING_DECISION_BINDING_MISMATCH'):need_windows.check_joint(bad)
+
+    def test_new_decision_authorizes_every_previously_blocked_interval(self):
+        # Exact prior categories, not new title classification at runtime.
+        categories={'MEAL_LOCKED':92,'MEDICATION_LOCKED':516,'EVENT_DEPENDENT':104,'REMINDER_BEFORE_FIXED_EVENT':63}
+        counts=Counter()
+        for d in self.bound['need_decisions'].values():
+            a=d['timing_authorization']
+            if a['category'] in categories and a['policy']!='UNIQUE_SOURCE_START':
+                self.assertEqual(a['policy'],'MOVABLE_WITHIN_SOURCE_WINDOW')
+                counts[a['category']]+=1
+        self.assertEqual(dict(counts),categories)
+        self.assertFalse(self.bound['timing_binding']['limits']['source_window_start_is_verified_original_placement'])
+
+    def test_execution_interval_rejects_duration_longer_than_window(self):
+        with synthetic_timing(duration=21) as (b,p):
+            with self.assertRaisesRegex(ValueError,'hela durationen ryms inte'):
+                prepare(p,jobs.normalize_request(b))
+        with synthetic_timing(duration=20) as (b,p):
+            case=prepare(p,jobs.normalize_request(b))
+            self.assertEqual(case['needs'][0]['domains'],[[540,540]])
+            flora_result(case,540)
+
+    def test_interval_permission_does_not_remove_explicit_event_condition(self):
+        for dep in ['BEDTIME_EVENT','DEPARTURE_EVENT','SMOKING_EVENT']:
+            with self.subTest(dependency=dep),synthetic_timing(dependency=dep) as (b,p):
+                with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED: 1'):
+                    prepare(p,jobs.normalize_request(b))
+                case=prepare_case(b['input'],p)
+                for key in ['source_needs','needs']:case[key][0]['timing_authorization'].pop('unresolved_dependency')
+                with self.assertRaisesRegex(ValueError,'TIMING_DECISION_BINDING_MISMATCH'):
+                    need_windows.check_joint(case)
+
+    def test_reminders_finish_before_separate_activity_anchor(self):
+        raw_by_id={n['need_id']:n for n in self.raw['customer_needs']}
+        seen=Counter()
+        for n in self.case['needs']:
+            auth=n['timing_authorization']
+            if auth['category']!='REMINDER_BEFORE_FIXED_EVENT':continue
+            row=raw_by_id[self.case['integration']['need_id_map'][n['id']]]
+            desc=row['source_fields']['Beskrivning']
+            anchor=19*60 if '19.00' in desc else 11*60 if '11.00' in desc else None
+            self.assertIsNotNone(anchor)
+            self.assertLessEqual(n['source_window_end']%1440,anchor)
+            self.assertNotIn('unresolved_dependency',auth)
+            seen[anchor]+=1
+        self.assertEqual(dict(seen),{19*60:15,11*60:48})
 
 
 def export_authorized_fixture(out):

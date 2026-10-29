@@ -9,7 +9,7 @@ from pathlib import Path
 from .flora_jobs import digest
 
 PROFILE_ID = 'flora-original-upload-morning-plan-historical-pass-20261021'
-DECISION_HASH = 'cd66471a9f0ffca75558444a5b80f0bcd9a9547f76bc4786b90376244d0bb868'
+DECISION_HASH = 'c07413cddfed163067812b739b6970e5da86342e394f09cc9efb3f19f3457da0'
 POLICIES = {'MOVABLE_WITHIN_SOURCE_WINDOW', 'UNIQUE_SOURCE_START', 'REVIEW_REQUIRED'}
 
 
@@ -34,6 +34,8 @@ def _rules(evidence):
                 raise ValueError('TIMING_DECISION_BINDING_MISMATCH: dubblerad medlemskoppling.')
             out[nid] = {k:group[k] for k in ('policy','category','reason','group_id')}
             out[nid]['decision_id'] = evidence['decision_id']
+            if group.get('unresolved_dependency'):
+                out[nid]['unresolved_dependency'] = group['unresolved_dependency']
     return out
 
 
