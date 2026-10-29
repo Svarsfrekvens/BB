@@ -1,128 +1,183 @@
-# Joint-method: exakt källbevis — 2026-10-29
+# FLORA-RADATA: färdig source_basis och serverprofilbindning
 
-## Besked
+Denna leverans ersätter instruktionen i 04664b6 om `reviewed_input_sha256`. Det fältet används inte. Bindningen följer användarens verifierade `source_identity`-projektion och lägger exakt två fält till den servervalda Flora-profilen.
 
-En isolerad motorrättning exporterar ett komplett `source_basis` för `joint-shifts-breaks-needs/v1` när hela indatan och originalfilens checksumma matchar serverprofilens granskade bindning. Rå exporterad JSON accepteras av frontendens faktiska funktioner i `69cfd6a476742713488a45e46bb33486ec7a3cd9`, utan fältöversättning.
+## Versioner och status
 
-**Kodrättningen är klar lokalt. Liveblockeraren är inte stängd:** den konfigurerade originalprofilen saknar en fullständig indatapin. Profilnamn och workbook-hash bevisar inte att en ändrad arbetskopia är original. Ingen sådan pin har gissats eller installerats i uppdraget.
+- Gren: `codex/original-motor-source-basis-20261029`.
+- Föregående patchcommit: `04664b679e63079d6459cbe526efa8b164c389e3`.
+- Motorbas: `c7170d487d29ee9338014c44a6373e57096cc4c9`.
+- Kanonisk frontend, läst och provad oförändrad: `ce9668eab9a2e048dd5a7c142fbd28e42ed6d701`.
+- Aktivitetspatchen `c5148cb54feba0e98c405c2dde883fb3a71307c2` ingår inte.
+- Leveranscommit, publicerad fjärr-SHA, patch och filhashar redovisas i leveransens `DELIVERY.json` efter commit/push.
+- Ingen deploy, merge, solver, jobbsubmission, historisk registrering eller databas-/secretändring har gjorts.
 
-## Versioner och avgränsning
+## Exakt serverprofil och hur bindningen installeras
 
-- Direkt motorbas: `c7170d487d29ee9338014c44a6373e57096cc4c9`.
-- Separat gren: `codex/original-motor-source-basis-20261029`.
-- Frontend läst och testad oförändrad: `69cfd6a476742713488a45e46bb33486ec7a3cd9`.
-- Aktivitetspatch `c5148cb54feba0e98c405c2dde883fb3a71307c2` ingår inte. Ingen aktivitetsmodul eller reservation tillagd.
-- Exakt lokal leveranscommit, filhashar och patchverifiering finns i `DELIVERY.json`.
-- Inga frontendfiler, affärsregler, jobb-/solverlogik eller befintliga resultat ändras.
-- Ingen push, merge, deploy, solver, faktisk jobbsubmission, profiländring, databasändring eller secretändring.
-
-## Varför enbart ett nytt exportfält inte räcker
-
-Flora-importörens befintliga `segment_decisions.expected` och behovsbeslut granskar identiteter och semantik, men tillåter ändrade tider och durationer. Det befintliga importtestet `test_uploaded_values_and_generic_period_ids` visar detta uttryckligen. Fil-SHA som appen för vidare från originalarkivet kan fortfarande vara samma när arbetskopians rader ändras.
-
-Read-only GET av originaltjänstens Render-konfiguration visade att `flora-morning-plan-profile.gz.b64` saknar full inputpin/source_identity. Den installerande koden och `flora-historical-pass-overlay-20261021.json` lägger till historiskt profil-ID och whole-duty-ID:n; de tillför ingen full indatapin. Profilens `source` innehåller en workbook-hash och en hash för ett annat numeriskt case. Dessa är inte hash för appens kompletta normaliserade input. Ingen av dem får återanvändas som sådan.
-
-Detta är observation av konfigurationen via Render API, inte nytt bevis från faktiskt monterad runtimefil. Inga privata profiler eller payloads bifogas leveransen.
-
-## De två ändrade motorfilerna
-
-### `motor/bb/flora_import.py`
-
-Efter befintlig full import/förkontroll byggs källbeviset endast om serverprofilen innehåller `reviewed_input_sha256`.
-
-Bindningen är:
+Render-konfigurationen lästes med GET. Befintligt register väljer:
 
 ```text
-reviewed_input_sha256 = SHA-256(
-  UTF-8(JSON(normaliserat input utan source_archive,
-            sort_keys=true, separators=(",", ":"),
-            ensure_ascii=false, allow_nan=false))
-)
+service: bemanningsbalans-motor
+owner: org:9b4cd08f-82fc-4e40-856a-04ce6dc4ec41
+business_id: 9b4cd08f-82fc-4e40-856a-04ce6dc4ec41
+data_use: development
+dataset_profiles[FLORA-RADATA]:
+  /var/data/profiles/flora-historical-pass-reviewed-20261021.json
+profile_id: flora-original-upload-morning-plan-historical-pass-20261021
 ```
 
-Det är samma algoritm/indatascope som `integration.input_sha256`. Hela indatan ingår, inklusive metadata, perioder, dataset, organisation/användning när de finns, källsegment, behov, otidsatta rader och andra kvarvarande inputfält. Radordning bevaras och ingår i denna exakta pin. Requestens körbudget och scenarioinställningar utanför `input` ingår inte och förblir separat provenance. Detta är inte availability-metodens projekterade source_identity-algoritm.
+Den befintliga profilens bytes återskapades lokalt från den konfigurerade basprofilen och det befintliga historiska passtillägget. Bas-/tilläggskontroller och installerarens förväntade slutchecksumma verifierades. Ingen remote installer kördes.
 
-Dessutom måste:
+- Befintlig profilfil SHA-256: `96a2f0e3aca08e15cfd5bd2b107646bf442c870f9113427e8ed84f0d50649eed`.
+- Befintligt kanoniskt profilobjekt SHA-256: `49b7fe16d33fa6daffd5e425d37af2ee47350dcd56b433fb2b41a0f6508605ac`.
+- Effektivt profilobjekt med exakt två nya fält SHA-256: `0ed6b1aae7b91f8f94d79d2ce30263c45cbfc5b31501f98cc90af9363abdf00a`.
 
-- mottaget `metadata.source_file_sha256` vara en giltig 64-teckens SHA-256,
-- serverprofilens befintliga `source.raw_workbook_sha256` vara giltig,
-- dessa två hashvärden vara identiska.
+**Inga filer på Render har skrivits om.** Den versionsbundna serverkonfigurationen `motor/bb/flora_source_binding.json` följer med denna kodgren. Vid en senare godkänd installation applicerar `business_profiles.profile_for` tillägget i minnet på exakt den profil registret redan valt. Det effektiva profilobjektet och dess nya profilhash lämnas vidare genom den befintliga jobbvägen. Ingen klient får välja tillägget eller dess värden.
 
-Saknad full inputpin ger inget verifierat `source_basis`; tidigare profilbeteende bevaras, och frontendens spärr ligger kvar. En konfigurerad men ogiltig/motstridig pin, eller saknat/motstridigt filbevis vid konfigurerad pin, ger förkontrollfel före jobbhanteraren (`422 INPUT_REVIEW_REQUIRED` i engine-rutten). Klientens metadata kan inte tillföra serverpinnen eller låsa upp certifikatet.
+Tillägget ändrar endast:
 
-Källsegment hämtas från importens orörda råa `schedule_segments`, **före** scenarioförkortningar, ersättningspass, solverplaceringar eller filtrering till fasta/importerade referenspass. Därför bevaras också P1, frånvaro och källrader som inte ingår i resultatets arbetsschema.
-
-### `motor/bb/flora/__init__.py`
-
-Resultatexporten kopierar importens verifierade bevis och kontrollerar först att snapshotens fullständiga hash fortfarande matchar. Resultatändringar får inte ändra originalbeviset. Exporten tillför endast `source_basis`; övriga resultatfält har jämförts identiskt med samma valideringsunderlag.
-
-```ts
-source_basis: {
-  kind: "VERIFIED_UPLOADED_ORIGINAL";
-  verification: "EXACT_SERVER_REVIEWED_INPUT";
-  source_identity: string;       // exakt serverpin för normaliserat input
-  source_file_sha256: string;    // identisk med serverns granskade workbook-hash
-  segments: {
-    segment_id: string;
-    person_id: string | null;
-    start: string;
-    end: string;
-    code: string;               // rå source_code, ingen omklassning
-  }[];
+```json
+{
+  "source_identity": "0c8fb9635f4a8562fb1b592702c30eb9c955e48937e5ba2f39ac81a6a05390c4",
+  "source_file_sha256": "5bd741c2a7f6e9058b32e3d6858b0f8951c1d1816eccd85c3cee1a1f5fd1ca38"
 }
 ```
 
-Segmentvärden kopieras direkt; inga genererade pass, profilnamnsheuristiker eller inferred originaltider används. Den nuvarande importörens regler för personreferenser ändras inte av att frontendtypen tillåter null.
+Hela det övriga profilobjektet måste ha den fastställda basprofilhashen. Ändrade regler, fönster, grupp-ID:n, perioder, underlag eller tidigare motstridiga bindningar stoppar tillägget med konfigurationsfel, aldrig en automatisk ombindning. Redan korrekt tillagd bindning är idempotent. Andra profil-ID:n lämnas oförändrade.
 
-Exporten är ett käll-/identitetsbevis, inte ett verksamhetsgodkännande. `review_required=true`, `business_schedule_approved=false` och befintliga UNKNOWN kvarstår. Den gör ingen ny kontroll av Excel-bytes på motorservern: bindningen måste i förväg granskas mot ett betrott original och dess normaliserade projektion.
+Historiska fält under `profile.source`, inklusive äldre referenskällor, bevaras. Den aktuella exakt godkända filbindningen är det nya toppfältet `source_file_sha256`; en gammal referenskällas workbook-hash återanvänds inte som denna bindning.
 
-## Prov och resultat
+## Verifierad motorindata
 
-**52 motorprov PASS, 0 FAIL:** 14 nya riktade källbevisprov, 18 typed-window-regressioner och 20 befintliga importprov.
+Den uppladdade filen `flora_3_uppdaterad (2).xlsx` har exakt fil-SHA enligt beställningen. Den konverterades lokalt genom **frontendens faktiska** `xlsxToContract` och `engineInput` från ce9668e. Verksamhets-ID och `data_use` tillfördes som de uttryckligt godkända autentiserade routningsvärdena. Ingen app-/arbetskopieimport utfördes.
 
-Nya prov omfattar komplett export, alla originalrader, P1/frånvaro, avsaknad av pin, missvisande profilnamn, klientförsök att skicka pin, ändrade källtider/durationer med samma fil-SHA, ändrat dataset, ogiltiga hashvärden, motstridigt serverfilbevis, muterat snapshot, originaldata som skiljer sig från resultatsegmenten och att bara exportfältet tillkommer.
+Resultatet gav exakt:
 
-Ett lokalt ASGI-prov visar att korrekt exakt input passerar importen men stannar vid avsiktligt ogiltig idempotensnyckel före manager; ändrad duration stoppas tidigare med `422 INPUT_REVIEW_REQUIRED`. Därutöver är 12 befintliga legacy-API-observationer identiska med basens status/body. Det senare betyder oförändrat beteende, inte att legacy-profiler fått striktare identitetskontroller utan pin.
-
-**17 frontendkontroller PASS:** verkliga `computationOf`, `proposalOf`, `originalRunBasis` och `engineOriginalChanges` från den exakta appcommitten tar emot rå motor-JSON. Komplett bevis och identiska källrader accepteras. Saknat bevis, ogiltig markering/hash/form, ändrad person/tid/kod/ID, saknad rad och dubblerad rad avvisas. Ingen fältöversättning eller efterhandskomplettering av motorresultatet görs.
-
-Alla uppgifter i proven är syntetiska. En deterministisk befintlig solverfri adapter skapar testschemat. Testernas status-envelope är ett objekt i minnet, ingen jobbpost. Solver-entrypoints, jobbhanterare, SQL, subprocess och nätanslutning var spärrade i motorproven; samtliga räknare är 0. Frontendprovet hade spärrar för nätverk och lagring, också 0. Inga faktiska runtime-/databasräknare har öppnats.
-
-Maskinläsbara bevis:
-
-- `checks/motor-tests.json` och `checks/motor-tests.log`
-- `checks/frontend-tests.json` inklusive SHA-256 för den råa exporterade JSON-filen
-- `checks/motor-result.json` — exakt syntetisk resultatexport
-- `checks/synthetic-input.json` — enbart syntetiskt input
-- `checks/baseline-comparison.json`
-
-## Exakt filförteckning
-
-1. `motor/bb/flora_import.py` — villkorad serverbunden källcertifiering.
-2. `motor/bb/flora/__init__.py` — separat export av certifikatet.
-3. `motor/tests/test_source_basis.py` — riktade negativa/positiva prov.
-4. `motor/tests/run_source_basis_checks.py` — solverfri testkörning och exportbevis.
-5. `motor/tests/frontend_source_basis.mts` — extern harness mot oförändrad frontend.
-6. `docs/original-motor-source-basis-20261029.md` — detta underlag.
-
-## Reproduktion
-
-Med motorberoenden installerade och frontendcommitten extraherad oförändrad till APP_ROOT:
-
-```bash
-python motor/tests/run_source_basis_checks.py --out /tmp/bb-source-basis-checks
-esbuild motor/tests/frontend_source_basis.mts --bundle --platform=node --format=esm \
-  --alias:@app="$APP_ROOT" --alias:@="$APP_ROOT/src" \
-  --outfile=/tmp/bb-source-basis-frontend.mjs
-node /tmp/bb-source-basis-frontend.mjs /tmp/bb-source-basis-checks
+```text
+business_id = 9b4cd08f-82fc-4e40-856a-04ce6dc4ec41
+data_use = development
+dataset_id = FLORA-RADATA
+planning_period_id = P2
+source_file_sha256 = 5bd741c2a7f6e9058b32e3d6858b0f8951c1d1816eccd85c3cee1a1f5fd1ca38
+source_identity = 0c8fb9635f4a8562fb1b592702c30eb9c955e48937e5ba2f39ac81a6a05390c4
+staff = 9
+customers = 5
+schedule_segments = 292
+customer_needs = 3235
+business_rules = 34
+vc_answers = 32
 ```
 
-## Nästa minsta steg — inte genomfört
+Samtliga stabila ID:n är unika och giltiga. `source_layout` och `history_period_id` är fortfarande frånvarande, inte tillagda i input.
 
-1. Läs ut den exakt avsedda normaliserade originalindatan från en betrodd källa och stäm av mot originalfilens bytes/checksumma. En godtycklig senast inskickad arbetskopia får inte automatiskt bli granskad referens.
-2. Efter separat mandat: bind den berörda serverprofilen med `reviewed_input_sha256` enligt algoritmen ovan. Verifiera också befintlig `source.raw_workbook_sha256`; byt inte den blint om det är en annan fil. Ingen hash har föreslagits utan detta underlag.
-3. Verifiera profilen och rå export solverfritt mot samma frontendcommit. Bevara övriga inställningar, regler och jobbvägar.
-4. Först efter installationsmandat: publicera/installera exakt denna separata patch på originalmotorn. Ingen aktivitetspatch får ingå. Säkerställ att faktiskt föregående deployment är godkänd c7170d4 och dokumentera rollback till den samt dess då gällande profilkonfiguration.
-5. Befintligt jobb `649630a6ca9e4517bf4da6be65c11902` får inget nytt certifikat bara för att kod deployas. Ingen databaspost eller tidigare resultatexport har skrivits om. Eventuell omexport med bevarat källunderlag eller en ny körning kräver separat beslut; detta uppdrag startar ingen solver.
+### Identitetsalgoritm
 
-**Kvarstående blockerare:** fullständigt servergranskat indatabevis saknas i den observerade profilkonfigurationen. Kodändringen ensam får därför inte presenteras som att Excel → gateway → live motor → befintligt resultat → frontend nu är verifierat.
+Samma befintliga `availability_import.source_identity` används för båda motorstrategierna. Projektionen omfattar metadatafälten:
+
+`schema_version`, `dataset_id`, `timezone`, `periods`, `planning_period_id`, `history_period_id`, `source_layout`, `source_file_sha256`.
+
+Saknade fält representeras av JSON null **i hashprojektionen**, utan att originalindatan skrivs om. `staff`, `customers`, `schedule_segments`, `customer_needs` sorteras på respektive stabilt ID; alla radfält följer med. `business_rules` och `vc_answers` följer med i given ordning. SHA-256 beräknas över kanonisk UTF-8 JSON (`sort_keys`, kompakta separatorer, `ensure_ascii=false`, inga NaN).
+
+Routningsfälten `business_id` och `data_use` ingår enligt denna befintliga definition inte i source_identity. De kontrolleras separat mot den autentiserade registerbindningen **och** mot den servervalda profilen vid källcertifieringen. Ett ändrat routningsvärde får därför inte godkännas bara för att source_identity är oförändrad.
+
+Tomma/blankstegs-ID:n avvisas nu också av den gemensamma identitetsfunktionen. Befintligt stöd för sorteringsoberoende identitet bevaras. Det kompletta importerade snapshotet har fortsatt egen `input_sha256` som kontrolleras igen vid export; det värdet förväxlas inte med source_identity.
+
+## Positiv export: exakt source_basis
+
+Den lokala positiva kontrollen använder den verkliga inputen, verkligt registerurval och det kontrollerade serverprofilobjektet med två tillagda fält. Import och normalisering passerar utan solver.
+
+```text
+kind: VERIFIED_UPLOADED_ORIGINAL
+verification: EXACT_SERVER_REVIEWED_INPUT
+source_identity: 0c8fb9635f4a8562fb1b592702c30eb9c955e48937e5ba2f39ac81a6a05390c4
+source_file_sha256: 5bd741c2a7f6e9058b32e3d6858b0f8951c1d1816eccd85c3cee1a1f5fd1ca38
+segments: 292 originalrader, exakt segment_id/person_id/start/end/source_code→code
+```
+
+**Hela oförkortade JSON-objektet** finns i den lokala privata leveransfilen `private/positive-source-basis.json`. Dess kanoniska SHA-256 är `01649303aed407c00f9d6cd66db36de3567fe5815a725cef9e717012359cd789`; bytefilens SHA finns i `DELIVERY.json`. Originalrader och privata profiler publiceras inte på GitHub.
+
+Alla 292 källrader bevaras, inklusive historik och källrader utanför den föreslagna arbetstiden. P2-raderna matchar frontendens originalperiodsegment exakt. Inga modifierade motorpass används som original. `source_basis` ger inga nya schemaplaceringar och är inte ett verksamhetsgodkännande.
+
+Den riktiga positiva källexporten skapades av `_normalize` utan kandidat/resultatschema. Därför har den inga föreslagna schemarader och frontendens `proposalOf` returnerar null, som avsett. Detta är ett källbevisprov, inte en ny körning eller ett påhittat solverresultat. Ett separat syntetiskt solverfritt schema används i frontendens fulla parserregression.
+
+## Godkända kontroller
+
+- **71 motor-/profiltester PASS, 0 FAIL**: source_basis, serverprofilens tvåfältstillägg, korruptions-/idempotenskontroller, komprimerad profil, befintlig import, START_WINDOW/EXECUTION_WINDOW och berörda availability-identitetsprov.
+- **32 lokala API-kontroller med den exakta Flora-indatan PASS**. Rätt input når nästa förkontroll och stoppas av avsiktligt ogiltig idempotensnyckel före manager. Negativa input stoppas tidigare. Registret väljer också sin verkliga fallbackprofil vid fel dataset; den felaktiga inputen nekas där.
+- **17 syntetiska frontendkontroller PASS** mot ce9668e, utan fältöversättning.
+- **Verkligt Flora-källbevis i frontend PASS**: `parseFloraText`, `originalRunBasis`, originalperiodens radmatchning och avsaknad av förslag utan schema. Rå JSON ändras inte.
+- **12 befintliga legacy-API-observationer oförändrade** mot basen c7170d4.
+- Övervakade solver-, manager-, JobStore-, SQL-, subprocess- och nätanrop i motorproven: **0**. Frontendens nät-/lagringsanrop: **0**.
+
+| Prov | HTTP | Felkod/kontroll | Resultat |
+| --- | --- | --- | --- |
+| correct_input_preflight | 422 | DELIBERATE_IDEMPOTENCY_STOP | PASS |
+| source_file_sha256 | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| dataset_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| business_id | 422 | BUSINESS_MISMATCH | PASS |
+| data_use | 422 | DATA_USE_MISMATCH | PASS |
+| timezone | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| planning_period_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| source_layout | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| history_period_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| schema_version | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| period | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| segment_time | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| segment_person | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| segment_code | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| need_row | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| staff_duplicate | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| staff_missing_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| staff_blank_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| staff_missing_row | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customers_duplicate | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customers_missing_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customers_blank_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customers_missing_row | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| schedule_segments_duplicate | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| schedule_segments_missing_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| schedule_segments_blank_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| schedule_segments_missing_row | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customer_needs_duplicate | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customer_needs_missing_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customer_needs_blank_id | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| customer_needs_missing_row | 422 | INPUT_REVIEW_REQUIRED | PASS |
+| missing_auth | 401 | AUTH_REQUIRED | PASS |
+
+Detaljer finns i `checks/motor-tests.json`, `checks/bound-flora-proof.json`, `checks/frontend-tests.json`, `checks/frontend-bound-flora.json` och `checks/baseline-comparison.json`. API-proven kördes i lokal ASGI-process mot kod och profilsnapshots, inte som live-POST på Render. Bara läsande Render-GET användes för att fastställa konfigurationen.
+
+## Ändrade filer i färdig rättning
+
+Profilkonfiguration:
+
+- `motor/bb/flora_source_binding.json` — versionsbundet, serverägt tillägg med exakt profil, verksamhet, dataset, basprofilhash och de två godkända hashvärdena. Inga privata rader.
+
+Motor:
+
+- `motor/bb/business_profiles.py` — applicerar tillägget efter befintligt autentiserat registerurval; bevarar övriga profilfält och låter profilhashen omfatta bindningen.
+- `motor/bb/flora_import.py` — verifierar exakt source_identity, fil-SHA och separat organisation/användning; bygger källbevis från orörd originalinput.
+- `motor/bb/flora/__init__.py` — exporterar källbevis och kontrollerar komplett snapshotintegritet.
+- `motor/bb/availability_import.py` — gemensam source_identity avvisar också tomma stabila ID:n; projektion och hashdefinition är i övrigt oförändrade.
+- `motor/bb/flora_jobs.py` — inkluderar bindningsfilen i befintligt method_fingerprint. Jobb-/solverlogik oförändrad.
+
+Prov och underlag:
+
+- `motor/tests/test_source_basis.py`
+- `motor/tests/test_source_profile_binding.py`
+- `motor/tests/run_source_basis_checks.py`
+- `motor/tests/check_bound_flora_source.py`
+- `motor/tests/frontend_source_basis.mts`
+- `motor/tests/frontend_bound_flora_source.mts`
+- `docs/original-motor-source-basis-20261029.md`
+
+## Installation och rollback — endast plan
+
+Ingen separat uppladdning av privat profil krävs för denna lösning. Vid ett senare godkänt införande används samma register och monterade profilfil; kodens versionsbundna tillägg skapar det effektiva bundna profilobjektet. Om den monterade profilen inte har förväntad basprofilhash stoppas profilen, i stället för att andra beslut skrivs över.
+
+Inför installation: verifiera aktuell service, livecommit, registerurval och faktiskt monterad profilhash mot denna leverans; installera därefter endast uttryckligt godkänd commit. Ingen aktivitetspatch eller merge till main/pilot ingår.
+
+Rollback till föregående godkända motorcommit tar bort tillägget ur den effektiva profilen; den monterade profilfilen har inte ändrats. Inga databasposter behöver skrivas om. Tidigare jobb/resultat behåller sina egna profil-/metodhashar och blir inte automatiskt uppgraderade eller nyverifierade.
+
+Befintligt jobb `649630a6ca9e4517bf4da6be65c11902` har inte ändrats. Read-only källbevisprov är klart; ingen ny körning eller deploy är godkänd genom denna leverans.
+
+SOURCE_BASIS OCH PROFILBINDNING REDO FÖR INSTALLATION

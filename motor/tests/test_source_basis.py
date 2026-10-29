@@ -9,14 +9,18 @@ from bb.flora import _normalize, validate_case
 from bb.engine_methods import prepare
 from bb.flora_jobs import normalize_request, digest
 from bb.flora_import import FloraImportError
+from bb.availability_import import source_identity
 from test_typed_windows_contract import flora_fixture, flora_result
 
 
 def reviewed_fixture():
     body, profile = flora_fixture()
+    body['input']['vc_answers'] = []
+    body['input']['metadata'].pop('history_period_id', None)
+    body['input']['metadata'].pop('source_layout', None)
     raw = normalize_request(body)['input']
-    profile['reviewed_input_sha256'] = digest(raw)
-    profile['source'] = {'raw_workbook_sha256': raw['metadata']['source_file_sha256']}
+    profile['source_identity'] = source_identity(raw)
+    profile['source_file_sha256'] = raw['metadata']['source_file_sha256']
     return body, profile
 
 
@@ -32,7 +36,7 @@ class SourceBasisTests(unittest.TestCase):
         body, profile, case, raw, result = export_fixture()
         proof = result['source_basis']
         self.assertEqual(proof, dict(kind='VERIFIED_UPLOADED_ORIGINAL',
-            verification='EXACT_SERVER_REVIEWED_INPUT', source_identity=profile['reviewed_input_sha256'],
+            verification='EXACT_SERVER_REVIEWED_INPUT', source_identity=profile['source_identity'],
             source_file_sha256=body['input']['metadata']['source_file_sha256'],
             segments=[dict(segment_id=r['segment_id'], person_id=r['person_id'], start=r['start'],
                 end=r['end'], code=r['source_code']) for r in body['input']['schedule_segments']]))
@@ -43,15 +47,15 @@ class SourceBasisTests(unittest.TestCase):
 
     def test_no_proof_from_profile_name_or_workbook_hash_alone(self):
         body, profile = reviewed_fixture()
-        profile.pop('reviewed_input_sha256')
+        profile.pop('source_identity'); profile.pop('source_file_sha256')
         profile['profile_id'] = 'flora-original-upload-morning-plan-historical-pass-20261021'
         case = prepare(profile, normalize_request(body))
         self.assertNotIn('source_basis', flora_result(case)[1])
 
     def test_client_cannot_supply_server_review_pin_or_certificate(self):
         body, profile = reviewed_fixture()
-        profile.pop('reviewed_input_sha256')
-        body['input']['metadata']['reviewed_input_sha256'] = digest(body['input'])
+        profile.pop('source_identity'); profile.pop('source_file_sha256')
+        body['input']['metadata']['source_identity'] = digest(body['input'])
         body['input']['metadata']['source_basis'] = {'verification':'EXACT_SERVER_REVIEWED_INPUT'}
         self.assertNotIn('source_basis', flora_result(prepare(profile, normalize_request(body)))[1])
 
@@ -74,20 +78,20 @@ class SourceBasisTests(unittest.TestCase):
     def test_malformed_or_mismatched_server_pin_is_rejected(self):
         for value in ['', 'a'*63, 'x'*64, 123, 'b'*64]:
             body, profile = reviewed_fixture()
-            profile['reviewed_input_sha256'] = value
+            profile['source_identity'] = value
             with self.subTest(value=value),self.assertRaises(FloraImportError):prepare(profile, normalize_request(body))
 
     def test_missing_or_invalid_file_sha_never_gets_complete_proof(self):
         for value in [None, '', 'z'*64, 'a'*63]:
             body, profile = reviewed_fixture()
             body['input']['metadata']['source_file_sha256'] = value
-            profile['reviewed_input_sha256'] = digest(normalize_request(body)['input'])
+            profile['source_identity'] = source_identity(normalize_request(body)['input'])
             with self.subTest(value=value),self.assertRaises(FloraImportError):prepare(profile, normalize_request(body))
 
     def test_server_file_hash_must_match(self):
         for value in [None, 'b'*64]:
             body, profile = reviewed_fixture()
-            profile['source']['raw_workbook_sha256'] = value
+            profile['source_file_sha256'] = value
             with self.subTest(value=value),self.assertRaises(FloraImportError):prepare(profile, normalize_request(body))
 
     def test_source_is_not_replaced_by_optimized_or_excluded_rows(self):
@@ -138,3 +142,33 @@ class SourceBasisTests(unittest.TestCase):
                 rejected=client.post('/api/engine/jobs',json=body,headers=headers)
                 self.assertEqual(rejected.status_code,422)
                 self.assertEqual(rejected.json()['detail']['code'],'INPUT_REVIEW_REQUIRED')
+
+    def test_absent_legacy_metadata_hashes_as_null_without_mutation(self):
+        body, profile = reviewed_fixture(); raw=body['input']; before=deepcopy(raw)
+        explicit=deepcopy(raw);explicit['metadata'].update(source_layout=None,history_period_id=None)
+        self.assertEqual(source_identity(raw),source_identity(explicit))
+        case=prepare(profile,normalize_request(body))
+        self.assertNotIn('source_layout',case['import_provenance']['upload']['metadata'])
+        self.assertNotIn('history_period_id',case['import_provenance']['upload']['metadata'])
+        self.assertEqual(raw,before)
+
+    def test_routing_metadata_cannot_hide_behind_source_projection(self):
+        for key,value in [('business_id','foreign'),('data_use','operational')]:
+            body,profile=reviewed_fixture();body['input']['metadata'][key]=value
+            self.assertEqual(source_identity(body['input']),profile['source_identity'])
+            with self.subTest(key=key),self.assertRaises(FloraImportError):prepare(profile,normalize_request(body))
+
+    def test_all_stable_id_lists_reject_duplicate_missing_or_blank_ids(self):
+        body,profile=reviewed_fixture()
+        for table,key in [('staff','person_id'),('customers','customer_id'),('schedule_segments','segment_id'),('customer_needs','need_id')]:
+            for change in ['duplicate','missing','blank']:
+                raw=deepcopy(body['input'])
+                if change=='duplicate':raw[table].append(deepcopy(raw[table][0]))
+                elif change=='missing':raw[table][0].pop(key)
+                else:raw[table][0][key]=''
+                with self.subTest(table=table,change=change),self.assertRaises(ValueError):source_identity(raw)
+
+    def test_row_order_does_not_change_source_identity(self):
+        body,profile=reviewed_fixture();raw=body['input']
+        for key in ['staff','customers','schedule_segments','customer_needs']:raw[key].reverse()
+        self.assertEqual(source_identity(raw),profile['source_identity'])

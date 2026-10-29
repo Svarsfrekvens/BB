@@ -22,7 +22,10 @@ def main():
             stack.enter_context(patch(target,side_effect=blocked(target)))
         for method in ['solve','Solve','SolveWithSolutionCallback','SearchForAllSolutions']:
             if hasattr(cp_model.CpSolver,method):stack.enter_context(patch.object(cp_model.CpSolver,method,side_effect=blocked('CpSolver.'+method)))
-        suite=unittest.defaultTestLoader.loadTestsFromNames(['test_source_basis','test_typed_windows_contract','test_flora_import.ImportTest'])
+        suite=unittest.defaultTestLoader.loadTestsFromNames(['test_source_basis','test_source_profile_binding','test_profile_encoding','test_typed_windows_contract','test_flora_import.ImportTest',
+            'test_availability_engine.AvailabilityMethodTests.test_source_changes_require_explicit_review_even_with_same_file_hash',
+            'test_availability_engine.AvailabilityMethodTests.test_a_new_source_hash_cannot_rebind_stale_effective_need_times',
+            'test_availability_engine.AvailabilityMethodTests.test_routing_metadata_and_row_order_do_not_change_source_identity'])
         result=unittest.TextTestRunner(verbosity=2).run(suite)
         report=dict(tests_run=result.testsRun,failures=len(result.failures),errors=len(result.errors),success=result.wasSuccessful(),
             api_regression=probes(),forbidden_calls=counts)

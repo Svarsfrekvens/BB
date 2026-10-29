@@ -97,6 +97,40 @@ def profile_for(owner, request):
                                                  for k in ('source', 'reviewed_at')):
         raise BusinessProfileError('PROFILE_REVIEW_REQUIRED',
             'Beslutsprofilen saknar dokumenterad källa och granskningsdatum.', 503)
+    profile = _source_bound_profile(profile, dataset_id)
     context = {'business_id': binding['business_id'], 'data_use': binding['data_use'],
                'profile_id': profile['profile_id'], 'automatic_learning': False}
     return profile, sha256(canonical(profile).encode()).hexdigest(), scope_for(owner, binding), context
+
+
+def _source_bound_profile(profile, dataset_id):
+    """Versioned server-only two-field overlay; never write the mounted profile.
+
+    Guard the entire existing decision profile, including whole-duty groups.
+    The returned profile (and its new hash) is what the existing worker receives.
+    """
+    try:
+        binding = json.loads(Path(__file__).with_name('flora_source_binding.json').read_text())
+        fields = {'schema_version', 'profile_id', 'business_id', 'data_use', 'dataset_id',
+                  'base_profile_sha256', 'source_identity', 'source_file_sha256'}
+        if (not isinstance(binding, dict) or set(binding) != fields
+                or binding.get('schema_version') != 'bb-source-profile-binding/1.0'):
+            raise ValueError('schema')
+        if profile.get('profile_id') != binding['profile_id']:
+            return profile
+        if any(profile.get(k) != binding[k] for k in ('business_id', 'data_use')):
+            raise ValueError('owner')
+        additions = {k: binding[k] for k in ('source_identity', 'source_file_sha256')}
+        if any(not isinstance(v, str) or not re.fullmatch(r'[a-f0-9]{64}', v) for v in additions.values()):
+            raise ValueError('hash')
+        if any(k in profile and profile[k] != v for k, v in additions.items()):
+            raise ValueError('existing binding')
+        unchanged = {k: v for k, v in profile.items() if k not in additions}
+        if digest(unchanged) != binding['base_profile_sha256']:
+            raise ValueError('decision profile changed')
+    except (OSError, ValueError, TypeError, KeyError) as exc:
+        raise BusinessProfileError('PROFILE_BINDING_MISMATCH',
+            'Serverns källbindning matchar inte den granskade beslutsprofilen.', 503) from exc
+    if dataset_id != binding['dataset_id']:
+        raise BusinessProfileError('DATASET_MISMATCH', 'Underlaget matchar inte profilens granskade dataset.')
+    return {**profile, **additions}

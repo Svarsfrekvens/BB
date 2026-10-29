@@ -40,7 +40,7 @@ def source_identity(raw):
         if not isinstance(rows, list):
             raise ValueError('Underlaget saknar listan ' + name + '.')
         if key:
-            if any(not isinstance(r, dict) or not isinstance(r.get(key), str) for r in rows):
+            if any(not isinstance(r, dict) or not isinstance(r.get(key), str) or not r[key].strip() for r in rows):
                 raise ValueError(name + ': stabila käll-ID krävs.')
             if len({r[key] for r in rows}) != len(rows):
                 raise ValueError(name + ': dubblerade käll-ID.')

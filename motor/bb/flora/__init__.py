@@ -261,7 +261,7 @@ def _normalize(case, raw, validation):
     source_basis = meta.get('source_basis')
     if source_basis is not None:
         from ..flora_import import _digest
-        if _digest(case['import_provenance']['upload']) != source_basis['source_identity']:
+        if _digest(case['import_provenance']['upload']) != meta['input_sha256']:
             raise ValueError('Källunderlaget har ändrats efter serverns indatakontroll.')
         result['source_basis'] = deepcopy(source_basis)
     return result

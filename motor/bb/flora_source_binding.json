@@ -1,0 +1,10 @@
+{
+  "schema_version": "bb-source-profile-binding/1.0",
+  "profile_id": "flora-original-upload-morning-plan-historical-pass-20261021",
+  "business_id": "9b4cd08f-82fc-4e40-856a-04ce6dc4ec41",
+  "data_use": "development",
+  "dataset_id": "FLORA-RADATA",
+  "base_profile_sha256": "49b7fe16d33fa6daffd5e425d37af2ee47350dcd56b433fb2b41a0f6508605ac",
+  "source_identity": "0c8fb9635f4a8562fb1b592702c30eb9c955e48937e5ba2f39ac81a6a05390c4",
+  "source_file_sha256": "5bd741c2a7f6e9058b32e3d6858b0f8951c1d1816eccd85c3cee1a1f5fd1ca38"
+}

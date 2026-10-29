@@ -47,6 +47,6 @@ check('missing original row rejected',()=>{const bad=structuredClone(result);bad
 check('duplicate original row rejected',()=>{const bad=structuredClone(result);bad.source_basis.segments.push(bad.source_basis.segments.find((r:any)=>r.segment_id==='active-row'));assert.equal(engineOriginalChanges(bad,source.dataset.segments),null);});
 assert.equal(JSON.stringify(result),frozen);
 assert.equal(forbiddenCalls,0);
-console.log(JSON.stringify({frontend_commit:'69cfd6a476742713488a45e46bb33486ec7a3cd9',
+console.log(JSON.stringify({frontend_commit:'ce9668eab9a2e048dd5a7c142fbd28e42ed6d701',
  raw_motor_json_sha256:crypto.createHash('sha256').update(bytes).digest('hex'),
  unchanged_result:true,field_translation:false,forbidden_calls:forbiddenCalls,results},null,2));

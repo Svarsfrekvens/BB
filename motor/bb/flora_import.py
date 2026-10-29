@@ -238,19 +238,23 @@ def _verified_source_basis(raw: dict, profile: dict) -> dict | None:
 
     Legacy semantic profiles may accept changed source times/durations. Their
     name and workbook checksum alone cannot establish this stronger claim.
-    The pin is SHA-256 of the complete canonical input without source_archive,
-    including routing metadata, as used by integration.input_sha256.
+    The pin uses the shared source_identity projection, including explicit null
+    for absent legacy metadata. Routing is checked separately against the server
+    profile. integration.input_sha256 still binds the complete received snapshot.
     """
-    expected = profile.get("reviewed_input_sha256")
-    if expected is None:
+    expected = profile.get("source_identity")
+    expected_file = profile.get("source_file_sha256")
+    if expected is None and expected_file is None:
         return None
+    from .availability_import import source_identity
     from re import fullmatch
     valid_hash = lambda value: isinstance(value, str) and fullmatch(r"[a-f0-9]{64}", value) is not None
-    if not valid_hash(expected) or _digest(raw) != expected:
+    if not valid_hash(expected) or source_identity(raw) != expected:
         _fail("Underlaget matchar inte serverprofilens exakt granskade indataversion.")
-    file_hash = (raw.get("metadata") or {}).get("source_file_sha256")
-    source = profile.get("source") or {}
-    expected_file = source.get("raw_workbook_sha256") if isinstance(source, dict) else None
+    metadata = raw.get("metadata") or {}
+    if any(metadata.get(k) != profile.get(k) or not profile.get(k) for k in ('business_id','data_use')):
+        _fail("Underlagets verksamhet eller användning matchar inte serverprofilens källbevis.")
+    file_hash = metadata.get("source_file_sha256")
     if not valid_hash(file_hash) or not valid_hash(expected_file) or file_hash != expected_file:
         _fail("Originalfilens SHA-256 saknas eller matchar inte serverprofilens källbevis.")
     return dict(kind="VERIFIED_UPLOADED_ORIGINAL", verification="EXACT_SERVER_REVIEWED_INPUT",
