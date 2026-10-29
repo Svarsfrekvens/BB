@@ -1,0 +1,155 @@
+{
+  "schema_version": "bb-analysis-input-profile/1.0",
+  "profile_id": "bb-synthetic-typed-windows-20261029-v1",
+  "business_id": "9b4cd08f-82fc-4e40-856a-04ce6dc4ec41",
+  "data_use": "development",
+  "period_id": "next",
+  "history_period_id": "history",
+  "applicable_periods": [
+    {
+      "id": "history",
+      "start": "2027-01-01",
+      "end": "2027-01-28"
+    },
+    {
+      "id": "next",
+      "start": "2027-01-29",
+      "end": "2027-02-25"
+    }
+  ],
+  "absence_mode": "omit_p2",
+  "allowed_absence_modes": [
+    "omit_p2",
+    "preserve"
+  ],
+  "config": {
+    "shift_step": 5,
+    "break_length": 30,
+    "break_threshold": 300,
+    "min_work_before_break": 1,
+    "min_work_after_break": 1,
+    "max_continuous_active": 300,
+    "min_daily_rest": 660,
+    "min_weekly_rest": 2160,
+    "min_free_days": 9,
+    "oncall_cap_28d": 2880,
+    "max_staff_on_duty": 1,
+    "min_shift": 240,
+    "calendar_mode": "rolling",
+    "week_break": "MONDAY 00:00",
+    "duty_profile": {
+      "max_reassigned_minutes": 1440,
+      "long_jour_min_minutes": 1200,
+      "night_jour_min_minutes": 300,
+      "night_start_minute": 1320,
+      "night_end_minute": 480,
+      "compensation_trigger_minutes": 720,
+      "compensation_mode": "REFERENCE_UNCONFIRMED_REST_AT_LEAST_DUTY_SPAN"
+    }
+  },
+  "staff": {
+    "person-a": {
+      "ordinary": true,
+      "target_net": 240,
+      "expected": {
+        "employment_type": "Tillsvidare",
+        "ssg_pct": null,
+        "fulltime_hours_28d": null,
+        "day_allowed": true,
+        "evening_allowed": true,
+        "sleeping_oncall_allowed": true,
+        "awake_night_allowed": false,
+        "hard_individual_condition": null,
+        "soft_preference": null,
+        "individual_delegations": "ALLA_BEFINTLIGA_INSATSKRAV"
+      }
+    }
+  },
+  "segment_decisions": {
+    "history-row": {
+      "mode": "fixed",
+      "locked_reason": "HISTORY",
+      "reference_import": true,
+      "expected": {
+        "person_id": "person-a",
+        "source_code": "Ar",
+        "category": "AKTIVT_ARBETE"
+      }
+    },
+    "active-row": {
+      "mode": "mutable",
+      "locked_reason": "SOURCE_MUTABLE",
+      "reference_import": true,
+      "expected": {
+        "person_id": "person-a",
+        "source_code": "Ar",
+        "category": "AKTIVT_ARBETE"
+      }
+    },
+    "absence-row": {
+      "mode": "excluded",
+      "locked_reason": "P2_SE_TI_GROUND_SCENARIO",
+      "reference_import": true,
+      "expected": {
+        "person_id": "person-a",
+        "source_code": "Se",
+        "category": "FRANVARO"
+      }
+    }
+  },
+  "candidate_windows": [
+    {
+      "person_id": "person-a",
+      "date": "2027-01-29",
+      "earliest": 480,
+      "latest": 1020,
+      "min_length": 240,
+      "max_length": 600,
+      "source_segment_id": "active-row"
+    }
+  ],
+  "need_decisions": {
+    "synthetic-start-window": {
+      "engine_id": "engine-1",
+      "expected": {
+        "customer_id": "customer-a",
+        "activity": "Syntetiskt startfönster",
+        "profession_raw": "Omsorg",
+        "delegated_profession_raw": null,
+        "medication": false,
+        "hsl": false,
+        "source_two_person_flag": false
+      },
+      "description": "Syntetiskt startfönster",
+      "flex": false,
+      "exclusive": true,
+      "parallel_permission": "EXCLUSIVE_ONLY",
+      "previous_class": "ORIGINAL_WINDOW"
+    },
+    "synthetic-execution-window": {
+      "engine_id": "engine-2",
+      "expected": {
+        "customer_id": "customer-b",
+        "activity": "Syntetiskt utförandefönster",
+        "profession_raw": "Omsorg",
+        "delegated_profession_raw": null,
+        "medication": false,
+        "hsl": false,
+        "source_two_person_flag": false
+      },
+      "description": "Syntetiskt utförandefönster",
+      "flex": false,
+      "exclusive": true,
+      "parallel_permission": "EXCLUSIVE_ONLY",
+      "previous_class": "ORIGINAL_WINDOW"
+    }
+  },
+  "business_rules_expected": [],
+  "reference_breaks": [],
+  "reassignable_units": [],
+  "issues": [],
+  "review_provenance": {
+    "source": "Godkänt isolerat syntetiskt kontraktsprov 2026-10-29",
+    "reviewed_at": "2026-10-29"
+  }
+}
