@@ -58,7 +58,7 @@ def check_case(case):
             raise ValueError('Verifierad gemensam insatsbehörighet och dag/kvällsbehörighet krävs; okänt får inte bli JA.')
         if type(p.get('ordinary')) is not bool or (p['ordinary'] and (type(p.get('target_net')) is not int or p['target_net'] < 0)):
             raise ValueError('Verifierad personaltyp och individuellt ordinarie nettomål krävs.')
-    need_windows.complete(case['source_needs'])
+    need_windows.check_joint(case)
     for n in case['needs']:
         if type(n.get('exclusive')) is not bool or not n.get('parallel_permission'):
             raise ValueError('Behovets samplaneringsbeslut och exklusivitet måste vara uttryckliga.')
@@ -142,6 +142,7 @@ def validate_case(case, result):
 
 
 def _normalize(case, raw, validation):
+    need_windows.check_joint(case, raw)
     meta=case.get('integration',{}); people={p['id']:p for p in case['staff']}; needs={n['id']:n for n in case['needs']}
     def mapped(kind,value):return meta.get(kind+'_id_map',{}).get(value,value)
     def stamp(t):
@@ -257,7 +258,8 @@ def _normalize(case, raw, validation):
             'time_accounting':{'before_break_reference':{'kind':'MATHEMATICAL_MINIMUM_REPEATED_BREAK_REFERENCE','recorded_paid_time':False, 'source':case.get('scenario_override',{}).get('ordinary_reference'),'rule_profile':{k:case['config'][k] for k in ['break_length','break_threshold','max_continuous_active']},'minutes_by_person':{mapped('person',pid):p['break_minutes'] for pid,p in before_people.items()},'exported_original_break_minutes':sum(clip(b['start'],b['end']) for b in case['references']['import'].get('breaks',[]))},'after_breaks':'EXPLICIT_SOLVER_PROPOSED_INTERVALS','ordinary_net':'PRESERVED_SOURCE_REFERENCE_NOT_CONTRACTUAL_SSG'},
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
-    result.update(need_windows.export(case['source_needs'], lambda n: mapped('need', n['id']), stamp))
+    result.update(need_windows.export(case['source_needs'], lambda n: mapped('need', n['id']), stamp, required=True))
+    need_windows.check_exported_placements(result['need_window_contract'], interventions)
     source_basis = meta.get('source_basis')
     if source_basis is not None:
         from ..flora_import import _digest

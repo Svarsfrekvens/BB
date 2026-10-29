@@ -11,11 +11,13 @@ def resolve(source, reviewed):
     return source if source is not None else reviewed
 
 
-def complete(needs):
+def complete(needs, *, required=False):
     """Frontend v1 requires all period needs when a contract is present."""
     values = [resolve(n.get('window_semantics'), None) for n in needs]
     if any(v is not None for v in values) and any(v is None for v in values):
         raise ValueError('Blandade typade och okända behovsfönster saknar ett komplett tidsfönsterkontrakt.')
+    if required and any(v is None for v in values):
+        raise ValueError('NEED_WINDOW_CONTRACT_REQUIRED: uttrycklig fönstertyp saknas i källan och den granskade profilen.')
     return bool(values) and all(v is not None for v in values)
 
 
@@ -39,11 +41,72 @@ def row(need, identity, stamp):
                 duration_minutes=need['duration'], personnel_count=need['count'])
 
 
-def export(needs, identity, stamp):
-    if not complete(needs):
+def export(needs, identity, stamp, *, required=False):
+    if not complete(needs, required=required) and not required:
         return {}
+    ids = [identity(n) for n in needs]
+    if any(not isinstance(i, str) or not i.strip() for i in ids) or len(set(ids)) != len(ids):
+        raise ValueError('NEED_WINDOW_CONTRACT_INVALID: saknade eller dubbla behovs-ID.')
     return {'need_window_contract': {'version': 'bb-need-window/1.0',
-            'needs': [row(n, identity(n), stamp) for n in needs]}}
+            'needs': [row(n, i, stamp) for n, i in zip(needs, ids)]}}
+
+
+def check_joint(case, raw=None):
+    """Fail before queueing and again at export; never type legacy evidence by guess.
+
+    The importer already checks source/profile coverage. Repeat against its frozen
+    input here so a truncated or changed internal case cannot certify a subset.
+    """
+    source, modeled = case['source_needs'], case['needs']
+    complete(source, required=True)
+    def indexed(rows):
+        ids = [n['id'] for n in rows]
+        if any(not isinstance(i, str) or not i.strip() for i in ids) or len(set(ids)) != len(ids):
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: saknade eller dubbla behovs-ID.')
+        return dict(zip(ids, rows))
+    sources, models = indexed(source), indexed(modeled)
+    if sources.keys() != models.keys():
+        raise ValueError('NEED_WINDOW_CONTRACT_INVALID: modellerade behov skiljer sig från källbehoven.')
+    meta = case.get('integration', {})
+    mapping = meta.get('need_id_map', {})
+    exported_ids = [mapping.get(i, i) for i in sources]
+    upload = case.get('import_provenance', {}).get('upload')
+    if upload is not None:
+        expected = [n['need_id'] for n in upload['customer_needs']
+                    if case['origin'][:10] <= n['date'][:10] < case['end'][:10]]
+        if len(set(expected)) != len(expected) or len(exported_ids) != len(expected) or set(exported_ids) != set(expected):
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: kontraktet täcker inte exakt planeringsperiodens behov.')
+    if len(set(exported_ids)) != len(exported_ids):
+        raise ValueError('NEED_WINDOW_CONTRACT_INVALID: dubblerad källkoppling.')
+    fields = ('window_semantics', 'source_window_start', 'source_window_end', 'duration', 'count', 'domains')
+    for i, n in sources.items():
+        if any(n.get(k) != models[i].get(k) for k in fields):
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: kontraktet motsäger det modellerade behovet.')
+        if type(n.get('count')) is not int or n['count'] < 1:
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: ogiltigt personalantal.')
+        first, last = bounds(n['window_semantics'], n.get('source_window_start'), n.get('source_window_end'), n['duration'], 0, case['horizon'])
+        if not n.get('domains') or any(a < first or b > last or a > b for a, b in n['domains']):
+            raise ValueError('Startdomänen motsäger det typade källfönstret: '+i)
+    if raw is not None:
+        placed = indexed(raw.get('placements', []))
+        for i, p in placed.items():
+            n = sources.get(i)
+            if n is None or type(p.get('start')) is not int or not any(a <= p['start'] <= b for a, b in n['domains']):
+                raise ValueError('NEED_WINDOW_CONTRACT_INVALID: placering utanför verifierat startintervall.')
+
+
+def check_exported_placements(contract, placements):
+    """Check the actual JSON-facing evidence, including independently assigned rows."""
+    from datetime import datetime
+    windows = {n['need_id']: n for n in contract['needs']}
+    for p in placements:
+        n = windows.get(p['need_id'])
+        if n is None or any(p.get(k) != v for k, v in n.items()):
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: exporterad placering motsäger kontraktet.')
+        a, b = datetime.fromisoformat(p['start']), datetime.fromisoformat(p['end'])
+        left, right = datetime.fromisoformat(n['source_window_start']), datetime.fromisoformat(n['source_window_end'])
+        if b <= a or a < left or (a > right if n['window_semantics'] == 'START_WINDOW' else b > right):
+            raise ValueError('NEED_WINDOW_CONTRACT_INVALID: exporterad placering ligger utanför källfönstret.')
 
 
 def placement(need, stamp):

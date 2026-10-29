@@ -88,9 +88,11 @@ class TypedWindowTests(unittest.TestCase):
             with self.subTest(start=start):
                 # Corrupt numerical domains deliberately; validator still checks source bounds.
                 c['needs'][0]['domains']=[[539,561]]
-                _,out=flora_result(c,start)
-                errors=[r for r in out['validation']['violations'] if r['rule']=='need_window']
+                raw=dict(segments=deepcopy(c['references']['import']['segments']), breaks=[], placements=[dict(id=c['needs'][0]['id'],start=start)])
+                validation=validate_case(c,raw)
+                errors=[r for r in validation['violations'] if r['rule']=='need_window']
                 self.assertEqual(not errors,valid)
+                with self.assertRaises(ValueError):_normalize(c,raw,validation)
 
     def test_execution_rejects_long_duration_and_end_overrun(self):
         b,p=flora_fixture('EXECUTION_WINDOW')
@@ -98,8 +100,11 @@ class TypedWindowTests(unittest.TestCase):
         b,p=flora_fixture('EXECUTION_WINDOW',10);c=prepare(p,normalize_request(b))
         self.assertEqual(c['needs'][0]['domains'],[[540,550]])
         for start,valid in [(550,True),(551,False)]:
-            _,out=flora_result(c,start)
-            self.assertEqual(not any(r['rule']=='need_window' for r in out['validation']['violations']),valid)
+            if valid:
+                _,out=flora_result(c,start)
+                self.assertFalse(any(r['rule']=='need_window' for r in out['validation']['violations']))
+            else:
+                with self.assertRaises(ValueError):flora_result(c,start)
 
     def test_type_conflict_unknown_and_zero_width_rejected(self):
         for value in ('EXECUTION_WINDOW','invalid'):
@@ -117,11 +122,12 @@ class TypedWindowTests(unittest.TestCase):
         b['input']['customer_needs'].append(n);p['need_decisions']['legacy-need']=deepcopy(p['need_decisions']['source-need']);p['need_decisions']['legacy-need']['engine_id']='legacy-engine'
         with self.assertRaisesRegex(ValueError,'Blandade'):prepare(p,normalize_request(b))
 
-    def test_legacy_import_export_stays_untyped(self):
-        b,p=flora_fixture(None,10);c=prepare(p,normalize_request(b));_,out=flora_result(c,540)
+    def test_joint_legacy_import_remains_untyped_but_job_and_export_are_blocked(self):
+        b,p=flora_fixture(None,10);c=import_flora(b['input'],p)
         self.assertEqual(c['needs'][0]['domains'],[[540,550]])
-        self.assertNotIn('need_window_contract',out)
-        self.assertNotIn('window_semantics',out['schedule']['interventions'][0])
+        self.assertNotIn('window_semantics',c['needs'][0])
+        with self.assertRaisesRegex(ValueError,'NEED_WINDOW_CONTRACT_REQUIRED'):prepare(p,normalize_request(b))
+        with self.assertRaisesRegex(ValueError,'NEED_WINDOW_CONTRACT_REQUIRED'):_normalize(c,{}, {})
 
     def test_flex_is_restricted_by_typed_source_not_exported_as_hidden_exception(self):
         b,p=flora_fixture();p['need_decisions']['source-need'].update(flex=True,flex_start_minute=480,flex_end_minute=1000)
@@ -146,7 +152,7 @@ class TypedWindowTests(unittest.TestCase):
 
     def test_case_rejects_mutated_start_domain_before_model(self):
         b,p=flora_fixture();c=prepare(p,normalize_request(b));c['needs'][0]['domains']=[[540,561]]
-        with self.assertRaisesRegex(ValueError,'Startdomänen'):check_case(c)
+        with self.assertRaisesRegex(ValueError,'kontraktet motsäger'):check_case(c)
 
     def test_availability_import_model_proto_and_export_no_solve(self):
         b,p=availability_fixture();c=prepare(p,normalize_request(b))
