@@ -52,7 +52,8 @@ def bind_profile(profile, dataset_id):
                 raise ValueError('En annan fönsterbindning finns redan.')
             d.update(window_semantics='EXECUTION_WINDOW', flex=False)
         out['window_binding'] = evidence
-        return out
+        from .flora_timing_decisions import bind
+        return bind(out)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         raise BusinessProfileError('WINDOW_BINDING_MISMATCH',
             'Serverns fönsterbevis matchar inte den granskade profilen.', 503) from exc
@@ -67,7 +68,8 @@ def verify_input(raw, profile):
     if 'window_binding' not in profile:
         return
     evidence = _checked(profile['window_binding'])
-    original = deepcopy(profile)
+    from .flora_timing_decisions import strip_verified
+    original = strip_verified(profile)
     original.pop('window_binding')
     flex_ids = set(evidence['inactive_flex_need_ids'])
     for nid, d in original['need_decisions'].items():

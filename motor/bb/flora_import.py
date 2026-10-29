@@ -545,6 +545,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                       review_reason=decision.get("review_reason"))
         if semantics is not None:
             source.update(window_semantics=semantics, source_window_start=a, source_window_end=b)
+        if 'timing_binding' in profile:
+            source['timing_authorization'] = deepcopy(decision['timing_authorization'])
         source_needs.append(deepcopy(source))
         source.update(members=[engine_id],weight=1,exclusive=decision["exclusive"],
                       parallel_permission=decision["parallel_permission"])
@@ -614,6 +616,12 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
         integration['original_window_binding'] = {
             'binding_id': profile['window_binding']['binding_id'],
             'locked_by_default': True,
+        }
+    if 'timing_binding' in profile:
+        from .flora_timing_decisions import DECISION_HASH
+        integration['timing_binding'] = {
+            'decision_id': profile['timing_binding']['decision_id'],
+            'decision_hash': DECISION_HASH,
         }
     need_windows.complete(source_needs)
     source_basis = _verified_source_basis(raw, profile)

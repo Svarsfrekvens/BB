@@ -51,6 +51,7 @@ def method_fingerprint() -> str:
              root / "profile_encoding.py", root / "concurrency_policy.py", root / "need_windows.py",
              root / "flora_source_binding.json",
              root / "flora_window_binding.py", root / "flora_window_binding.json",
+             root / "flora_timing_decisions.py", root / "flora_timing_decisions.json",
              *sorted((root / "flora").glob("*.py")), *sorted((root / "availability").glob("*.py"))]
     content = hashlib.sha256(METHOD_VERSION.encode())
     for path in files:

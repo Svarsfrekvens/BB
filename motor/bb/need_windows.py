@@ -78,7 +78,13 @@ def check_joint(case, raw=None):
             raise ValueError('NEED_WINDOW_CONTRACT_INVALID: kontraktet täcker inte exakt planeringsperiodens behov.')
     if len(set(exported_ids)) != len(exported_ids):
         raise ValueError('NEED_WINDOW_CONTRACT_INVALID: dubblerad källkoppling.')
-    fields = ('window_semantics', 'source_window_start', 'source_window_end', 'duration', 'count', 'domains')
+    fields = ('window_semantics', 'source_window_start', 'source_window_end', 'duration', 'count', 'domains', 'timing_authorization')
+    from .flora_timing_decisions import case_rules
+    timing_rules = case_rules(case)
+    if not timing_rules and any('timing_authorization' in n for n in source):
+        raise ValueError('TIMING_DECISION_BINDING_MISMATCH: serverbevis saknas för tidsbehörigheten.')
+    if timing_rules and set(exported_ids) != set(timing_rules):
+        raise ValueError('TIMING_DECISION_BINDING_MISMATCH: modellens behovsmängd har ändrats.')
     unresolved_locks = []
     for i, n in sources.items():
         if any(n.get(k) != models[i].get(k) for k in fields):
@@ -86,7 +92,11 @@ def check_joint(case, raw=None):
         if type(n.get('count')) is not int or n['count'] < 1:
             raise ValueError('NEED_WINDOW_CONTRACT_INVALID: ogiltigt personalantal.')
         first, last = bounds(n['window_semantics'], n.get('source_window_start'), n.get('source_window_end'), n['duration'], 0, case['horizon'])
-        if meta.get('original_window_binding', {}).get('locked_by_default') and first != last:
+        timing = timing_rules.get(mapping.get(i, i))
+        if timing is not None and n.get('timing_authorization') != timing:
+            raise ValueError('TIMING_DECISION_BINDING_MISMATCH: modellerad tidsbehörighet har ändrats.')
+        if meta.get('original_window_binding', {}).get('locked_by_default') and first != last and (
+                timing is None or timing['policy'] != 'MOVABLE_WITHIN_SOURCE_WINDOW'):
             # Neither an analysis classification nor interval boundaries prove
             # an approved start or permission to move within that interval.
             unresolved_locks.append(i)

@@ -84,7 +84,9 @@ def main():
             source_basis_sha256=jobs.digest(T.result['source_basis']),source_basis_unchanged=True,source_segments=292,
             inactive_extensions=286,inactive_k3_exceptions=8,synthetic_raw_result_sha256=synthetic_sha,
             evidence_hash=binding.EVIDENCE_HASH,forbidden_calls=calls,real_jobs_created=0,
-            unresolved_locked_starts=1275,unique_starts_from_constraints=176,installation_ready=False,
+            unresolved_locked_starts=sum(d.get('timing_authorization',{}).get('policy')=='REVIEW_REQUIRED' for d in T.bound['need_decisions'].values()),
+            movable_by_common_decision=sum(d.get('timing_authorization',{}).get('policy')=='MOVABLE_WITHIN_SOURCE_WINDOW' for d in T.bound['need_decisions'].values()),
+            unique_starts_from_constraints=176,installation_ready=False,
             actual_contract_is_source_projection_only=True,
             no_feasibility_claim=True)
         assert not any(calls.values())
