@@ -137,3 +137,20 @@ Tidigare kvällsberedning behöver ingen ny principiell tillåtelse. Rekommendat
 6. Stopp/rollback: avbryt före jobbskapande vid fel SHA, profil, ofullständig tidsbindning eller ändrat källbevis. Vid installationsfel återställ den då verifierade föregående motorversionen och dess profilkonfiguration enligt ett separat installationsmandat. Radera inga jobb, resultat, registreringar eller källfiler. En kodrollback är inte en databasåterställning.
 
 **Slutsats:** körbar ändring och frontendkoppling är redan riktat kontrollerade. Nya källkontroller och gruppunderlag är färdiga. Fullständigt Flora-prov behöver fortfarande de fyra specificerade tidsunderlagen ovan; ytterligare kod kan inte legitimt uppfinna dem. Ingen verifierad optimering eller förbättring har producerats i denna fortsättning.
+
+
+## Slutförd kontroll av originalplacering och samlad komplettering
+
+Fortsättningen utgår från rapportcommit `bd89329daccc97749d096562d93f5743d07b7d32`. Ingen ny sökning i de sex arbetsböckerna och ingen upprepning av motor-, parser- eller webbläsarprov gjordes.
+
+Det möjliga tekniska hindret kontrollerades direkt i befintlig exakt motorindata, profil och importkod: motorns `original` sätts till `a`, där `a` kommer från `window_start` (`motor/bb/flora_import.py`). Fältet är därför ett härlett intervallankare, inte en separat verifierad originalplacering. Samtliga 775 återstående rader har `fixed_or_flexible=null`; profilens `retain_original_start` är false för samtliga och dess `expected`-fält innehåller ingen separat låst start. Originalets 292 personalschemasegment saknar behovs-ID-koppling. Befintlig textgranskning visar aktivitets-/händelseankare men inte någon ytterligare styrkt egen insatsstart att binda. Historiska registreringar kan inte uppgraderas till sådan källa.
+
+**Resultat:** noll ytterligare verifierade originalplaceringar kunde kopplas in ur det befintliga granskade underlaget. 676 är fortsatt tidsmässigt färdiga och 775 saknar tidsunderlag. Detta är inte ett påstående att tider saknas i verksamhetens andra system. Ingen kodändring eller ny verksamhetsregel kan ersätta den saknade källan.
+
+Den nuvarande versionsbundna policyn innehåller inte heller en separat policy för verifierad låst start inuti ett bredare intervall. När en sådan originalkälla tillförs ska dess bindning implementeras och riktat testas före installation; ingen förhandsaktivering eller gissad singleton-domän införs här.
+
+Den enda samlade beställningen finns i `docs/flora-timing-completion-request-20261029.md`. Lokal leverans: `/workspace/deliveries/BB_FLORA_TIMING_COMPLETION_REQUEST_20261029/`. Den innehåller fyra konkreta exempel med fönsterstart, fönsterslut, duration och förklaring samt en förifylld privat CSV med exakt 91 grupper och medlemsbilaga för 775 behov. Källreferenser och proveniens kopieras oförändrade. Svars-/tidsfält är tomma; samma befintliga tidsmall kan refereras av flera tillämpliga grupper.
+
+**Nya kontroller PASS:** statisk spårning av `original`-tilldelningen, fältinventering av kvarvarande input/profilbindning, CSV-återläsning med 91 unika grupper och exakt 775 unika medlemmar, oförvalda tider/beslut och oförändrade hashreferenser till tidigare testbevis. Inga motorfunktioner importerades eller kördes. **Återanvänt:** 18 motorprov och två parserkontroller mot frontend 95b9c43 samt tidigare giltigt webbläsarprov. Körbar motorkod är fortfarande ef72ae85; source_basis och 292 segment ändras inte av denna dokumentationsleverans.
+
+Installationsplanen ovan kompletteras med beställningens godkännandekriterier: styrkt källa → exakt medlems-/datumbindning → laglig låst tid/behörig flytt inom originalfönstret → riktade regressions- och parserprov → ny fryst commit/profilhash → separat installations- och körmandat. Inget sådant mandat har utnyttjats här. Ingen optimering eller genomförbarhet har verifierats.
