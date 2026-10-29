@@ -98,6 +98,8 @@ def profile_for(owner, request):
         raise BusinessProfileError('PROFILE_REVIEW_REQUIRED',
             'Beslutsprofilen saknar dokumenterad källa och granskningsdatum.', 503)
     profile = _source_bound_profile(profile, dataset_id)
+    from .flora_window_binding import bind_profile
+    profile = bind_profile(profile, dataset_id)
     context = {'business_id': binding['business_id'], 'data_use': binding['data_use'],
                'profile_id': profile['profile_id'], 'automatic_learning': False}
     return profile, sha256(canonical(profile).encode()).hexdigest(), scope_for(owner, binding), context

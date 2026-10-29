@@ -278,6 +278,8 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
     if any(k in profile for k in ("solution", "search_hint", "warm_start", "assignments", "placements")):
         _fail("En indataprofil får inte innehålla sparade solverresultat eller startlösningar.")
     raw = deepcopy({k: v for k, v in raw_input.items() if k != "source_archive"})
+    from .flora_window_binding import verify_input
+    verify_input(raw, profile)
     md = raw.get("metadata") or {}
     if md.get("schema_version") not in ("flora-bb-input/1.0", "bb-input/1.0"):
         _fail("Underlaget måste vara bb-input/1.0 eller flora-bb-input/1.0 från appens import.")
@@ -607,6 +609,12 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        planned_oncall_replacements=planned_oncall,
                        planned_active_replacements=planned_active,
                        scenario=deepcopy(scenario))
+    if 'window_binding' in profile:
+        # A window-type decision is not permission to reschedule an intervention.
+        integration['original_window_binding'] = {
+            'binding_id': profile['window_binding']['binding_id'],
+            'locked_by_default': True,
+        }
     need_windows.complete(source_needs)
     source_basis = _verified_source_basis(raw, profile)
     if source_basis is not None:
