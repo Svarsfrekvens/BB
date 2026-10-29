@@ -15,6 +15,8 @@ from .flora_jobs import JobInputError, canonical, digest
 
 REGISTRY_SCHEMA = 'bb-business-profiles/1.0'
 INPUT_SCHEMAS = ('bb-input/1.0', 'flora-bb-input/1.0')
+SYNTHETIC_DATASET_ID = 'BB-SYNTHETIC-TYPED-WINDOWS-20261029'
+SYNTHETIC_PROFILE = Path(__file__).resolve().parents[1] / 'synthetic' / 'typed-windows-profile.json'
 
 
 class BusinessProfileError(JobInputError):
@@ -85,6 +87,13 @@ def profile_for(owner, request):
     # prepare_case still checks the complete reviewed mapping before queuing.
     dataset_id = md.get('dataset_id')
     variant = binding['dataset_profiles'].get(dataset_id) if isinstance(dataset_id, str) else None
+    # One explicitly approved, fictional dataset can be enabled temporarily for
+    # a single contract job. It never replaces the workspace's default profile,
+    # does not alter the private registry, and remains unavailable when the flag
+    # is absent or after it is disabled.
+    if (os.environ.get('BB_SYNTHETIC_PROFILE_ENABLED') == '1'
+            and dataset_id == SYNTHETIC_DATASET_ID):
+        variant = str(SYNTHETIC_PROFILE)
     profile = _read(variant or binding['profile_path'], 'Verksamhetens beslutsprofil')
     if (profile.get('schema_version') != 'bb-analysis-input-profile/1.0'
             or not isinstance(profile.get('profile_id'), str) or not profile['profile_id']
