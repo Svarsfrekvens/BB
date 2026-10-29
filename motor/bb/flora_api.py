@@ -10,6 +10,7 @@ import os
 import re
 
 from fastapi import APIRouter, HTTPException, Request
+from .planning_activities import ActivityReviewRequired
 
 MAX_BODY = 6 * 1024 * 1024
 
@@ -78,10 +79,16 @@ async def create_flora_job(request: Request):
         if client_key and not re.fullmatch(r'[A-Za-z0-9_.:@-]{1,160}', client_key):
             raise JobInputError('Ogiltig körningsnyckel.')
         profile, profile_hash = load_profile()
+        # Activity review must finish before constructing a legacy job manager.
+        if "activities" in body.get("scenario", {}).get("workspace", {}):
+            from .engine_methods import prepare
+            prepare(profile, body)
         manager = get_manager()
         job, created = manager.store.submit(owner, body, profile, profile_hash, client_key)
         manager.wake()
         return {**job, 'deduplicated': not created}
+    except ActivityReviewRequired as exc:
+        raise HTTPException(422, exc.detail()) from exc
     except IdempotencyConflict as exc:
         raise HTTPException(409, str(exc)) from exc
     except JobInputError as exc:

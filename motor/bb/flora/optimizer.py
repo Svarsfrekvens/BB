@@ -86,6 +86,9 @@ def build(case, objective_mode="coverage_then_temporary"):
     model.AddCumulative(gross_intervals,[1]*len(gross_intervals),cfg['max_staff_on_duty'])
     model._fixed_breaks=breakvars
     add_person_constraints(case,model,variables)
+    from ..planning_activities import add_to_model
+    activity_intervals = add_to_model(case, model, breakvars)
+    absence.extend(activity_intervals); absence_d.extend([1]*len(activity_intervals))
     background=[K-fixed_supply[t]-possible[t] for t in range(H)]
     assert min(background)>=0
     for a,b,value in runs(background):
@@ -206,7 +209,13 @@ def solve(case, output=None, seconds=60, workers=1, seed=41, det=30, objective_m
                 fragments=[dict(start=last.Value(st),duration=dur) for st,dur in t['parts']],
                 shared_host=next((host for h,host in t['hosts'] if last.Value(h)),None)))
         result.update(segments=segments,breaks=breaks,placements=placements)
-        sig=json.dumps([segments,breaks,result['placements']],sort_keys=True).encode();result['signature']=hashlib.sha256(sig).hexdigest()
+        if case.get("planning_activities"):
+            from ..planning_activities import model_result
+            result["planning_activities"] = model_result(model, last)
+        signature_rows = [segments, breaks, result['placements']]
+        if case.get("planning_activities"):
+            signature_rows.append(result["planning_activities"])
+        sig=json.dumps(signature_rows,sort_keys=True).encode();result['signature']=hashlib.sha256(sig).hexdigest()
     if output is not None:Path(output).write_text(json.dumps(result,ensure_ascii=False,indent=2))
     return result
 

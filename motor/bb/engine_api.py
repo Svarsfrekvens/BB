@@ -13,6 +13,7 @@ from .business_profiles import (BusinessProfileError, INPUT_SCHEMAS, binding_for
 from .flora_api import json_body
 from .flora_jobs import IdempotencyConflict, JobInputError, get_manager, normalize_request
 from .rule_policy import shared_principles
+from .planning_activities import ActivityReviewRequired
 
 router = APIRouter()
 
@@ -75,6 +76,8 @@ async def create_job(request: Request):
         job, created = manager.store.submit(scope, body, profile, profile_hash, client_key)
         manager.wake()
         return {**job, 'deduplicated': not created, 'engine_context': context}
+    except ActivityReviewRequired as exc:
+        raise HTTPException(422, exc.detail()) from exc
     except BusinessProfileError as exc:
         raise profile_error(exc) from exc
     except IdempotencyConflict as exc:

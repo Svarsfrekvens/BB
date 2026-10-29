@@ -261,4 +261,6 @@ def prepare_case(raw, profile, scenario=None):
         period={**period, 'timezone': zone}, profile_source=deepcopy(profile['review_provenance']),
         decisions=deepcopy(profile.get('decision_ledger', [])),
         exact_reviewed_input_only=True, old_solver_result_reused=False)
+    from .planning_activities import prepare as prepare_activities
+    prepare_activities(raw, profile, scenario, case, strategy="availability")
     return case

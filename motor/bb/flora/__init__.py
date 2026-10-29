@@ -108,6 +108,8 @@ def validate_case(case, result):
         'mathematical_assignments': ('Minutvis utförartäckning och handlingens exklusivitet kontrollerade.', {'executor_coverage','shopping_overlap','need_window','need_outside_period','duplicate_need_id','unknown_placed_need'}),
         'capacity_limit': ('Profilens samtidiga personalnärvaro kontrollerad.', {'max2_active_staff'}),
     }
+    if case.get('planning_activities') or raw.get('planning_activities'):
+        checks['planning_activities'] = ('Planeringsaktiviteter kontrollerade mot person, källpass, tid och kapacitet.', {'planning_activity'})
     rules = [{'rule_id':k,'status':'FAIL' if by_rule & names else 'PASS','message':message} for k,(message,names) in checks.items()]
     counts = {status:sum(row['status']==status for row in rest['windows']) for status in ('PASS','FAIL','UNKNOWN')}
     rest_message = (f"Fast dygnsvilokontroll: {counts['PASS']} dygn uppfyllda, {counts['FAIL']} avvikelser, "
@@ -258,6 +260,8 @@ def _normalize(case, raw, validation):
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
     result.update(need_windows.export(case['source_needs'], lambda n: mapped('need', n['id']), stamp))
+    from ..planning_activities import export as export_activities
+    result.update(export_activities(case, validation, stamp))
     return result
 
 

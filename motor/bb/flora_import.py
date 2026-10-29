@@ -127,10 +127,8 @@ def _workspace(scenario: dict, raw: dict, profile: dict) -> None:
                 person.get("admin_hours_per_week") not in (None, 0)):
             _fail(f"{pid}: nya tillgänglighets-/frånvaro-/stödtidsuppgifter behöver "
                   "tidsatt mappning före körning; de får inte ignoreras.")
-    for activity in workspace.get("activities") or []:
-        if activity.get("on") or activity.get("slots"):
-            _fail(f"Aktiviteten {activity.get('name', activity.get('id'))} är aktiverad. "
-                  "Den behöver importeras och kontrolleras före körning.")
+    from .planning_activities import activities
+    activities(scenario)  # Shape only; collect all activity issues after source-bound import.
     for customer, contact in (workspace.get("contacts") or {}).items():
         if contact.get("kp") or contact.get("vice") or contact.get("check") or contact.get("minutes") is not None:
             _fail(f"{customer}: nya kontaktpersonsbeslut behöver motorstöd före körning.")
@@ -577,7 +575,7 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        planned_active_replacements=planned_active,
                        scenario=deepcopy(scenario))
     need_windows.complete(source_needs)
-    return dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
+    case = dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
                 staff=staff,fixed_segments=sorted(fixed,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),
                 candidates=candidates,needs=needs,source_needs=source_needs,
                 references={"import":dict(segments=sorted(imported,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),breaks=breaks,placements=[])},
@@ -593,6 +591,10 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                 import_provenance=dict(upload=raw,excluded_segments=excluded,
                                        all_timed_history=[deepcopy(row) for row in segments_raw.values() if minute(row["start"])<0],
                                        unknown_values_preserved=True))
+
+    from .planning_activities import prepare as prepare_activities
+    prepare_activities(raw, profile, scenario, case)
+    return case
 
 
 build_case = prepare_case

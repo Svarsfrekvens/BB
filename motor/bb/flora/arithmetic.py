@@ -277,6 +277,15 @@ def check_arithmetic(case, solution):
         if maximum > case["config"]["oncall_cap_28d"]:
             errors.append({"rule": "rolling28day_Jo48h", "person": person, "actual": maximum})
     
+    # Activities consume capacity, but remain active work (never a break).
+    work_available = available
+    from ..planning_activities import validate as validate_activities
+    activity_errors, activity_rows = validate_activities(case, solution, work_available)
+    errors.extend(activity_errors)
+    exports["planning_activities"] = activity_rows
+    available = {pid: bytearray(mask) for pid,mask in work_available.items()}
+    for activity in activity_rows:
+        available[activity["person_id"]][activity["start"]:activity["end"]] = b"\0" * activity["minutes"]
     placed = {p["id"]: p for p in solution.get("placements", [])}
     if len(placed) != len(solution.get("placements", [])):
         errors.append({"rule": "duplicate_need_id"})
@@ -381,7 +390,7 @@ def check_arithmetic(case, solution):
     save("reference_profile_diagnostic.json", {"status": "REFERENCE_DEFAULT_DIAGNOSIS_NOT_APPLICABLE_RULE_CONFIRMATION", "default": "combined/extended rest >= whole duty span immediately after, for span >12h; domain.py428–450,537–550", "known_reference_default_rest_shortfalls": compensation, "known_reference_default_checked_gaps_including_P1_edge": checked_compensation, "unknown_boundary_compensation": comp_unknown, "inherited_over24h_occasions": long_25, "limitations": ["The reference profile's applicability and individual exception approval remain unconfirmed.", "This diagnosis does not turn a missing business check into approval or rejection under an assumed agreement."]})
     
     weekly_active_net = {
-        person: [sum(available[person][week*10080:(week+1)*10080]) for week in range(H//10080)]
+        person: [sum(work_available[person][week*10080:(week+1)*10080]) for week in range(H//10080)]
         for person in staff
     }
     independent_peak = max(max(values) for values in weekly_active_net.values())

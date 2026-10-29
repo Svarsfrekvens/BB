@@ -48,7 +48,7 @@ def method_fingerprint() -> str:
     files = [root / "flora_import.py", root / "business_profiles.py",
              root / "engine_api.py", root / "flora_api.py", root / "flora_jobs.py", root / "rule_policy.py",
              root / "engine_methods.py", root / "availability_import.py",
-             root / "profile_encoding.py", root / "concurrency_policy.py", root / "need_windows.py",
+             root / "profile_encoding.py", root / "concurrency_policy.py", root / "need_windows.py", root / "planning_activities.py",
              *sorted((root / "flora").glob("*.py")), *sorted((root / "availability").glob("*.py"))]
     content = hashlib.sha256(METHOD_VERSION.encode())
     for path in files:
