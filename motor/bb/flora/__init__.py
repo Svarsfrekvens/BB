@@ -258,6 +258,12 @@ def _normalize(case, raw, validation):
             'capacity_effect':{'ordinary_net_change_minutes':None if not after_people else sum(a['worked_net_minutes']-before_people[pid]['net_minutes'] for pid,a in after_people.items() if people[pid]['ordinary']),
                                'released_ordinary_customer_capacity_minutes':None,'explanation':'Bevarad ordinarie tid och betald vikarietid hålls isär; praktisk frigjord kundkapacitet är inte verifierad.'}}
     result.update(need_windows.export(case['source_needs'], lambda n: mapped('need', n['id']), stamp))
+    source_basis = meta.get('source_basis')
+    if source_basis is not None:
+        from ..flora_import import _digest
+        if _digest(case['import_provenance']['upload']) != source_basis['source_identity']:
+            raise ValueError('Källunderlaget har ändrats efter serverns indatakontroll.')
+        result['source_basis'] = deepcopy(source_basis)
     return result
 
 

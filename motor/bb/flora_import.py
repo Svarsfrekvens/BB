@@ -233,6 +233,33 @@ def _economic_parameters(scenario: dict, person_ids: set[str]) -> dict:
                 missing_person_ids=sorted(person_ids-set(parameters)))
 
 
+def _verified_source_basis(raw: dict, profile: dict) -> dict | None:
+    """Certify only an exact server-pinned upload, never a mutable workspace.
+
+    Legacy semantic profiles may accept changed source times/durations. Their
+    name and workbook checksum alone cannot establish this stronger claim.
+    The pin is SHA-256 of the complete canonical input without source_archive,
+    including routing metadata, as used by integration.input_sha256.
+    """
+    expected = profile.get("reviewed_input_sha256")
+    if expected is None:
+        return None
+    from re import fullmatch
+    valid_hash = lambda value: isinstance(value, str) and fullmatch(r"[a-f0-9]{64}", value) is not None
+    if not valid_hash(expected) or _digest(raw) != expected:
+        _fail("Underlaget matchar inte serverprofilens exakt granskade indataversion.")
+    file_hash = (raw.get("metadata") or {}).get("source_file_sha256")
+    source = profile.get("source") or {}
+    expected_file = source.get("raw_workbook_sha256") if isinstance(source, dict) else None
+    if not valid_hash(file_hash) or not valid_hash(expected_file) or file_hash != expected_file:
+        _fail("Originalfilens SHA-256 saknas eller matchar inte serverprofilens källbevis.")
+    return dict(kind="VERIFIED_UPLOADED_ORIGINAL", verification="EXACT_SERVER_REVIEWED_INPUT",
+                source_identity=expected, source_file_sha256=file_hash,
+                segments=[dict(segment_id=r["segment_id"], person_id=r.get("person_id"),
+                               start=r["start"], end=r["end"], code=r["source_code"])
+                          for r in raw["schedule_segments"]])
+
+
 def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -> dict:
     """Build a runnable case from *this upload*, with explicit decision provenance.
 
@@ -577,6 +604,9 @@ def prepare_case(raw_input: dict, profile: dict, scenario: dict | None = None) -
                        planned_active_replacements=planned_active,
                        scenario=deepcopy(scenario))
     need_windows.complete(source_needs)
+    source_basis = _verified_source_basis(raw, profile)
+    if source_basis is not None:
+        integration["source_basis"] = source_basis
     return dict(origin=origin.isoformat(timespec="minutes"),end=end.isoformat(timespec="minutes"),horizon=horizon,
                 staff=staff,fixed_segments=sorted(fixed,key=lambda row:(row["person"],row["start"],row["end"],row["id"])),
                 candidates=candidates,needs=needs,source_needs=source_needs,
