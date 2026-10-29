@@ -1,6 +1,6 @@
 {
   "schema_version": "bb-analysis-input-profile/1.0",
-  "profile_id": "bb-synthetic-typed-windows-20261029-v1",
+  "profile_id": "bb-synthetic-typed-windows-20261029-v2",
   "business_id": "9b4cd08f-82fc-4e40-856a-04ce6dc4ec41",
   "data_use": "development",
   "period_id": "next",
@@ -8,13 +8,13 @@
   "applicable_periods": [
     {
       "id": "history",
-      "start": "2027-01-01",
-      "end": "2027-01-28"
+      "start": "2027-01-04",
+      "end": "2027-01-31"
     },
     {
       "id": "next",
-      "start": "2027-01-29",
-      "end": "2027-02-25"
+      "start": "2027-02-01",
+      "end": "2027-02-28"
     }
   ],
   "absence_mode": "omit_p2",
@@ -100,7 +100,7 @@
   "candidate_windows": [
     {
       "person_id": "person-a",
-      "date": "2027-01-29",
+      "date": "2027-02-01",
       "earliest": 480,
       "latest": 1020,
       "min_length": 240,
@@ -149,7 +149,7 @@
   "reassignable_units": [],
   "issues": [],
   "review_provenance": {
-    "source": "Godkänt isolerat syntetiskt kontraktsprov 2026-10-29",
+    "source": "Godkänt isolerat syntetiskt kontraktsprov 2026-10-29, korrigerad måndagsankrad profil",
     "reviewed_at": "2026-10-29"
   }
 }
