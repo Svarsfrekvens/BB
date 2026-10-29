@@ -31,7 +31,7 @@ class OriginalWindowTests(unittest.TestCase):
         cls.basis=json.loads((root/'positive-source-basis.json').read_text())
         cls.bound=bind_profile(cls.old,'FLORA-RADATA')
         cls.case=prepare_case(cls.raw,cls.bound)
-        # Source-evidence projection only: no accepted model/result for the unresolved locks.
+        # Contract/source projection only: no real schedule or optimization result.
         stamp=lambda t:(datetime.fromisoformat(cls.case['origin'])+timedelta(minutes=t)).replace(tzinfo=ZoneInfo('Europe/Stockholm')).isoformat(timespec='minutes')
         cls.result=need_windows.export(cls.case['source_needs'],lambda n:cls.case['integration']['need_id_map'][n['id']],stamp,required=True)
         cls.result['source_basis']=cls.case['integration']['source_basis']
@@ -130,10 +130,9 @@ class OriginalWindowTests(unittest.TestCase):
         # Pure placement boundary validation, no fictitious full schedule.
         from bb.need_windows import check_joint
         for start in [n['original'],n['original_window_end']-n['duration']]:
-            with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED'):
-                check_joint(self.case,{'placements':[{'id':n['id'],'start':start}]})
+            check_joint(self.case,{'placements':[{'id':n['id'],'start':start}]})
 
-    def test_server_selection_and_preflight_stop_before_manager(self):
+    def test_server_selection_and_preflight_pass_without_job_submission(self):
         owner='org:'+self.old['business_id']
         registry={'schema_version':'bb-business-profiles/1.0','workspaces':{owner:{
             'business_id':self.old['business_id'],'data_use':'development',
@@ -142,11 +141,13 @@ class OriginalWindowTests(unittest.TestCase):
         with patch.dict(os.environ,{'BB_ENGINE_PROFILE_REGISTRY':'/snapshot/registry','BB_API_TOKEN':'synthetic-local-token','BB_ENGINE_REMOTE_ENABLED':'1'}),patch('bb.business_profiles._read',side_effect=read):
             selected,h,_,_=profile_for(owner,normalize_request({'input':self.raw}))
             self.assertEqual(selected,self.bound);self.assertEqual(h,digest(self.bound))
+            case=prepare(selected,normalize_request({'input':self.raw}))
+            self.assertEqual(len(case['needs']),1451)
+            invalid=deepcopy(self.raw);invalid['metadata']['source_file_sha256']='b'*64
             with TestClient(app) as client:
-                response=client.post('/api/engine/jobs',json={'input':self.raw},headers={'Authorization':'Bearer synthetic-local-token','X-BB-Job-Owner':owner,'Idempotency-Key':'STOP/BEFORE_MANAGER'})
+                response=client.post('/api/engine/jobs',json={'input':invalid},headers={'Authorization':'Bearer synthetic-local-token','X-BB-Job-Owner':owner,'Idempotency-Key':'STOP/BEFORE_MANAGER'})
             self.assertEqual(response.status_code,422)
-            self.assertEqual(response.json()['detail']['code'],'INPUT_REVIEW_REQUIRED')
-            self.assertIn('NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132',response.json()['detail']['message'])
+            self.assertIn(response.json()['detail']['code'],('INPUT_REVIEW_REQUIRED','SOURCE_FILE_SHA_MISMATCH','SOURCE_BINDING_MISMATCH'))
 
     def test_input_and_original_profile_unchanged(self):
         original=deepcopy((self.raw,self.old))
@@ -158,9 +159,8 @@ class OriginalWindowTests(unittest.TestCase):
         p={'profile_id':'other'}
         self.assertIs(bind_profile(p,'other'),p)
 
-    def test_remaining_132_event_conditions_stop_before_job_or_result(self):
-        with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132'):
-            prepare(self.bound,normalize_request({'input':self.raw}))
-        with self.assertRaisesRegex(ValueError,'NEED_DEPENDENCY_EVIDENCE_REQUIRED: 132'):
-            _normalize(self.case,{}, {})
-        self.assertEqual(sum(n['source_window_end']-n['source_window_start']==n['duration'] for n in self.case['needs']),176)
+    def test_all_1451_pass_solver_free_preflight(self):
+        case=prepare(self.bound,normalize_request({'input':self.raw}))
+        self.assertEqual(len(case['needs']),1451)
+        need_windows.check_joint(case)
+        self.assertEqual(sum(n['source_window_end']-n['source_window_start']==n['duration'] for n in case['needs']),176)

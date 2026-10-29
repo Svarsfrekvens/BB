@@ -30,7 +30,7 @@ with contextlib.ExitStack() as stack:
  assert not any(calls.values())
  report=dict(tests=result.testsRun,failures=0,errors=0,forbidden_calls=calls,real_jobs=0,
   source_basis_unchanged=W.result['source_basis']==W.basis,source_basis_canonical_sha256=digest(W.basis),original_segments=292,
-  need_contract_rows=1451,movable_by_common_decision=1275,unique_source_starts=176,remaining_timing_gaps=0,remaining_event_dependencies=132,newly_authorized_intervals=775,
+  need_contract_rows=1451,movable_by_common_decision=1275,unique_source_starts=176,remaining_timing_gaps=0,remaining_event_dependencies=0,resolved_event_conditions=132,newly_authorized_intervals=775,
   effective_profile_hash=digest(T.bound),synthetic_raw_result_sha256=result_sha,
-  actual_flora_run_ready=False,solver_free=True)
+  solver_free_preflight_pass=True,actual_optimization_verified=False,solver_free=True)
  (root/'motor-evidence.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2))

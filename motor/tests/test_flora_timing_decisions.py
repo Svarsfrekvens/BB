@@ -49,7 +49,8 @@ class TimingDecisionTests(unittest.TestCase):
         policies=Counter(d['timing_authorization']['policy'] for d in self.bound['need_decisions'].values())
         self.assertEqual(dict(policies),{'MOVABLE_WITHIN_SOURCE_WINDOW':1275,'UNIQUE_SOURCE_START':176})
         deps=Counter(d['timing_authorization'].get('unresolved_dependency') for d in self.bound['need_decisions'].values())
-        self.assertEqual(dict(deps),{None:1319,'BEDTIME_EVENT':28,'DEPARTURE_EVENT':20,'SMOKING_EVENT':84})
+        self.assertEqual(dict(deps),{None:1451})
+        self.assertEqual(sum(d['timing_authorization'].get('event_condition_resolution')=='SOURCE_EXECUTION_INTERVAL_IS_COMPLETE' for d in self.bound['need_decisions'].values()),132)
         for d in self.bound['need_decisions'].values():self.assertIs(d['flex'],False)
         self.assertEqual(self.bound['window_binding'],window._load_evidence())
         self.assertEqual(len(self.bound['window_binding']['inactive_flex_need_ids']),286)
@@ -149,6 +150,32 @@ class TimingDecisionTests(unittest.TestCase):
             self.assertNotIn('unresolved_dependency',auth)
             seen[anchor]+=1
         self.assertEqual(dict(seen),{19*60:15,11*60:48})
+
+    def test_exact_132_use_complete_interval_at_both_boundaries(self):
+        case=prepare(self.bound,jobs.normalize_request({'input':self.raw}))
+        affected=[n for n in case['needs'] if n['timing_authorization'].get('event_condition_resolution')]
+        self.assertEqual(len(affected),132)
+        for n in affected:
+            self.assertNotIn('unresolved_dependency',n['timing_authorization'])
+            first=n['source_window_start'];last=n['source_window_end']-n['duration']
+            self.assertEqual(n['domains'],[[first,last]])
+            for start in [first,last]:
+                need_windows.check_joint(case,{'placements':[{'id':n['id'],'start':start}]})
+            for start in [first-1,last+1]:
+                with self.assertRaisesRegex(ValueError,'placering utanför'):
+                    need_windows.check_joint(case,{'placements':[{'id':n['id'],'start':start}]})
+
+    def test_complete_interval_resolution_cannot_be_forged_or_removed(self):
+        p=deepcopy(self.bound)
+        nid=next(n for n,d in p['need_decisions'].items() if 'event_condition_resolution' in d['timing_authorization'])
+        del p['need_decisions'][nid]['timing_authorization']['event_condition_resolution']
+        with self.assertRaisesRegex(ValueError,'TIMING_DECISION_BINDING_MISMATCH'):window.verify_input(self.raw,p)
+        case=prepare(self.bound,jobs.normalize_request({'input':self.raw}))
+        n=next(n for n in case['needs'] if not n['timing_authorization'].get('event_condition_resolution'))
+        for collection in ['needs','source_needs']:
+            row=next(r for r in case[collection] if r['id']==n['id'])
+            row['timing_authorization']['event_condition_resolution']='SOURCE_EXECUTION_INTERVAL_IS_COMPLETE'
+        with self.assertRaisesRegex(ValueError,'TIMING_DECISION_BINDING_MISMATCH'):need_windows.check_joint(case)
 
 
 def export_authorized_fixture(out):

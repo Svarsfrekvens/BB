@@ -1,13 +1,14 @@
 {
   "version": "flora-timing-decision/1.0",
-  "decision_id": "PATRICIA-FLORA-TIMING-20261029-v2",
+  "decision_id": "FLORA-EXECUTION-INTERVAL-20261029-v3",
   "source": "Explicit user decision in this conversation, 2026-10-29; applies to the exact reviewed Flora snapshot only",
   "decision_text": [
     "Motorn får välja start inom det angivna tillåtna utförandeintervallet. Hela insatsen ska rymmas: start >= intervallstart och slut <= intervallslut; varaktigheten bevaras.",
     "Senaste möjliga start är intervallslut minus varaktighet. Separat exakt start krävs inte när tillåtet utförandeintervall finns.",
     "Detta gäller även måltidsstöd, medicinering, påminnelser och händelsebundna insatser när intervallen är deras tillåtna utförandetider.",
     "Uttryckliga exakta tider, ordinationsvillkor, individuella beroenden och omfattning gäller fortfarande.",
-    "Intervallets början är inte en verifierad originalplacering. Gamla analysutvidgningar och K3-undantag förblir inaktiva. VC granskar före godkännande."
+    "Intervallets början är inte en verifierad originalplacering. Gamla analysutvidgningar och K3-undantag förblir inaktiva. VC granskar före godkännande.",
+    "För de exakt bundna 132 förekomsterna vid läggdags, rökning och efter avfärd är befintligt utförandeintervall det fullständiga tidsvillkoret. Ingen separat händelsetid eller händelsekoppling krävs. Detta ersätter tidigare sådant krav för just dessa förekomster; originaltexter och omfattning bevaras."
   ],
   "window_evidence_hash": "3ae2937e057d7385e6cc692754290841c02a3c5e45317558502056799c3dd184",
   "window_binding_id": "FLORA-ORIGINALINTERVALL-20261029-v1",
@@ -575,7 +576,7 @@
       "group_id": "PT06-INTERVAL-1",
       "policy": "MOVABLE_WITHIN_SOURCE_WINDOW",
       "category": "EVENT_DEPENDENT",
-      "reason": "EXPLICIT_EXECUTION_INTERVAL_AUTHORIZATION_V2",
+      "reason": "EXPLICIT_INTERVAL_COMPLETE_TIME_CONDITION_V3",
       "need_ids": [
         "FL-SEK-R1789",
         "FL-SEK-R1807",
@@ -662,13 +663,14 @@
         "FL-SEK-R3209",
         "FL-SEK-R3221"
       ],
-      "unresolved_dependency": "SMOKING_EVENT"
+      "event_condition_resolution": "SOURCE_EXECUTION_INTERVAL_IS_COMPLETE",
+      "superseded_event_condition": "SMOKING_EVENT"
     },
     {
       "group_id": "PT06-INTERVAL-2",
       "policy": "MOVABLE_WITHIN_SOURCE_WINDOW",
       "category": "EVENT_DEPENDENT",
-      "reason": "EXPLICIT_EXECUTION_INTERVAL_AUTHORIZATION_V2",
+      "reason": "EXPLICIT_INTERVAL_COMPLETE_TIME_CONDITION_V3",
       "need_ids": [
         "FL-SEK-R1797",
         "FL-SEK-R1847",
@@ -691,7 +693,8 @@
         "FL-SEK-R3039",
         "FL-SEK-R3091"
       ],
-      "unresolved_dependency": "DEPARTURE_EVENT"
+      "event_condition_resolution": "SOURCE_EXECUTION_INTERVAL_IS_COMPLETE",
+      "superseded_event_condition": "DEPARTURE_EVENT"
     },
     {
       "group_id": "PT07",
@@ -1293,7 +1296,7 @@
       "group_id": "PT08-INTERVAL-2",
       "policy": "MOVABLE_WITHIN_SOURCE_WINDOW",
       "category": "MEDICATION_LOCKED",
-      "reason": "EXPLICIT_EXECUTION_INTERVAL_AUTHORIZATION_V2",
+      "reason": "EXPLICIT_INTERVAL_COMPLETE_TIME_CONDITION_V3",
       "need_ids": [
         "FL-SEK-R1828",
         "FL-SEK-R1881",
@@ -1324,7 +1327,8 @@
         "FL-SEK-R3176",
         "FL-SEK-R3231"
       ],
-      "unresolved_dependency": "BEDTIME_EVENT"
+      "event_condition_resolution": "SOURCE_EXECUTION_INTERVAL_IS_COMPLETE",
+      "superseded_event_condition": "BEDTIME_EVENT"
     },
     {
       "group_id": "PT09",
@@ -1646,5 +1650,5 @@
       ]
     }
   ],
-  "supersedes": "PATRICIA-FLORA-TIMING-20261029-v1"
+  "supersedes_decision_sha256": "c07413cddfed163067812b739b6970e5da86342e394f09cc9efb3f19f3457da0"
 }

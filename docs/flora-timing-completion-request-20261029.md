@@ -1,4 +1,4 @@
-> **ÅTERKALLAD SOM AKTUELL BESTÄLLNING.** Patricias uttryckliga intervallbeslut ersätter kravet på separat exakt start för de 775 förekomsterna. Bevara detta dokument som historik; skicka eller besvara inte den tidigare beställningen. Se gällande status i `flora-patricia-timing-decision-20261029.md`. Endast 132 uttryckliga händelsevillkor kvarstår, inte 775 krav på starttider.
+> **ÅTERKALLAD SOM AKTUELL BESTÄLLNING.** Patricias uttryckliga intervallbeslut ersätter kravet på separat exakt start för de 775 förekomsterna. Bevara detta dokument som historik; skicka eller besvara inte den tidigare beställningen. Se gällande status i `flora-patricia-timing-decision-20261029.md`. Även de 132 separata händelsekraven är nu ersatta av beslutet att respektive originalintervall är det fullständiga tidsvillkoret. Alla 1 451 behov passerar lokal solverfri förkontroll; ingen tidskomplettering begärs av denna kontroll.
 
 # Flora – en samlad beställning av befintliga tidsuppgifter
 

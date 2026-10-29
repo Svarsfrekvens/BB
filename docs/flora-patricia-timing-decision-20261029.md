@@ -1,5 +1,63 @@
 # Flora – gemensamt tidsbeslut, 2026-10-29
 
+## Gällande leverans: fullständigt intervallvillkor och godkänd solverfri förkontroll
+
+**Samtliga 1 451 behov passerar den solverfria förkontrollen: 1 451 PASS, 0 FAIL och 0 UNKNOWN i denna förkontroll.** Det återstår inget blockerande krav på separat start eller händelsekoppling för de 132 aktuella förekomsterna. Detta är inte ett solverresultat, ett genomförbarhetsbevis eller ett verksamhetsgodkänt schema. Validatorns framtida bedömning av ett beräknat schema är inte prövad.
+
+Arbetet fortsatte från ren arbetskopia på `84ebcc2176d67d222fa50569d0beaaaad2cdb42a`; ingen senare ändring behövde ersättas. Slutcommit anges i leveransens DELIVERY.json på samma granskningsgren. Ingen push, merge, installation, publicering, solver eller verklig jobbsubmission har gjorts.
+
+### Gällande beslut utan personnamn
+
+`FLORA-EXECUTION-INTERVAL-20261029-v3` fastställer att **befintligt utförandeintervall är det fullständiga tidsvillkoret för exakt de 132 versionsbundna förekomsterna**: 28 vid läggdags, 84 vid rökning och 20 efter avfärd. Ingen separat händelsetid eller händelsekoppling krävs för dessa. Tidigare motsvarande krav ersätts enbart för denna exakta mängd.
+
+Start ska vara minst intervallstart. Slut (`start + duration`) ska vara högst intervallslut. Originalintervall, varaktighet, personalantal och omfattning är oförändrade. Originaltexterna finns kvar orörda i källindatan; den nya serverbundna beslutsregeln avgör deras tidsmässiga tillämpning. Intervallets början är inte ett verifierat originalplaceringsbevis. Inga intervall vidgas.
+
+- Alla 1 275 behov med flera möjliga starter får använda sina godkända originalintervall.
+- Alla 176 behov med en enda möjlig start behåller den.
+- Exakt 132 behov får den spårbara markeringen `event_condition_resolution=SOURCE_EXECUTION_INTERVAL_IS_COMPLETE`. Deras äldre händelsekategori bevaras som `superseded_event_condition` i beslutsmanifestet, inte som aktivt krav.
+- Regeln överförs inte till andra behov eller profiler. Befintliga generella spärrar för faktiskt obekräftade villkor finns kvar och prövas med separata syntetiska testdata.
+- Analysutvidgningarna (286) och K3-undantagen (8) förblir inaktiva. Ingen sammansatt insats delas och ingen dygnsgräns flyttas.
+
+### Kontroller och bevis
+
+**24 riktade motorprov PASS.** De omfattar intervallets första start och sista möjliga start, bibehållen duration, avvisning före/efter intervallet, avvisning av för lång insats, borttaget händelsekrav för exakt 132 medlemmar samt avvisning av förfalskad/borttagen beslutsbindning. Alla 132 kontrollerades vid båda giltiga gränserna och utanför dem. Berörda tidigare prov uppdaterades och kördes om på grund av ändrad bindning och accepterad förkontroll; övriga giltiga sviter återanvändes.
+
+Den fullständiga förkontrollen följer den verkliga lokala kedjan `normalize_request → profile_for → prepare → check_case/check_joint` med oförändrad exakt källindata och granskad profil. Registerläsningen är en lokal, skrivskyddad testfixtur för rätt organisation/dataset. Ingen driftsatt miljö eller liveprofil har verifierats här. Den korrekta requesten skickades inte till HTTP-jobbrutten eller jobbhanteraren.
+
+`run_flora_full_interval_preflight.py` skriver ett separat privat kontrollunderlag med **en PASS-rad per unikt behovs-ID** samt det fullständiga `bb-need-window/1.0`-kontraktet. Behovens antal, durationer, personalantal och exakta startdomäner stäms av. Underlaget är märkt `SOLVER_FREE_PREFLIGHT_NOT_SCHEDULE` och innehåller inga föreslagna schemaplaceringar.
+
+**Två aktuella frontendparserkontroller PASS** på `95b9c43ee92751397ddd066b2379e28a54a33df9`. Ny rå syntetisk motorexport går oförändrad genom parser och arbetskopiefunktion i minnet; överträdelse av intervallslut avvisas. Ingen apppersistens eller browseromkörning. Tidigare giltigt isolerat webbläsarprov återanvänds.
+
+Vakter redovisar **noll solveranrop, noll jobbskapanden, noll databasanslutningar och noll nätverksanrop** i dessa lokala prov. Originalindata, originalprofil, källtexter, båda källreferensernas proveniens, `source_basis` och samtliga 292 originalsegment är oförändrade. Aktivitetspatchen ingår inte.
+
+### Filer och kontrollsummor
+
+Ändrad produktionskod/bindning: `motor/bb/flora_timing_decisions.json` och `motor/bb/flora_timing_decisions.py`. Övriga ändringar gäller riktade tester, den solverfria kontrollskripten och dokumentation. Ingen frontendkod ändras.
+
+| Bevis | SHA-256 |
+|---|---|
+| Versionsbundet beslut, kanonisk JSON | `a93c200b1a1270fa9455ab4d30fc07cc671391886072adb77c6dc04f60e2e582` |
+| Effektiv lokal profil | `370bc10fbc0139cd01837cd7877377e2da5c7846b1da97c6f4cc289be4fcc090` |
+| Normaliserad input | `d21fd0637ebaca2481687da41c366f0c2a50b514a36431658e51a5abf1f2624e` |
+| Oförändrat source_basis | `01649303aed407c00f9d6cd66db36de3567fe5815a725cef9e717012359cd789` |
+| Privat förkontroll för alla behov | `67395b899840ad606ef1aed9fda74dfa1c8445e483de6674b55d77bacbef5169` |
+| Ny rå syntetisk resultatexport | `bbb677ccbf3918f4b08668ffc0647e812785f1f2630f0b9df8555fa0a33c6582` |
+
+Den normaliserade inputhashen ovan är inte en hash för en fullständig framtida HTTP-request; körparametrar och idempotens måste frysas separat inför godkänd körning.
+
+Leverans: `/workspace/deliveries/BB_FLORA_FULL_INTERVAL_PREFLIGHT_20261029/`. `motor-evidence.json`, `full-preflight-evidence.json`, `frontend-evidence.json`, `private/all-1451-preflight.json`, `private/resolved-event-members.json` och `SHA256SUMS` innehåller aktuella bevis. Tidigare leveranser bevaras som historik. Äldre blockeringsbesked och kompletteringsbeställningar nedan är ersatta av denna sektion.
+
+### Exakt återstående steg före verkligt Flora-prov
+
+1. **Separat mandat för push och installation av slutcommitten.** Verifiera då avsedd motorservice, aktuell livecommit och rollback, samt den monterade profilens ursprungliga källbindning. Denna ändring tillför det versionsbundna pålägget i kod; den kräver ingen ny verksamhetsdata eller secretrotation. Rapporterad tidigare live-/rollbackbas är `d60b518922040771016a6335f8d1310a6fbe249a`, inte på nytt verifierad här.
+2. **Efter uttryckligen godkänd installation:** kontrollera livecommit och effektiv profilhash mot denna leverans, gatewayns organisation/dataset/period och operativ baseline. En lokal PASS är inte runtimeverifiering.
+3. **Separat mandat för en avgränsad verklig körning:** frys request, isolering, idempotensnyckel och tids-/kostnadsgräns. Först därefter får jobb och solver startas. Kontrollera sedan verkligt resultat, validatorutfall, behovstäckning, alla 1 451 kontraktsrader, source_basis/292 segment och samma förslag i frontendens vyer. VC granskar före godkännande; gällande schema ersätts inte automatiskt.
+
+**Ingen ytterligare tidskomplettering krävs av denna förkontroll.** Den lämnar inget tekniskt blockerande fel. Ett verkligt optimeringsresultat, schemaegenskaper och eventuella olösta behov kan bedömas först efter en separat godkänd körning.
+
+## Historik före det fullständiga intervallbeslutet – inte aktuell status
+
+
 ## Gällande status efter Patricias uttryckliga intervallbeslut
 
 **Den tidigare spärren som krävde separat exakt start för 775 förekomster är borttagen.** Beslut `PATRICIA-FLORA-TIMING-20261029-v2` ersätter v1:s krav i denna fråga. Hela insatsen ska rymmas i originalets EXECUTION_WINDOW: `start >= window_start`, `start + duration <= window_end`. Senaste start är `window_end - duration`. Ett 10-minutersbehov i 08:00–09:00 får starta 08:00–08:50.
