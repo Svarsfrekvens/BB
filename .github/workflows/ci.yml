@@ -25,3 +25,4 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install -r motor/requirements.txt
       - run: cd motor && python -m unittest discover -s tests -v
+      - run: python -m unittest discover -s scripts/tests -v
