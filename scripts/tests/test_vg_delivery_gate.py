@@ -75,6 +75,18 @@ class DeliveryGateTest(unittest.TestCase):
         self.assertEqual(independent["substitute_minutes"], 20)
         self.assertEqual(independent["whole_duty_substitute_minutes"], 120)
 
+    def test_unapproved_secondary_ranking_is_not_accepted_as_primary_goal(self):
+        candidate = {"staff": [], "duties": [], "validation": {"workload": {}},
+                     "period": {"start": "2026-12-02", "end": "2026-12-29",
+                                "timezone": "Europe/Stockholm"}}
+        proof = {"schema": "bb-vg-optimization-proof/1.0", "candidate_sha256": "hash",
+                 "baseline_sha256": "baseline", "objective": "MIN_SUBSTITUTE_NET_THEN_TOTAL_NET",
+                 "model_scope": "JOINT_STAFF_SHIFTS_AND_NEEDS", "status": "OPTIMAL",
+                 "model_sha256": "model", "solver_log_sha256": "log",
+                 "achieved_substitute_minutes": 0, "lower_bound_minutes": 0}
+        result = check(candidate, "hash", 0, None, None, None, None, "baseline", proof)
+        self.assertIn("OPTIMIZATION_PROOF_INVALID", result["errors"])
+
 
 if __name__ == "__main__":
     unittest.main()

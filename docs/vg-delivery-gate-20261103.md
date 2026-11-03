@@ -17,12 +17,15 @@ ursprungliga kontrollsummor som ett granskningsspår, inte skrivas över.
    vakanskompletteringar och jämförelsetid per personaltyp. Varje vakans får
    läggas till högst en gång, endast om den inte redan finns i Medvind.
    SSG-/avtalstimmar är kapacitetskontroll, inte före-tid.
-3. Beräkna samma beslutade kundbehov med ett gemensamt mål som i första hand
-   minimerar vikariernas schemalagda nettotid och därefter total nettotid.
+3. Beräkna samma beslutade kundbehov med ett gemensamt primärt mål som
+   minimerar vikariernas schemalagda nettotid. Total nettotid, kostnad,
+   kontinuitet och arbetsmiljö redovisas som separata avvägningar; ingen
+   ytterligare strikt målordning är beslutad i Bibeln v16.32.
    En stegvis tilldelning av återstående arbete till vikarier räcker inte som
    optimeringsbevis. Spara modellens hash, solverlogg, målvärde, gräns och
-   söktid för exakt kandidathash. En genomförbar kandidat får inte kallas
-   optimal utan bevisad gräns.
+   söktid för exakt kandidathash. Redovisa luckan mot undergränsen utan ett
+   påhittat acceptanstak. En genomförbar kandidat får inte kallas optimal
+   utan bevisad gräns.
 4. Kör oberoende pass-/behovsvalidatorn och `scripts/vg_delivery_gate.py` på
    **exakt de filer som ska överlämnas**. Kontrollera periodklippt betald tid
    från personpass, samma 293 kr per aktiv timme, vaken natt och administration

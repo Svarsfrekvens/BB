@@ -176,20 +176,21 @@ def check(candidate, candidate_hash, candidate_bytes, manifest, ledger, ledger_h
         if (proof.get("schema") != "bb-vg-optimization-proof/1.0" or
                 proof.get("candidate_sha256") != candidate_hash or
                 proof.get("baseline_sha256") != baseline_hash or
-                proof.get("objective") != "MIN_SUBSTITUTE_NET_THEN_TOTAL_NET" or
+                proof.get("objective") != "MIN_SUBSTITUTE_NET_MINUTES" or
                 proof.get("model_scope") != "JOINT_STAFF_SHIFTS_AND_NEEDS" or
                 proof.get("status") not in ("OPTIMAL", "FEASIBLE_WITH_BOUND") or
                 not proof.get("model_sha256") or not proof.get("solver_log_sha256") or
                 proof.get("achieved_substitute_minutes") != period["substitute"] or
                 not isinstance(proof.get("lower_bound_minutes"), int) or
                 proof["lower_bound_minutes"] < 0 or
-                proof["lower_bound_minutes"] > period["substitute"] or
-                (period["substitute"] - proof["lower_bound_minutes"]) >
-                max(60, period["substitute"] * 0.05)):
+                proof["lower_bound_minutes"] > period["substitute"]):
             errors.append("OPTIMIZATION_PROOF_INVALID")
     return {"status": "BLOCKED" if errors else "READY_FOR_REVIEW", "errors": sorted(set(errors)),
             "after_period_minutes": period, "after_whole_duty_minutes": full,
-            "after_period_cost_sek": expected_cost, "candidate_sha256": candidate_hash}
+            "after_period_cost_sek": expected_cost, "candidate_sha256": candidate_hash,
+            "primary_objective_bound_minutes": proof.get("lower_bound_minutes") if proof else None,
+            "primary_objective_gap_minutes": period["substitute"] - proof["lower_bound_minutes"]
+            if proof and isinstance(proof.get("lower_bound_minutes"), int) else None}
 
 
 def main():

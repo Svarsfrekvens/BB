@@ -1,6 +1,7 @@
 # Vintergatan: avstämning av Medvind före optimering
 
-Status: **källrader avstämda, jämförbart före ännu inte låst**. Detta är inte
+Status enligt Bemanningsbibeln v16.32, avsnitt 8d: **källrader avstämda,
+jämförbart före ännu inte låst**. Detta är inte
 en sparad arbetskopia eller ett nytt schema.
 
 Det verifierade Medvind-originalet `vinterg ssg mm.xlsx` har SHA-256
