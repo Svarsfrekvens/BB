@@ -49,7 +49,7 @@ history=[z for z in x['validation']['checks'] if z.get('scope')!='CANDIDATE' and
 checks=[{'id':k,'status':'FAIL' if k in report['failed'] else 'PASS','scope':'CANDIDATE','violations':report['failed'].get(k,0)} for k in sorted(set(report['passed'])|set(report['failed']))]
 checks += [{'id':k,'status':v['status'],'scope':'SOURCE','details':{kk:vv for kk,vv in v.items() if kk!='status'}} for k,v in extra.items()]
 checks += history
-x['validation']={'scope':'DECEMBER','validator':'vg_validate_candidate.py','checks':checks,
+x['validation']={'scope':'DECEMBER','validator':'vg_validate_candidate.py','validator_commit':args.engine_commit,'checks':checks,
                  'summary':dict(collections.Counter(z['status'] for z in checks)),
                  'workload':{'ordinary_minutes':report['ordinary_minutes'],'temporary_minutes':report['substitute_minutes'],
                              'model_cost_sek':report['model_cost_sek']}}
