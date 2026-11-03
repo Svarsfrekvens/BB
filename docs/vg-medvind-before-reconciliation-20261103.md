@@ -40,6 +40,14 @@ Ingen tillgänglig fil/blad/cell med separat faktisk TV/vik/total har därmed
 kunnat anges. Detta är en konkret saknad källa, inte bevis för att den inte
 existerar. Full Medvind-vikarietid är okänd tills källan hittas.
 
+Den nuvarande leveransgrinden `scripts/vg_delivery_gate.py` kräver dessutom
+minutexakta betalda intervall för sin Medvind-ledger. De 145 källraderna ger
+avrundade decimalvärden för rapporterad nettotid och styrker inte var varje
+historisk rast låg eller att tiden var betald. Grinden ska därför fortsätta
+blockera leverans. När en fullständig Medvindtotal finns måste dess exakta
+källceller bindas och grinden kunna bevara rapporterat decimalnetto utan att
+konstruera betalda intervall eller dolda 30-minutersavdrag.
+
 Vakansantagandet 103,2476 h redovisas separat. Det får inte bli faktiskt
 Medvindutfall eller adderas igen om det finns i en senare fullständig total.
 SSG-/avtalstimmar och ramen 1 230,24/103,2476/1 333,4876 h hålls separat
