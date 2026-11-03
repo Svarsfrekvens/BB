@@ -135,11 +135,15 @@ def validate(candidate):
         check("STAFF_ID", s is not None)
         if s and s.get("type") != "SYNTHETIC_SUBSTITUTE" and s.get("contract_seconds") is not None:
             check("SSG_PERIOD_CAP", sum(d.get("net_minutes", 0) * 60 for d in shifts) <= float(s["contract_seconds"]) + 0.01)
+    # A historically observed awake person at night is not an automatically
+    # decided minimum at every five-minute point (Bible v16.32, section 8b).
+    # Every decided night need is still bound to an actual duty above.
+    unstaffed_night_reference_minutes = 0
     for day in range(28):
         for minute in range(day * 1440 + 1320, (day + 1) * 1440 + 390, 5):
-            check("AWAKE_NIGHT_COVERAGE", any(d.get("segment_type") == "VAKEN_NATT"
-                  and d["start"] <= minute < d["end"]
-                  and all(not (a <= minute < b) for a, b in d["breaks"]) for d in duties))
+            if not any(d.get("segment_type") == "VAKEN_NATT" and d["start"] <= minute < d["end"]
+                       and all(not (a <= minute < b) for a, b in d["breaks"]) for d in duties):
+                unstaffed_night_reference_minutes += 5
     for a in assignments:
         check("ALL_ASSIGNMENTS_HAVE_DUTY", a.get("duty_id") in duty_by_id)
 
@@ -155,11 +159,12 @@ def validate(candidate):
                             "DUTY_LENGTH_4_TO_13_H", "DAY_EVENING_WINDOW", "UNPAID_BREAK_FOR_LONG_DUTY", "BREAK_INTERVAL",
                             "MAX_FIVE_HOURS_ACTIVE", "NET_TIME", "PERSON_OR_POSITION", "ASSIGNMENT_DUTY_LINK", "NO_WORK_DURING_BREAK",
                             "NO_TASK_OVERLAP_WITHIN_DUTY", "ELEVEN_HOURS_REST", "NINE_FREE_DAYS", "ROLLING_36H_REST",
-                            "STAFF_ID", "SSG_PERIOD_CAP", "AWAKE_NIGHT_COVERAGE", "ALL_ASSIGNMENTS_HAVE_DUTY"]) - set(problems)),
+                            "STAFF_ID", "SSG_PERIOD_CAP", "ALL_ASSIGNMENTS_HAVE_DUTY"]) - set(problems)),
             "failed": dict(sorted(problems.items())), "ordinary_minutes": tv, "substitute_minutes": vik,
             "model_cost_sek": round((tv + vik) * 293 / 60, 2),
             "whole_duty_ordinary_minutes": whole_tv, "whole_duty_substitute_minutes": whole_vik,
             "outside_period_minutes": whole_tv + whole_vik - tv - vik,
+            "unstaffed_night_reference_minutes": unstaffed_night_reference_minutes,
             "needs": len(needs), "duties": len(duties)}
 
 

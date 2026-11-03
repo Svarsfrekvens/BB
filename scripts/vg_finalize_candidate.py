@@ -1,4 +1,4 @@
-"""Add verified night-break relief and finalize source-bound validation evidence."""
+"""Finalize source-bound evidence without inventing a full-night staffing minimum."""
 import argparse,json,collections,hashlib
 from vg_validate_candidate import validate,stable,source_projection,external_work_rest,name_free,night_eligibility
 parser=argparse.ArgumentParser()
@@ -10,35 +10,7 @@ parser.add_argument('--engine-commit',required=True)
 args=parser.parse_args()
 x=json.load(open(args.candidate))
 x['engine_commit']=args.engine_commit
-DEC_END=28*1440
-night=[d for d in x['duties'] if d['segment_type']=='VAKEN_NATT']
-next_vik=max(int(s['id'].split('-')[1]) for s in x['staff'] if s['id'].startswith('VIK-'))+1
-resource=f'VIK-{next_vik}'
-x['staff'].append({'id':resource,'type':'SYNTHETIC_SUBSTITUTE','alias':f'Vikarie {next_vik}'})
 relief=[]
-for day in range(28):
- missing=[]
- for m in range(day*1440+1320,(day+1)*1440+390,5):
-  if not any(d['start']<=m<d['end'] and all(not(a<=m<b) for a,b in d['breaks']) for d in night):missing.append(m)
- if not missing:continue
- groups=[];start=prev=missing[0]
- for m in missing[1:]:
-  if m>prev+5:groups.append((start,prev+5));start=m
-  prev=m
- groups.append((start,prev+5))
- for gap_start,gap_end in groups:
-  if day==27:
-   start=day*1440+1285
-   end=max(start+240,gap_end)
-  else:
-   start=max(0,gap_start-120)
-   end=max(start+240,gap_end)
-  if start%5 or end%5 or end-start>300:raise RuntimeError('invalid night relief span')
-  did=f'C-NIGHT-RELIEF-{len(relief)+1:02d}'
-  relief.append({'id':did,'slot':len(x['duties'])+len(relief),'day':start//1440,'start':start,'end':end,
-                 'breaks':[],'net_minutes':end-start,'person_id':resource,'position_id':None,
-                 'staffing_status':'SYNTHETIC_SUBSTITUTE','segment_type':'VAKEN_NATT','purpose':'AWAKE_NIGHT_BREAK_RELIEF'})
-x['duties'].extend(relief)
 for n in x['administration_requirements']:
  n['source_ref']='VC-beslut 2026-11-02; skyddad källa'
 x['candidate_id']='VG-20261202-'+hashlib.sha256(stable({'duties':x['duties'],'assignments':x['assignments']})).hexdigest()[:12]

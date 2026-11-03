@@ -124,6 +124,10 @@ def check(candidate, candidate_hash, candidate_bytes, manifest, ledger, ledger_h
         errors.append("MANIFEST_CANDIDATE_BINDING")
     period, full, duty_errors = candidate_paid_minutes(candidate)
     errors.extend(duty_errors)
+    assigned_duties = {a.get("duty_id") for a in candidate.get("assignments", [])}
+    if any(d.get("id") not in assigned_duties and not d.get("presence_requirement_source")
+           for d in candidate.get("duties", [])):
+        errors.append("UNBOUND_PAID_DUTY")
     rules = validate(candidate)
     if rules["failed"]:
         errors.append("CANDIDATE_RULE_FAIL")

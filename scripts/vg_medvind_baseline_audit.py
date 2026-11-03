@@ -29,11 +29,14 @@ def d(value):
 
 
 def audit(medvind, workbook):
-    raw = list(openpyxl.load_workbook(medvind, read_only=True, data_only=True)["Medvind"].values)
+    source_book = openpyxl.load_workbook(medvind, read_only=True, data_only=True)
+    raw = list(source_book["Medvind"].values)
+    source_book.close()
     w = openpyxl.load_workbook(workbook, read_only=True, data_only=True)
     rows = list(w["SCHEMA_DEC"].values)
     columns = {name: i for i, name in enumerate(rows[0])}
     people = list(w["PERSONAL"].values)
+    w.close()
     pc = {name: i for i, name in enumerate(people[0])}
     employment = {r[pc["person_id"]]: r[pc["anstallning"]] for r in people[1:] if r[pc["person_id"]]}
     problems = Counter()

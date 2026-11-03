@@ -5,6 +5,10 @@ schema. Den klarar pass- och behovskontroller men har inget låst fullständigt
 Medvind-före, inget gemensamt optimeringsbevis och dess redovisade timmar räknar
 hela två pass som går in i 30 december. Filen och manifestet ska bevaras med
 ursprungliga kontrollsummor som ett granskningsspår, inte skrivas över.
+Fem vikariepass lades dessutom till utan tilldelade behov för att fylla en
+påhittad regel om ständig vaken närvaro hela natten. Bibeln v16.32 beskriver
+en vaken nattperson som historisk observation, inte ett automatiskt bindande
+minimikrav varje femte minut. Beslutade nattinsatser ska fortfarande täckas.
 
 ## Obligatorisk ordning
 
@@ -29,7 +33,8 @@ ursprungliga kontrollsummor som ett granskningsspår, inte skrivas över.
 4. Kör oberoende pass-/behovsvalidatorn och `scripts/vg_delivery_gate.py` på
    **exakt de filer som ska överlämnas**. Kontrollera periodklippt betald tid
    från personpass, samma 293 kr per aktiv timme, vaken natt och administration
-   en gång. Läs gate-utdata: endast `READY_FOR_REVIEW` tillåter en versionsmärkt
+   en gång. Betalda pass utan tilldelat behov måste ha ett uttryckligt
+   källbundet närvarokrav. Läs gate-utdata: endast `READY_FOR_REVIEW` tillåter en versionsmärkt
    granskningsleverans; verksamhetsgodkännande och inloggad import är separata.
 
 Gate-anropet kräver `candidate`, `--manifest`, `--source-report`,
@@ -40,7 +45,7 @@ bevisar inte att rapporten är fullständig. Inte heller ersätter en solverlogg
 oberoende kontroll av modellens omfattning och rätt kundbehov.
 
 För den redan uppladdade C-kandidaten ger spärren `BLOCKED`: `AFTER_NOT_PERIOD_CLIPPED`,
-`AFTER_COST_NOT_PERIOD_CLIPPED`, `LOCKED_MEDVIND_BASELINE_MISSING` och
+`AFTER_COST_NOT_PERIOD_CLIPPED`, `UNBOUND_PAID_DUTY`, `LOCKED_MEDVIND_BASELINE_MISSING` och
 `JOINT_OPTIMIZATION_PROOF_MISSING`. Hela pass ger 1 978 h 05 min, men
 **periodklippt eftertid är 1 969 h 40 min** (tillsvidare 1 160 h 30 min,
 vikarier 809 h 10 min), modellkostnad 577 112,33 kr. Det är fortfarande

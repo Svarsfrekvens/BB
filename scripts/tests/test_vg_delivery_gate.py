@@ -71,6 +71,7 @@ class DeliveryGateTest(unittest.TestCase):
         self.assertEqual(result["after_period_minutes"]["substitute"], 20)
         self.assertIn("AFTER_NOT_PERIOD_CLIPPED", result["errors"])
         self.assertIn("AFTER_COST_NOT_PERIOD_CLIPPED", result["errors"])
+        self.assertIn("UNBOUND_PAID_DUTY", result["errors"])
         independent = validate(candidate)
         self.assertEqual(independent["substitute_minutes"], 20)
         self.assertEqual(independent["whole_duty_substitute_minutes"], 120)
@@ -86,6 +87,12 @@ class DeliveryGateTest(unittest.TestCase):
                  "achieved_substitute_minutes": 0, "lower_bound_minutes": 0}
         result = check(candidate, "hash", 0, None, None, None, None, "baseline", proof)
         self.assertIn("OPTIMIZATION_PROOF_INVALID", result["errors"])
+
+    def test_historical_full_night_presence_is_diagnostic_not_hard_rule(self):
+        result = validate({"staff": [], "duties": [], "needs": [], "assignments": [],
+                           "administration_requirements": [], "shared_meal_groups": []})
+        self.assertEqual(result["unstaffed_night_reference_minutes"], 28 * 510)
+        self.assertNotIn("AWAKE_NIGHT_COVERAGE", result["failed"])
 
 
 if __name__ == "__main__":

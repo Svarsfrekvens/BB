@@ -1,4 +1,4 @@
-"""Trim redundant substitute duty edges without moving any need or reducing awake-night coverage."""
+"""Trim substitute duty edges while preserving every assigned need and legal break."""
 import argparse,json,collections
 from vg_validate_candidate import stable
 parser=argparse.ArgumentParser()
@@ -53,12 +53,7 @@ night=[d for d in x['duties'] if d['segment_type']=='VAKEN_NATT']
 saved=0
 for d in night:
  if not d['person_id'].startswith('VIK-') or not by[d['id']]:continue
- required=[]
- for day in range(28):
-  for m in range(day*1440+1320,(day+1)*1440+390,5):
-   providers=[q for q in night if q['start']<=m<q['end'] and all(not(a<=m<b) for a,b in q['breaks'])]
-   if len(providers)==1 and providers[0]['id']==d['id']:required.append((m,m+5))
- rows=by[d['id']];intervals=[(r['start'],r['end']) for r in rows]+required;earliest=min(a for a,b in intervals);latest=max(b for a,b in intervals)
+ rows=by[d['id']];intervals=[(r['start'],r['end']) for r in rows];earliest=min(a for a,b in intervals);latest=max(b for a,b in intervals)
  best=None
  for start in range(d['start'],earliest+1,5):
   for end in range(((latest+4)//5)*5,d['end']+1,5):
