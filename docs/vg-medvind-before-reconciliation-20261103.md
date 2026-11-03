@@ -1,7 +1,7 @@
 # Vintergatan: avstämning av Medvind före optimering
 
 Status enligt Bemanningsbibeln v16.32, avsnitt 8d: **källrader avstämda,
-jämförbart före ännu inte låst**. Detta är inte
+fullständig Medvind-total ännu inte styrkt, jämförbart före inte låst**. Detta är inte
 en sparad arbetskopia eller ett nytt schema.
 
 Det verifierade Medvind-originalet `vinterg ssg mm.xlsx` har SHA-256
@@ -16,22 +16,35 @@ Alla 145 värden i Medvinds `Summa` stämmer exakt mot arbetsbokens
 |---|---|---:|---|
 | Tillsvidare, rapporterad radsumma | 145 tidsatta Medvind-pass, 9 personer | 1 178,94 | Exakt summa av rapporterade decimalvärden |
 | Tillsvidare, klippt till 2–29 december | 144 helt inre pass + 155 minuter av ett gränspass | 1 171,693333… | Periodklippt enligt Medvinds **rapporterade** netto; decimalvärdena är avrundade i källan |
-| Vikarier, tidsatta i detta utdrag | Inga rader | 0 | Endast i detta utdrag; separat fullständig vikariesumma saknas |
+| Vikarier, tidsatta i detta utdrag | Inga rader | 0 | Endast i detta utdrag |
+| Faktisk vikarietid i hela Medvind | Separat totalrapport ännu inte funnen | **Okänd** | Får inte fyllas med utdragets noll |
 | Vakanser, beräkningsantagande | 65,37 % × 148 h + 6,5 h | 103,2476 | **Otidsatt komplettering**, inte Medvind-bokning eller kundbehov |
 
 Periodgränspasset har inget nettotidsavdrag i Medvind; dess 155 minuter inom
-perioden har därför räknats som rapporterad betald tid. **27 pass över fem
-timmar saknar ett redovisat avdrag om minst 30 minuter** (inklusive
-avrundningsskillnader på 0,2 minut). Detta är en käll-/rastfråga. Vi har inte
-lagt in ett påhittat rastläge, och samma regeldefinition kan därför ännu inte
-certifieras mellan Medvind och det nya förslaget.
+perioden har därför behållits som **rapporterad nettotid enligt Medvind**.
+**27 pass över fem timmar saknar ett redovisat avdrag om minst 30 minuter**
+(inklusive avrundningsskillnader på 0,2 minut). Detta är en käll-/rastfråga.
+Användaren har beslutat att originalets rapporterade netto ska behållas utan
+ytterligare 30-minutersschablon. Rastläget är inte verifierat; kalla därför
+inte denna tid verifierad betald tid. I det nya förslaget ska beslutad rast
+däremot placeras och täckas.
 
-Innan före får låsas krävs bekräftelse på att detta är hela Medvinds
-TV/vik-tidsutdrag för perioden, hur de 27 rapporterade långa passen ska
-behandlas, och om de tre vakansposterna ska läggas till som uttrycklig
-komplettering utanför Medvind. Kompletteringen får inte räknas igen om den
-redan ingår i en senare fullständig Medvindtotal. SSG-/avtalstimmar och
-ramen 1 230,24/103,2476/1 333,4876 h hålls separat från Medvindutfallet.
+Användaren bekräftar **inte** att de 145 passen är hela Medvind. Genomsökning
+av det verifierade decemberkällpaketet och BB:s privata artefaktlista fann
+ingen separat decemberrapport med TV-, vikarie- och totalsummor. De två
+`axmedvind`-filerna avser veckorna 44–47, och den andra filen med Medvind i
+namnet är ett externt arbetsschema; de är inte en total för denna verksamhet.
+Decemberarbetsbokens `SCHEMA_DEC` är en bearbetning av det nämnda utdraget,
+och `VAKANSER!A2:G4` är VC-underlagets antagande, inte tidsatta Medvindpass.
+Ingen tillgänglig fil/blad/cell med separat faktisk TV/vik/total har därmed
+kunnat anges. Detta är en konkret saknad källa, inte bevis för att den inte
+existerar. Full Medvind-vikarietid är okänd tills källan hittas.
+
+Vakansantagandet 103,2476 h redovisas separat. Det får inte bli faktiskt
+Medvindutfall eller adderas igen om det finns i en senare fullständig total.
+SSG-/avtalstimmar och ramen 1 230,24/103,2476/1 333,4876 h hålls separat
+från Medvindutfallet. Optimeringsscenarier får fortsätta mot beslutade behov
+och villkor, men ingen verifierad Medvindbesparing får påstås.
 
 `scripts/vg_medvind_baseline_audit.py` reproducerar kontrollen med endast
 aggregat i utdata. Privat person-/kundinnehåll finns enbart i skyddade

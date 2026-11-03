@@ -110,6 +110,8 @@ def audit(medvind, workbook):
         "long_rows_without_30min_reported_deduction": long_without_reported_break,
         "booked_substitute_hours_in_this_extract": "0",
         "booked_substitute_total_is_complete": False,
+        "actual_medvind_substitute_total": "UNKNOWN",
+        "separate_medvind_tv_vik_total_cells_in_this_extract": False,
         "vacancy_complement_assumption_hours": str(vacancy),
         "vacancy_complement_basis": "65.37% x 148h + 6.5h; untimed assumption, not Medvind booked time",
         "source_problems": dict(problems),

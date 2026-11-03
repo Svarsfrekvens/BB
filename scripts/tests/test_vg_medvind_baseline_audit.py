@@ -42,6 +42,7 @@ class MedvindBaselineAuditTest(unittest.TestCase):
             self.assertEqual(result["medvind_period_clipped_as_reported_hours"], "3.0")
             self.assertEqual(result["boundary_rows"], 1)
             self.assertEqual(result["rows_by_type"], {"ordinary_rows": 2})
+            self.assertEqual(result["actual_medvind_substitute_total"], "UNKNOWN")
             self.assertEqual(result["status"], "SOURCE_RECONCILED_COMPARISON_NOT_LOCKED")
 
     def test_missing_source_row_blocks_reconciliation(self):
