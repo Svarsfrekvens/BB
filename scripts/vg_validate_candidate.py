@@ -19,6 +19,15 @@ def stable(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
 
 
+def period_net_minutes(duty):
+    """Paid person minutes within 2–29 December; whole boundary duties remain for rest checks."""
+    start, end = duty["start"], duty["end"]
+    paid = max(0, min(end, DEC_END) - max(start, 0))
+    for a, b in duty.get("breaks", []):
+        paid -= max(0, min(b, DEC_END) - max(a, 0))
+    return paid
+
+
 def validate(candidate):
     problems = Counter()
 
@@ -134,8 +143,12 @@ def validate(candidate):
     for a in assignments:
         check("ALL_ASSIGNMENTS_HAVE_DUTY", a.get("duty_id") in duty_by_id)
 
-    tv = sum(d.get("net_minutes", 0) for d in duties if staff.get(d.get("person_id"), {}).get("type") != "SYNTHETIC_SUBSTITUTE" and d.get("person_id"))
-    vik = sum(d.get("net_minutes", 0) for d in duties if staff.get(d.get("person_id"), {}).get("type") == "SYNTHETIC_SUBSTITUTE")
+    tv_duties = [d for d in duties if d.get("person_id") and staff.get(d.get("person_id"), {}).get("type") != "SYNTHETIC_SUBSTITUTE"]
+    vik_duties = [d for d in duties if staff.get(d.get("person_id"), {}).get("type") == "SYNTHETIC_SUBSTITUTE"]
+    tv = sum(period_net_minutes(d) for d in tv_duties)
+    vik = sum(period_net_minutes(d) for d in vik_duties)
+    whole_tv = sum(d.get("net_minutes", 0) for d in tv_duties)
+    whole_vik = sum(d.get("net_minutes", 0) for d in vik_duties)
     return {"passed": sorted(set(["NATIVE_FORMAT", "PERIOD_AND_NEED_COUNT", "ORIGINAL_145_HASH", "NO_SLEEPING_JOUR",
                             "NEED_STAFF_COUNT", "NEED_WINDOW", "DISTINCT_STAFF_PER_NEED", "ASSIGNMENT_DURATION", "ASSIGNMENT_WINDOW",
                             "ADMIN_STAFF_COUNT", "ADMIN_PERSON", "ADMIN_DURATION", "ADMIN_30H", "FIVE_MINUTE_BOUNDARIES",
@@ -144,7 +157,10 @@ def validate(candidate):
                             "NO_TASK_OVERLAP_WITHIN_DUTY", "ELEVEN_HOURS_REST", "NINE_FREE_DAYS", "ROLLING_36H_REST",
                             "STAFF_ID", "SSG_PERIOD_CAP", "AWAKE_NIGHT_COVERAGE", "ALL_ASSIGNMENTS_HAVE_DUTY"]) - set(problems)),
             "failed": dict(sorted(problems.items())), "ordinary_minutes": tv, "substitute_minutes": vik,
-            "model_cost_sek": round((tv + vik) * 293 / 60, 2), "needs": len(needs), "duties": len(duties)}
+            "model_cost_sek": round((tv + vik) * 293 / 60, 2),
+            "whole_duty_ordinary_minutes": whole_tv, "whole_duty_substitute_minutes": whole_vik,
+            "outside_period_minutes": whole_tv + whole_vik - tv - vik,
+            "needs": len(needs), "duties": len(duties)}
 
 
 def source_projection(candidate, workbook):

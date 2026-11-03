@@ -6,6 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from vg_delivery_gate import _ledger_minutes, candidate_paid_minutes, check
+from vg_validate_candidate import validate
 
 
 class DeliveryGateTest(unittest.TestCase):
@@ -70,6 +71,9 @@ class DeliveryGateTest(unittest.TestCase):
         self.assertEqual(result["after_period_minutes"]["substitute"], 20)
         self.assertIn("AFTER_NOT_PERIOD_CLIPPED", result["errors"])
         self.assertIn("AFTER_COST_NOT_PERIOD_CLIPPED", result["errors"])
+        independent = validate(candidate)
+        self.assertEqual(independent["substitute_minutes"], 20)
+        self.assertEqual(independent["whole_duty_substitute_minutes"], 120)
 
 
 if __name__ == "__main__":
