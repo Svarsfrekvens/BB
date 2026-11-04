@@ -57,3 +57,17 @@ och villkor, men ingen verifierad Medvindbesparing får påstås.
 `scripts/vg_medvind_baseline_audit.py` reproducerar kontrollen med endast
 aggregat i utdata. Privat person-/kundinnehåll finns enbart i skyddade
 källfiler; inga sådana rader hör hemma i GitHub.
+
+## Kontroll av kompletterande privat källarkiv 4 november
+
+Användarens `VINTERGATAN_KALLUNDERLAG_20261104 (1).tar.xz` har SHA-256
+`1f954cd8a3bc5abf8ef862f7fcfc6537e172a2b99dbcb5c085c087717592c1a6`.
+Arkivet innehåller 50 manifestförda filer; alla storlekar och SHA-256 i
+`FILFORTECKNING.txt` stämmer. Den ingående decemberarbetsboken och
+`vinterg ssg mm.xlsx` har samma SHA-256 som ovan och ger inga nya faktiska
+Medvindtotaler. De ytterligare Medvindutdragen avser maj–juli, juli–september,
+veckor 44–47 samt externt arbete över oktober–december. Ingen av dessa är en
+separat faktisk TV-, vikarie- och totalrapport för Vintergatan 2–29 december.
+Kopplingsnycklar och VC-underlag ger planeringsramar, inte bokad Medvindtid.
+Faktisk fullständig Före-total och vikarietid är därför fortsatt okända.
+Privatarkivets innehåll och personrader publiceras inte i GitHub.
