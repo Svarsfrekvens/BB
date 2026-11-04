@@ -71,3 +71,11 @@ separat faktisk TV-, vikarie- och totalrapport för Vintergatan 2–29 december.
 Kopplingsnycklar och VC-underlag ger planeringsramar, inte bokad Medvindtid.
 Faktisk fullständig Före-total och vikarietid är därför fortsatt okända.
 Privatarkivets innehåll och personrader publiceras inte i GitHub.
+
+Ett separat inklistrat mejlutdrag anger 667 vikarieh för 27 juli–23 augusti
+och 448 vikarieh för 24 augusti–20 september; frågan om decemberschema säger
+uttryckligen att vikarier kan vara ännu inte inbokade. Utdraget ger alltså
+inte faktisk vikarie-Före 2–29 december. Senare svar i samma tråd preciserar
+30 administrationstimmar **per fyra veckor** (redan i Medvindpassen) och att
+`0,0439` avser ett pass på 6,5 timmar. Dessa planeringsuppgifter får inte
+adderas som en ny faktisk Medvindtotal.
