@@ -79,3 +79,25 @@ inte faktisk vikarie-Före 2–29 december. Senare svar i samma tråd preciserar
 30 administrationstimmar **per fyra veckor** (redan i Medvindpassen) och att
 `0,0439` avser ett pass på 6,5 timmar. Dessa planeringsuppgifter får inte
 adderas som en ny faktisk Medvindtotal.
+
+## Beslutad Före-visning i Dashboard, förtydligad 4 november
+
+Användaren har förtydligat att huvudtabellens **Före** ska visa den beslutade
+bemanningsramen: 1 230,24 h tillsvidare inklusive 30 h administration en gång,
+103,2476 h vikarieplanering enligt `(48,82 % + 16,55 %) × 148 h + 6,5 h`,
+totalt 1 333,4876 h och 0 h sovande jour enligt Vintergatans profil med vaken
+natt. Detta är en kapacitets-/planeringsjämförelse, inte faktiskt tidsatta
+Medvindpass eller en verifierad besparing. De fullständiga faktiska
+Medvindtotalerna och historisk raststatus visas separat som okända där källa
+saknas. **Efter** ska vara förslagets periodklippta schemalagda nettotid från
+personpass, med TV och VIK var för sig samt jour separat. Den visade
+efterkandidaten i appen har 1 072 h 50 min TV + 453 h 10 min VIK = 1 526 h
+aktiv netto och 0 h sovande jour, alltså +192,5124 h mot bemanningsramen;
+detta är inte en faktisk Medvindförändring.
+
+Den äldre preliminära SSG-tabellen i mejltråden ersätts av senare svar:
+avslutad anställning räknas inte, ersättande anställning är 100 %, en delad
+anställning räknas endast en gång med 43,32 % i denna verksamhet, och två
+nattanställda har heltidsmått 36,33 h/vecka. Dessa uppgifter ger
+`4×148 + 2×145,32 + 148 + 0,4332×148 + 0,9155×148 = 1 230,2476 h`;
+skillnaden 0,0076 h mot den fastställda ramen 1 230,24 h är avrundning.
